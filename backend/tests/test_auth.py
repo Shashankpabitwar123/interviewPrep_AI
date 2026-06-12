@@ -1,0 +1,102 @@
+from collections.abc import Generator
+
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.database import Base, get_db
+from app.main import app
+from app.models import User
+
+
+def test_register_creates_user_without_exposing_password() -> None:
+    client = _client_with_memory_db()
+
+    response = client.post(
+        "/auth/register",
+        json={"name": "Shashank", "email": "Shashank@example.com", "password": "password123"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["user"]["name"] == "Shashank"
+    assert body["user"]["email"] == "shashank@example.com"
+    assert body["access_token"]
+    assert body["token_type"] == "bearer"
+    assert "password" not in body["user"]
+
+
+def test_register_rejects_duplicate_email() -> None:
+    client = _client_with_memory_db()
+    payload = {"name": "Shashank", "email": "shashank@example.com", "password": "password123"}
+
+    assert client.post("/auth/register", json=payload).status_code == 200
+    response = client.post("/auth/register", json=payload)
+
+    assert response.status_code == 409
+
+
+def test_login_accepts_correct_password_and_rejects_wrong_password() -> None:
+    client = _client_with_memory_db()
+    client.post(
+        "/auth/register",
+        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
+    )
+
+    login = client.post("/auth/login", json={"email": "shashank@example.com", "password": "password123"})
+    wrong_password = client.post("/auth/login", json={"email": "shashank@example.com", "password": "wrongpass123"})
+
+    assert login.status_code == 200
+    assert login.json()["user"]["email"] == "shashank@example.com"
+    assert login.json()["access_token"]
+    assert wrong_password.status_code == 401
+
+
+def test_me_reads_user_from_bearer_token() -> None:
+    client = _client_with_memory_db()
+    register = client.post(
+        "/auth/register",
+        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
+    )
+    token = register.json()["access_token"]
+
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "shashank@example.com"
+
+
+def test_password_is_hashed_in_database() -> None:
+    client = _client_with_memory_db()
+    db = next(client.app.dependency_overrides[get_db]())
+
+    client.post(
+        "/auth/register",
+        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
+    )
+
+    user = db.query(User).filter(User.email == "shashank@example.com").first()
+    assert user is not None
+    assert user.password_hash != "password123"
+    assert user.password_hash.startswith("pbkdf2_sha256$")
+
+
+def _client_with_memory_db() -> TestClient:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_get_db() -> Generator[Session, None, None]:
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    return TestClient(app)

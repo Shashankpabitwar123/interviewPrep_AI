@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Local databases and secrets
+*.db
+.env
+.env.*
+!.env.example
+
+# Frontend
+node_modules/
+dist/
+
+# OS/editor
+.DS_Store
+.vscode/
+
+# Generated docs renders
+docs/rendered-tomorrow-handoff/
