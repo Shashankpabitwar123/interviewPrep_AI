@@ -2,9 +2,11 @@ services:
   - type: web
     name: interviewprep-ai-api
     runtime: python
+    plan: free
     rootDir: backend
     buildCommand: pip install -e .
     startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: APP_ENV
         value: production
