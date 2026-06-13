@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: interviewprep-ai-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -e .
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: REQUIRE_AUTH
+        value: true
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 10080
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: AUTH_SECRET_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
