@@ -4,7 +4,6 @@
 
   const extensionApi = globalThis.chrome || globalThis.browser;
   setupWebsiteBridge();
-  if (isInterviewPrepApp()) return;
 
   const state = {
     open: false,
@@ -17,6 +16,7 @@
     bubbleY: Number(localStorage.getItem("interviewprep_bubble_y")) || Math.round(window.innerHeight * 0.58),
     description: "",
     status: "",
+    toastTimer: null,
     settings: { bubbleEnabled: true },
   };
 
@@ -24,14 +24,22 @@
   root.id = "interviewprep-capture-root";
   root.innerHTML = `
     <button class="ipai-bubble" type="button" aria-label="InterviewPrep AI capture">
-      <span>IP</span>
+      <span aria-hidden="true">
+        <svg viewBox="0 0 24 24" class="ipai-logo" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path>
+          <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path>
+          <path d="M15 13h.01"></path>
+          <path d="M18 10h.01"></path>
+          <path d="M15 7h.01"></path>
+          <path d="M12 12h.01"></path>
+          <path d="M12 18h.01"></path>
+        </svg>
+      </span>
     </button>
     <div class="ipai-radial" aria-hidden="true">
-      <button type="button" data-action="selected" title="Capture selected text">Selected</button>
-      <button type="button" data-action="page" title="Capture visible page text">Page</button>
-      <button type="button" data-action="url" title="Save current URL">URL</button>
-      <button type="button" data-action="quick-save" title="Capture page text and save immediately">Save</button>
-      <button type="button" data-action="open" title="Open InterviewPrep AI">Open</button>
+      <button type="button" data-action="auto" title="Automatically detect the job description">Auto copy description</button>
+      <button type="button" data-action="selected" title="Copy the text you highlighted">Copy selected text</button>
+      <button type="button" data-action="url" title="Copy the current page URL">Copy URL</button>
     </div>
     <section class="ipai-panel" aria-label="InterviewPrep AI capture panel">
       <header>
@@ -41,7 +49,7 @@
         </div>
         <button type="button" data-action="close" aria-label="Close">×</button>
       </header>
-      <textarea placeholder="Highlight a job description, capture page text, or paste the description here."></textarea>
+      <textarea placeholder="Auto-copy, selected text, or URL will appear here. You can edit before saving."></textarea>
       <div class="ipai-capture-meta">
         <input class="ipai-title" placeholder="Job title (AI can detect)" />
         <input class="ipai-date" type="datetime-local" />
@@ -53,6 +61,7 @@
       </div>
       <p class="ipai-status"></p>
     </section>
+    <p class="ipai-toast" aria-live="polite"></p>
   `;
   document.documentElement.appendChild(root);
 
@@ -64,6 +73,7 @@
   const dateInput = root.querySelector(".ipai-date");
   const hoursInput = root.querySelector(".ipai-hours");
   const statusEl = root.querySelector(".ipai-status");
+  const toastEl = root.querySelector(".ipai-toast");
 
   init();
 
@@ -87,11 +97,9 @@
     root.addEventListener("click", async (event) => {
       const action = event.target?.dataset?.action;
       if (!action) return;
-      if (["selected", "page", "url"].includes(action)) await capture(action);
-      if (action === "quick-save") await quickSave();
+      if (["auto", "selected", "url"].includes(action)) await capture(action);
       if (action === "save") await saveJob();
       if (action === "plan") await generatePlan();
-      if (action === "open") await sendMessage({ type: "openApp" });
       if (action === "close") setPanel(false);
     });
 
@@ -173,16 +181,17 @@
     setOpen(true);
     setPanel(true);
     setStatus("Capturing...");
+    if (mode === "auto") {
+      state.description = pageText();
+      if (!state.description) setStatus("Could not auto-detect text. Highlight the description or copy the URL.");
+    }
     if (mode === "selected") {
       state.description = selectedText();
-      if (!state.description) setStatus("No selected text found. Highlight the job description first or use Page.");
-    }
-    if (mode === "page") {
-      state.description = pageText();
+      if (!state.description) setStatus("No selected text found. Highlight the job description first or use Auto copy description.");
     }
     if (mode === "url") {
-      state.description = "";
-      setStatus("Using current page URL. Add notes if the page blocks text capture.");
+      state.description = window.location.href;
+      setStatus("Copied the current page URL. Save it now or generate a prep plan from the URL.");
     }
     textarea.value = state.description;
     titleInput.value = titleInput.value || guessTitle();
@@ -194,33 +203,25 @@
     setStatus("Saving job...");
     const response = await sendMessage({ type: "saveJob", payload: payload() });
     if (!response.ok) return setStatus(response.error);
-    setStatus(`Saved: ${response.saved?.role_title || "job"}. Open InterviewPrep AI to view it.`);
-  }
-
-  async function quickSave() {
-    setOpen(true);
-    setPanel(true);
-    setStatus("Capturing page and saving...");
-    state.mode = "quick save";
-    state.description = pageText();
-    textarea.value = state.description;
-    titleInput.value = titleInput.value || guessTitle();
-    updateSubtitle();
-    await saveJob();
+    const title = response.saved?.role_title || "Job";
+    completeAction(`${title} saved`);
   }
 
   async function generatePlan() {
     setStatus("Generating prep plan...");
     const response = await sendMessage({ type: "generatePlan", payload: payload() });
     if (!response.ok) return setStatus(response.error);
-    setStatus(`Prep plan ready: ${response.plan?.job_title || "job"}.`);
+    const title = response.plan?.job_title || "Prep plan";
+    completeAction(`${title} generated`);
   }
 
   function payload() {
+    const textValue = textarea.value.trim();
+    const isUrlMode = state.mode === "url";
     return {
       jobTitle: titleInput.value.trim() || guessTitle(),
-      description: textarea.value.trim(),
-      sourceUrl: window.location.href,
+      description: isUrlMode ? "" : textValue,
+      sourceUrl: isUrlMode ? textValue || window.location.href : window.location.href,
       interviewAt: dateInput.value ? new Date(dateInput.value).toISOString() : undefined,
       hoursPerDay: Number(hoursInput.value || 3),
     };
@@ -250,11 +251,60 @@
   }
 
   function updateSubtitle() {
-    root.querySelector(".ipai-panel-subtitle").textContent = `${state.mode} capture • ${textarea.value.length.toLocaleString()} chars`;
+    const modeLabels = {
+      auto: "auto description",
+      selected: "selected text",
+      url: "URL",
+    };
+    root.querySelector(".ipai-panel-subtitle").textContent = `${modeLabels[state.mode] || "capture"} • ${textarea.value.length.toLocaleString()} chars`;
   }
 
   function setStatus(message) {
     statusEl.textContent = message || "";
+  }
+
+  function completeAction(message) {
+    setStatus(message);
+    setOpen(false);
+    showToast(message);
+    playGeneratedSound();
+  }
+
+  function showToast(message) {
+    toastEl.textContent = message || "";
+    root.classList.add("ipai-toast-visible");
+    window.clearTimeout(state.toastTimer);
+    state.toastTimer = window.setTimeout(() => {
+      root.classList.remove("ipai-toast-visible");
+      toastEl.textContent = "";
+    }, 2600);
+  }
+
+  function playGeneratedSound() {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const context = new AudioContext();
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.045, context.currentTime + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.34);
+      gain.connect(context.destination);
+
+      [523.25, 659.25, 783.99].forEach((frequency, index) => {
+        const oscillator = context.createOscillator();
+        oscillator.type = "sine";
+        oscillator.frequency.value = frequency;
+        oscillator.connect(gain);
+        const start = context.currentTime + index * 0.055;
+        oscillator.start(start);
+        oscillator.stop(start + 0.18);
+      });
+
+      window.setTimeout(() => context.close?.(), 650);
+    } catch {
+      // Sound is only feedback; ignore browser autoplay/audio restrictions.
+    }
   }
 
   function sendMessage(message) {

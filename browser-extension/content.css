@@ -46,7 +46,14 @@
   box-shadow: 0 18px 38px rgba(37, 99, 235, 0.34);
   cursor: grab;
   pointer-events: auto;
+  touch-action: none;
   user-select: none;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.ipai-bubble:hover {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 22px 46px rgba(37, 99, 235, 0.42);
 }
 
 .ipai-bubble:active {
@@ -60,35 +67,42 @@
   height: 39px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.16);
-  font-size: 13px;
-  font-weight: 900;
-  letter-spacing: 0;
+  pointer-events: none;
+}
+
+.ipai-logo {
+  width: 25px;
+  height: 25px;
+  pointer-events: none;
 }
 
 .ipai-radial {
   position: fixed;
-  left: calc(var(--ipai-x) - 100px);
-  top: calc(var(--ipai-y) - 100px);
-  width: 260px;
-  height: 260px;
+  left: calc(var(--ipai-x) - 178px);
+  top: calc(var(--ipai-y) - 86px);
+  width: 250px;
+  height: 228px;
   pointer-events: none;
   opacity: 0;
-  transform: scale(0.9);
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  transform: scale(0.86) translateX(12px);
+  transform-origin: right center;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .ipai-open .ipai-radial {
   opacity: 1;
-  transform: scale(1);
+  transform: scale(1) translateX(0);
 }
 
 .ipai-radial button {
   all: unset;
   position: absolute;
-  display: grid;
-  place-items: center;
-  width: 70px;
-  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 168px;
+  min-height: 38px;
+  padding: 0 12px;
   border: 1px solid rgba(216, 226, 240, 0.92);
   border-radius: 999px;
   color: #172033;
@@ -96,39 +110,48 @@
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.16);
   font-size: 12px;
   font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
   pointer-events: auto;
   cursor: pointer;
+  opacity: 0;
+  transform: translate(24px, 44px) scale(0.82);
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.ipai-open .ipai-radial button {
+  opacity: 1;
+  transform: translate(0, 0) scale(1);
 }
 
 .ipai-radial button:hover {
   color: var(--ipai-blue);
   border-color: #9bbcf4;
   background: #eef5ff;
+  transform: translate(0, -1px) scale(1.02);
+}
+
+.ipai-radial [data-action="auto"] {
+  left: 32px;
+  top: 20px;
+  transition-delay: 0.01s;
 }
 
 .ipai-radial [data-action="selected"] {
-  left: 8px;
-  top: 114px;
-}
-
-.ipai-radial [data-action="page"] {
-  left: 38px;
-  top: 55px;
+  left: 0;
+  top: 82px;
+  transition-delay: 0.04s;
 }
 
 .ipai-radial [data-action="url"] {
-  left: 100px;
-  top: 22px;
-}
-
-.ipai-radial [data-action="quick-save"] {
-  left: 168px;
-  top: 44px;
-}
-
-.ipai-radial [data-action="open"] {
-  left: 188px;
-  top: 108px;
+  left: 38px;
+  top: 144px;
+  transition-delay: 0.07s;
 }
 
 .ipai-panel {
@@ -258,6 +281,33 @@
 .ipai-status {
   min-height: 17px;
   margin: 0;
+}
+
+.ipai-toast {
+  all: unset;
+  position: fixed;
+  left: calc(var(--ipai-x) - 206px);
+  top: calc(var(--ipai-y) + 68px);
+  display: block;
+  max-width: 260px;
+  padding: 11px 14px;
+  border: 1px solid rgba(187, 247, 208, 0.9);
+  border-radius: 14px;
+  color: #14532d;
+  background: rgba(240, 253, 244, 0.98);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.18);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.25;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px) scale(0.96);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.ipai-toast-visible .ipai-toast {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 @media (prefers-color-scheme: dark) {
