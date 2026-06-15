@@ -1,0 +1,280 @@
+#interviewprep-capture-root {
+  --ipai-blue: #2563eb;
+  --ipai-blue-2: #4f8cff;
+  --ipai-panel: #ffffff;
+  --ipai-line: #d8e2f0;
+  --ipai-text: #111827;
+  --ipai-muted: #667085;
+  --ipai-x: calc(100vw - 96px);
+  --ipai-y: 58vh;
+  --ipai-panel-x: calc(100vw - 430px);
+  --ipai-panel-y: 40vh;
+  all: initial;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#interviewprep-capture-root *,
+#interviewprep-capture-root *::before,
+#interviewprep-capture-root *::after {
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+#interviewprep-capture-root.ipai-hidden {
+  display: none;
+}
+
+.ipai-bubble {
+  all: unset;
+  position: fixed;
+  left: var(--ipai-x);
+  top: var(--ipai-y);
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  color: white;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.55), transparent 28%),
+    linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow: 0 18px 38px rgba(37, 99, 235, 0.34);
+  cursor: grab;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.ipai-bubble:active {
+  cursor: grabbing;
+}
+
+.ipai-bubble span {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 39px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.ipai-radial {
+  position: fixed;
+  left: calc(var(--ipai-x) - 100px);
+  top: calc(var(--ipai-y) - 100px);
+  width: 260px;
+  height: 260px;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.ipai-open .ipai-radial {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.ipai-radial button {
+  all: unset;
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 70px;
+  height: 34px;
+  border: 1px solid rgba(216, 226, 240, 0.92);
+  border-radius: 999px;
+  color: #172033;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.16);
+  font-size: 12px;
+  font-weight: 800;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ipai-radial button:hover {
+  color: var(--ipai-blue);
+  border-color: #9bbcf4;
+  background: #eef5ff;
+}
+
+.ipai-radial [data-action="selected"] {
+  left: 8px;
+  top: 114px;
+}
+
+.ipai-radial [data-action="page"] {
+  left: 38px;
+  top: 55px;
+}
+
+.ipai-radial [data-action="url"] {
+  left: 100px;
+  top: 22px;
+}
+
+.ipai-radial [data-action="quick-save"] {
+  left: 168px;
+  top: 44px;
+}
+
+.ipai-radial [data-action="open"] {
+  left: 188px;
+  top: 108px;
+}
+
+.ipai-panel {
+  position: fixed;
+  left: var(--ipai-panel-x);
+  top: var(--ipai-panel-y);
+  display: none;
+  width: min(370px, calc(100vw - 32px));
+  padding: 13px;
+  border: 1px solid var(--ipai-line);
+  border-radius: 18px;
+  color: var(--ipai-text);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+  pointer-events: auto;
+}
+
+.ipai-panel-open .ipai-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.ipai-panel header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ipai-panel strong,
+.ipai-panel span {
+  display: block;
+}
+
+.ipai-panel strong {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.ipai-panel span,
+.ipai-status {
+  color: var(--ipai-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ipai-panel header button {
+  all: unset;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: #344054;
+  cursor: pointer;
+}
+
+.ipai-panel header button:hover {
+  background: #eef2f7;
+}
+
+.ipai-panel textarea,
+.ipai-panel input {
+  all: unset;
+  width: 100%;
+  border: 1px solid var(--ipai-line);
+  border-radius: 12px;
+  color: var(--ipai-text);
+  background: #fbfdff;
+  font-size: 13px;
+}
+
+.ipai-panel textarea {
+  min-height: 150px;
+  max-height: 280px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.ipai-panel input {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.ipai-panel textarea:focus,
+.ipai-panel input:focus {
+  border-color: var(--ipai-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.ipai-capture-meta {
+  display: grid;
+  grid-template-columns: 1fr 132px 70px;
+  gap: 8px;
+}
+
+.ipai-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ipai-actions button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.ipai-actions button:first-child {
+  color: var(--ipai-blue);
+  border: 1px solid #bcd0ee;
+  background: #fff;
+}
+
+.ipai-actions button:hover {
+  transform: translateY(-1px);
+}
+
+.ipai-status {
+  min-height: 17px;
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ipai-panel {
+    --ipai-panel: #07101f;
+    --ipai-line: #263a5d;
+    --ipai-text: #f8fbff;
+    --ipai-muted: #9ca8bd;
+    background: rgba(7, 12, 23, 0.98);
+  }
+
+  .ipai-radial button,
+  .ipai-panel textarea,
+  .ipai-panel input,
+  .ipai-actions button:first-child {
+    color: #f8fbff;
+    background: #0b1424;
+    border-color: #263a5d;
+  }
+}

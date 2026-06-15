@@ -2,18 +2,64 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>InterviewPrep AI</title>
+    <title>InterviewPrep AI Capture</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main>
-      <h1>Save Job</h1>
-      <p id="page-title">Reading current tab...</p>
-      <label>
-        API URL
-        <input id="api-url" value="http://127.0.0.1:8000" />
-      </label>
-      <button id="save-button">Save current job</button>
+      <header>
+        <div class="logo">IP</div>
+        <div>
+          <h1>InterviewPrep AI</h1>
+          <p>Capture jobs from any page.</p>
+        </div>
+      </header>
+
+      <section class="status-card">
+        <strong id="auth-title">Checking account...</strong>
+        <span id="auth-subtitle">Connect the extension to your account.</span>
+      </section>
+
+      <form id="login-form">
+        <label>
+          Email
+          <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+        </label>
+        <label>
+          Password
+          <input id="password" type="password" autocomplete="current-password" placeholder="Your password" required />
+        </label>
+        <button type="submit">Login to Extension</button>
+      </form>
+
+      <section class="settings">
+        <label class="toggle-row">
+          <span>
+            <strong>Hovering bubble</strong>
+            <small>Show the draggable capture button on job pages.</small>
+          </span>
+          <input id="bubble-enabled" type="checkbox" />
+        </label>
+
+        <details>
+          <summary>Connection settings</summary>
+          <label>
+            Backend API
+            <input id="api-url" />
+          </label>
+          <label>
+            Website URL
+            <input id="app-url" />
+          </label>
+          <button id="save-settings" type="button" class="secondary">Save Settings</button>
+        </details>
+      </section>
+
+      <div class="actions">
+        <button id="open-app" type="button" class="secondary">Open Website</button>
+        <button id="logout" type="button" class="danger">Logout</button>
+      </div>
+
       <p id="status"></p>
     </main>
     <script src="popup.js"></script>

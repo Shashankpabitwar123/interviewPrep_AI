@@ -1,12 +1,29 @@
 {
   "manifest_version": 3,
-  "name": "InterviewPrep AI Job Saver",
-  "version": "0.1.0",
-  "description": "Save the current job page to InterviewPrep AI for interview preparation.",
+  "name": "InterviewPrep AI Capture",
+  "version": "0.2.0",
+  "description": "Capture job posts from career sites and send them to InterviewPrep AI.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
-  "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*"],
+  "host_permissions": [
+    "https://interviewprep-ai-api.onrender.com/*",
+    "https://interview-prep-ai-sable.vercel.app/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "<all_urls>"
+  ],
   "action": {
-    "default_title": "Save job to InterviewPrep AI",
+    "default_title": "InterviewPrep AI Capture",
     "default_popup": "popup.html"
-  }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
 }

@@ -1,29 +1,59 @@
-# InterviewPrep AI Chrome Extension
+# InterviewPrep AI Capture Extension
 
-This extension saves the current job page to the local InterviewPrep AI backend.
+This browser extension adds a draggable InterviewPrep AI bubble to job pages so a logged-in user can capture a role without copy/pasting back into the dashboard.
 
-## How It Works
+## What Works
 
-When you click **Save current job**, the extension sends:
+- **Capture selected text**: highlight a job description, click the bubble, then choose `Selected`.
+- **Capture page text**: choose `Page` to read the visible job content from the current tab.
+- **Save page URL**: choose `URL` when a site blocks page text capture.
+- **Quick save**: choose `Save` to capture page text and save immediately.
+- **Open InterviewPrep AI**: choose `Open` to jump back to the website.
+- **Save Job / Generate Prep Plan**: use the panel buttons after capturing or pasting a description.
+- **Account connection**: the popup login uses the same InterviewPrep AI account as the website.
 
-- current tab title
-- current tab URL
-- visible page text
+## Chrome Install
 
-to:
+1. Open Chrome.
+2. Go to `chrome://extensions`.
+3. Turn on **Developer mode**.
+4. Click **Load unpacked**.
+5. Select this folder:
 
 ```text
-POST http://127.0.0.1:8000/jobs/analyze
+/Users/shashankpabitwar/Downloads/InterviewPrep AI/browser-extension
 ```
 
-Sending visible page text is important for sites like LinkedIn or Handshake because the backend may not be logged in, but your browser tab already is.
+6. Pin the extension.
+7. Click the extension icon, login, and keep **Hovering bubble** enabled.
+8. Open a job page on Handshake, LinkedIn, or a company careers page.
+9. Use the bubble to capture selected text, page text, URL, or quick-save the job.
 
-## Local Install
+## Production Defaults
 
-1. Start the backend at `http://127.0.0.1:8000`.
-2. Open Chrome.
-3. Go to `chrome://extensions`.
-4. Turn on Developer mode.
-5. Click **Load unpacked**.
-6. Select this `browser-extension` folder.
+The extension points to the live services by default:
 
+```text
+Backend API: https://interviewprep-ai-api.onrender.com
+Website URL: https://interview-prep-ai-sable.vercel.app
+```
+
+You can edit those in the extension popup if testing local services.
+
+## Safari Support
+
+Safari supports WebExtensions, but it requires conversion and signing through Xcode before it can be installed or distributed.
+
+From the project root, run:
+
+```bash
+xcrun safari-web-extension-converter "/Users/shashankpabitwar/Downloads/InterviewPrep AI/browser-extension"
+```
+
+Then open the generated Xcode project, run it locally, and later sign it with an Apple Developer account for distribution. Chrome is the primary development target right now; Safari should be tested after conversion because a few extension APIs can behave slightly differently.
+
+## Notes
+
+- Some sites render job descriptions inside protected containers or iframes. In those cases, use selected text or URL mode.
+- The extension saves jobs and prep plans to the logged-in account through the backend.
+- Recent activity on the website is still mostly app-side state. A future backend activity log will make extension-created actions appear everywhere instantly.

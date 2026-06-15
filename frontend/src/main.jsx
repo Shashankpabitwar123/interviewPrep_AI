@@ -3892,6 +3892,17 @@ function SettingsView({ user, status, theme, setTheme, soundVolume, setSoundVolu
           </div>
         </div>
         <div className="settings-mini-card">
+          <strong><Sparkles size={16} /> Hovering extension</strong>
+          <span>Install the browser extension to capture jobs from Handshake, LinkedIn, and company career pages.</span>
+          <button
+            type="button"
+            className="outline-action compact-action"
+            onClick={() => window.open("https://github.com/Shashankpabitwar123/interviewPrep_AI/tree/main/browser-extension", "_blank", "noopener,noreferrer")}
+          >
+            Extension guide <ExternalLink size={13} />
+          </button>
+        </div>
+        <div className="settings-mini-card">
           <strong>Local workspace</strong>
           <span>Plans, attempts, notes, and settings stay on this machine.</span>
         </div>
