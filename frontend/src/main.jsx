@@ -136,9 +136,23 @@ function App() {
   useEffect(() => {
     resetCreatePrepForm();
     setInterviewDate(defaultInterviewDate());
+    reloadLocalWorkspaceState();
     refreshJobs();
     refreshSavedPlans();
   }, []);
+
+  function reloadLocalWorkspaceState() {
+    setJobMarkers(loadLocalMap("interviewprep_job_markers"));
+    setDeletedJobs(loadLocalList("interviewprep_deleted_jobs"));
+    setArchivedJobIds(loadLocalList("interviewprep_archived_job_ids"));
+    setExamAttempts(loadLocalList("interviewprep_exam_attempts"));
+    setMockAttempts(loadLocalList("interviewprep_mock_attempts"));
+    setNotes(loadLocalList("interviewprep_notes"));
+    setNoteFolders(loadLocalList("interviewprep_note_folders"));
+    setCalendarEvents(loadLocalList("interviewprep_calendar_events"));
+    setRecentActivity(loadLocalList("interviewprep_recent_activity"));
+    setCompletedTasks(loadCompletedTasks());
+  }
 
   async function apiFetch(path, options = {}) {
     const headers = {
@@ -1347,6 +1361,7 @@ function App() {
       saveUserSession(body.user, body.access_token);
       setAuthOpen(false);
       setAuthForm({ name: "", email: body.user.email, password: "" });
+      reloadLocalWorkspaceState();
       setStatus(authMode === "register" ? "Account Created" : "Logged In");
       refreshJobs();
       refreshSavedPlans();
@@ -1361,6 +1376,10 @@ function App() {
     setUser(null);
     setAuthToken("");
     saveUserSession(null, "");
+    reloadLocalWorkspaceState();
+    setJobs([]);
+    setSavedPlans([]);
+    setPlan(null);
     setStatus("Guest Mode");
     refreshJobs();
     refreshSavedPlans();
@@ -4645,26 +4664,8 @@ function saveUserSession(user, token) {
 }
 
 function loadCompletedTasks() {
-  try {
-    return JSON.parse(localStorage.getItem("interviewprep_completed_tasks")) || {};
-  } catch {
-    return {};
-  }
-}
-
-function loadLocalList(key) {
-  try {
-    return JSON.parse(localStorage.getItem(key)) || [];
-  } catch {
-    return [];
-  }
-}
-
-function saveLocalList(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-function loadLocalMap(key) {
+  const key = scopedStorageKey("interviewprep_completed_tasks");
+  if (!key) return {};
   try {
     return JSON.parse(localStorage.getItem(key)) || {};
   } catch {
@@ -4672,12 +4673,55 @@ function loadLocalMap(key) {
   }
 }
 
+function loadLocalList(key) {
+  const storageKey = scopedStorageKey(key);
+  if (!storageKey) return [];
+  try {
+    return JSON.parse(localStorage.getItem(storageKey)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalList(key, value) {
+  const storageKey = scopedStorageKey(key);
+  if (!storageKey) return;
+  localStorage.setItem(storageKey, JSON.stringify(value));
+}
+
+function loadLocalMap(key) {
+  const storageKey = scopedStorageKey(key);
+  if (!storageKey) return {};
+  try {
+    return JSON.parse(localStorage.getItem(storageKey)) || {};
+  } catch {
+    return {};
+  }
+}
+
 function saveLocalMap(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  const storageKey = scopedStorageKey(key);
+  if (!storageKey) return;
+  localStorage.setItem(storageKey, JSON.stringify(value));
 }
 
 function saveCompletedTasks(tasks) {
-  localStorage.setItem("interviewprep_completed_tasks", JSON.stringify(tasks));
+  const key = scopedStorageKey("interviewprep_completed_tasks");
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify(tasks));
+}
+
+function scopedStorageKey(key) {
+  const token = localStorage.getItem("interviewprep_token");
+  if (!token) return "";
+  try {
+    const user = JSON.parse(localStorage.getItem("interviewprep_user"));
+    if (!user?.id && !user?.email) return "";
+    const scope = String(user.id || user.email).replace(/[^a-zA-Z0-9_-]/g, "_");
+    return `${key}:${scope}`;
+  } catch {
+    return "";
+  }
 }
 
 function loadSoundVolume() {
