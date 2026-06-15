@@ -16,6 +16,7 @@
     bubbleY: Number(localStorage.getItem("interviewprep_bubble_y")) || Math.round(window.innerHeight * 0.58),
     description: "",
     status: "",
+    hoverCloseTimer: null,
     toastTimer: null,
     settings: { bubbleEnabled: true },
   };
@@ -74,6 +75,7 @@
   const hoursInput = root.querySelector(".ipai-hours");
   const statusEl = root.querySelector(".ipai-status");
   const toastEl = root.querySelector(".ipai-toast");
+  const hoverTargets = [bubble, ...root.querySelectorAll(".ipai-radial button")];
 
   init();
 
@@ -90,8 +92,11 @@
     window.addEventListener("pointerup", stopDrag);
     document.addEventListener("pointerdown", closeFromOutside, true);
 
-    bubble.addEventListener("mouseenter", () => {
-      if (!state.dragging) setOpen(true);
+    hoverTargets.forEach((target) => {
+      target.addEventListener("pointerenter", openFromHover);
+      target.addEventListener("mouseenter", openFromHover);
+      target.addEventListener("pointerleave", scheduleHoverClose);
+      target.addEventListener("mouseleave", scheduleHoverClose);
     });
 
     bubble.addEventListener("click", () => {
@@ -158,17 +163,36 @@
     if (state.panelOpen) positionPanel();
   }
 
+  function openFromHover() {
+    if (state.dragging) return;
+    window.clearTimeout(state.hoverCloseTimer);
+    setOpen(true, { closePanel: false });
+  }
+
+  function scheduleHoverClose() {
+    window.clearTimeout(state.hoverCloseTimer);
+    state.hoverCloseTimer = window.setTimeout(() => {
+      if (isPointerOverCaptureControls()) return;
+      setOpen(false, { closePanel: false });
+    }, 180);
+  }
+
+  function isPointerOverCaptureControls() {
+    return Boolean(root.querySelector(".ipai-bubble:hover, .ipai-radial button:hover"));
+  }
+
   function closeFromOutside(event) {
     if (!state.open && !state.panelOpen) return;
     if (root.contains(event.target)) return;
     setOpen(false);
   }
 
-  function setOpen(open) {
+  function setOpen(open, options = {}) {
+    const closePanel = options.closePanel !== false;
     state.open = open;
     root.classList.toggle("ipai-open", open);
     radial.setAttribute("aria-hidden", String(!open));
-    if (!open) setPanel(false);
+    if (!open && closePanel) setPanel(false);
   }
 
   function setPanel(open) {
