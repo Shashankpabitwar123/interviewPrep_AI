@@ -51,22 +51,6 @@ import "./styles.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
-const starterJobs = [
-  { id: 1, title: "SDE Intern", company: "Amazon", source_url: "amazon.jobs", saved_at: "Saved 2h ago", logo: "a", tone: "amazon" },
-  { id: 2, title: "Software Engineering Intern", company: "Microsoft", source_url: "careers.microsoft.com", saved_at: "Saved 1d ago", logo: "M", tone: "microsoft" },
-  { id: 3, title: "STEP Intern", company: "Google", source_url: "careers.google.com", saved_at: "Saved 2d ago", logo: "G", tone: "google" },
-  { id: 4, title: "Backend Engineer Intern", company: "Meta", source_url: "boards.greenhouse.io", saved_at: "Saved 3d ago", logo: "∞", tone: "meta" },
-  { id: 5, title: "Backend Intern", company: "Dropbox", source_url: "dropbox.com/careers", saved_at: "Saved 5d ago", logo: "D", tone: "dropbox" },
-];
-
-const starterActivity = [
-  ["exam", "You submitted an exam", "Technical Exam - Day 2", "2h ago", "82%"],
-  ["plan", "New prep plan generated", "Backend Software Engineer Intern", "3h ago", ""],
-  ["practice", "Completed 15 questions", "Data Structures Practice", "5h ago", "15"],
-  ["mock", "Mock interview completed", "Behavioral Round", "1d ago", "Good"],
-  ["job", "Job saved from URL", "Amazon SDE Intern", "2d ago", ""],
-];
-
 const EXAM_PRESETS = {
   easy: { difficulty: "easy", questionCount: 10, timeLimit: 5, questionTypes: ["auto"] },
   medium: { difficulty: "medium", questionCount: 20, timeLimit: 10, questionTypes: ["auto"] },
@@ -91,7 +75,7 @@ function App() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [interviewDate, setInterviewDate] = useState("");
   const [hoursPerDay, setHoursPerDay] = useState(3);
-  const [jobs, setJobs] = useState(starterJobs);
+  const [jobs, setJobs] = useState([]);
   const [jobMarkers, setJobMarkers] = useState(() => loadLocalMap("interviewprep_job_markers"));
   const [jobModalOpen, setJobModalOpen] = useState(false);
   const [jobDraft, setJobDraft] = useState({ title: "", description: "", sourceUrl: "", color: "#2563eb" });
@@ -131,6 +115,7 @@ function App() {
   const [eventDraft, setEventDraft] = useState({ title: "", date: dateKey(new Date()), type: "preparation", color: "#2563eb", link: "" });
   const [recentActivity, setRecentActivity] = useState(() => loadLocalList("interviewprep_recent_activity"));
   const [status, setStatus] = useState("Backend Connected");
+  const [theme, setTheme] = useState(() => loadTheme());
   const [loading, setLoading] = useState(false);
   const [loadingStudyTaskId, setLoadingStudyTaskId] = useState(null);
   const [loadingExamTaskId, setLoadingExamTaskId] = useState(null);
@@ -1341,6 +1326,9 @@ function App() {
     setAuthMessage("");
 
     try {
+      if (authMode === "register" && !isStrongPassword(authForm.password)) {
+        throw new Error("Password must be 8+ characters and include at least one letter and one number.");
+      }
       const endpoint = authMode === "register" ? "register" : "login";
       const payload = authMode === "register"
         ? authForm
@@ -1378,16 +1366,14 @@ function App() {
     refreshSavedPlans();
   }
 
-  const activity = recentActivity.length
-    ? recentActivity.map((item) => ({ ...item, time: relativeTime(item.createdAt), target: item.target || targetForActivity(item.type) }))
-    : starterActivity.map(([type, title, detail, time, badge]) => ({ type, title, detail, time, badge, target: targetForActivity(type) }));
+  const activity = recentActivity.map((item) => ({ ...item, time: relativeTime(item.createdAt), target: item.target || targetForActivity(item.type) }));
 
   function openActivity(item) {
     setActiveView(item.target || targetForActivity(item.type));
   }
 
   return (
-    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} theme-${theme}`}>
       <aside className="sidebar">
         <button className="brand" onClick={() => setActiveView("dashboard")}>
           <BrainCircuit size={25} />
@@ -1433,6 +1419,8 @@ function App() {
             <SettingsView
               user={user}
               status={status}
+              theme={theme}
+              setTheme={setTheme}
               soundVolume={soundVolume}
               setSoundVolume={setSoundVolume}
               deletedJobs={deletedJobs}
@@ -1456,7 +1444,7 @@ function App() {
             <h1>{viewTitle(activeView)}</h1>
           </div>
           <div className="top-actions">
-            <div className="connection"><span className="dot" /> {status}</div>
+            <StatusIndicator status={status} />
             <button className="icon-button"><BookOpen size={20} /></button>
             <button className="icon-button notification"><Bell size={20} /><span>3</span></button>
             {user ? (
@@ -1546,16 +1534,24 @@ function App() {
           <section className="panel saved-panel">
             <PanelTitle icon={BriefcaseBusiness} title="Saved Jobs" action="View all" onAction={() => setActiveView("jobs")} />
             <div className="saved-list saved-list-scroll">
-              {jobs.map((job) => (
-                <SavedJob
-                  key={job.id}
-                  job={job}
-                  onSelect={useSavedJob}
-                  menuOpen={jobActionMenuId === job.id}
-                  onToggleMenu={setJobActionMenuId}
-                  onRequestDelete={setConfirmDeleteJob}
-                />
-              ))}
+              {jobs.length ? (
+                jobs.map((job) => (
+                  <SavedJob
+                    key={job.id}
+                    job={job}
+                    onSelect={useSavedJob}
+                    menuOpen={jobActionMenuId === job.id}
+                    onToggleMenu={setJobActionMenuId}
+                    onRequestDelete={setConfirmDeleteJob}
+                  />
+                ))
+              ) : (
+                <div className="compact-empty-state">
+                  <BriefcaseBusiness size={20} />
+                  <strong>No saved jobs yet</strong>
+                  <span>Save a job or generate a prep plan to see it here.</span>
+                </div>
+              )}
             </div>
             <button className="text-action" onClick={() => setJobModalOpen(true)}><Plus size={16} /> Add Job Manually</button>
           </section>
@@ -1603,9 +1599,17 @@ function App() {
           <section className="panel activity-panel">
             <PanelTitle icon={Activity} title="Recent Activity" action="View all" />
             <div className="activity-list">
-              {activity.slice(0, 5).map((item, index) => (
-                <ActivityRow key={`${item.title}-${index}`} item={item} onClick={() => openActivity(item)} />
-              ))}
+              {activity.length ? (
+                activity.slice(0, 5).map((item, index) => (
+                  <ActivityRow key={`${item.title}-${index}`} item={item} onClick={() => openActivity(item)} />
+                ))
+              ) : (
+                <div className="compact-empty-state">
+                  <Activity size={20} />
+                  <strong>No recent activity</strong>
+                  <span>Your generated plans, notes, exams, and mock interviews will appear here.</span>
+                </div>
+              )}
             </div>
             <button className="text-action">View All Activity</button>
           </section>
@@ -1768,7 +1772,7 @@ function App() {
                 <input
                   value={authForm.name}
                   onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })}
-                  placeholder="Shashank"
+                  placeholder="Your name"
                   required
                 />
               </label>
@@ -1791,9 +1795,13 @@ function App() {
                 onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
                 placeholder="At least 8 characters"
                 minLength={8}
+                maxLength={128}
                 required
               />
             </label>
+            {authMode === "register" && (
+              <PasswordCriteria password={authForm.password} />
+            )}
 
             {authMessage && <div className="auth-error">{authMessage}</div>}
 
@@ -3793,11 +3801,16 @@ function isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) {
   return task.task_type === "practice_exam" ? loadingExamTaskId === key : loadingStudyTaskId === key;
 }
 
-function SettingsView({ user, status, soundVolume, setSoundVolume, deletedJobs, restoreDeletedJob, clearDeletedJob, loading, onClose, onKnowMore }) {
+function SettingsView({ user, status, theme, setTheme, soundVolume, setSoundVolume, deletedJobs, restoreDeletedJob, clearDeletedJob, loading, onClose, onKnowMore }) {
   function updateSoundVolume(value) {
     const nextVolume = Math.max(0, Math.min(100, Number(value)));
     setSoundVolume(nextVolume);
     localStorage.setItem("interviewprep_sound_volume", String(nextVolume));
+  }
+
+  function updateTheme(nextTheme) {
+    setTheme(nextTheme);
+    localStorage.setItem("interviewprep_theme", nextTheme);
   }
 
   return (
@@ -3817,7 +3830,22 @@ function SettingsView({ user, status, soundVolume, setSoundVolume, deletedJobs, 
         </div>
         <div className="settings-mini-card">
           <strong>Backend</strong>
-          <span>{status}</span>
+          <span>{statusText(status)}</span>
+        </div>
+        <div className="settings-mini-card theme-settings-card">
+          <div className="sound-setting-head">
+            <strong><Palette size={16} /> Appearance</strong>
+            <span>{theme === "dark" ? "Dark" : "Light"}</span>
+          </div>
+          <button
+            type="button"
+            className={`theme-toggle ${theme === "dark" ? "is-dark" : ""}`}
+            onClick={() => updateTheme(theme === "dark" ? "light" : "dark")}
+            aria-pressed={theme === "dark"}
+          >
+            <span />
+            <strong>{theme === "dark" ? "Premium dark mode" : "Light mode"}</strong>
+          </button>
         </div>
         <div className="settings-mini-card sound-settings-card">
           <div className="sound-setting-head">
@@ -3875,6 +3903,35 @@ function SettingsView({ user, status, soundVolume, setSoundVolume, deletedJobs, 
       <button className="primary know-more-button" onClick={onKnowMore}>
         <Sparkles size={17} /> Know more
       </button>
+    </div>
+  );
+}
+
+function StatusIndicator({ status }) {
+  const kind = statusKind(status);
+  const isCompact = kind === "online" || kind === "offline";
+  const Icon = kind === "offline" ? X : Check;
+  return (
+    <div className={`connection ${kind} ${isCompact ? "compact" : ""}`} title={statusText(status)} aria-label={statusText(status)}>
+      <span className="status-dot"><Icon size={12} /></span>
+      {!isCompact && <span>{statusText(status)}</span>}
+    </div>
+  );
+}
+
+function PasswordCriteria({ password }) {
+  const checks = [
+    ["8+ characters", password.length >= 8],
+    ["Has a letter", /[A-Za-z]/.test(password)],
+    ["Has a number", /\d/.test(password)],
+  ];
+  return (
+    <div className="password-criteria" aria-live="polite">
+      {checks.map(([label, done]) => (
+        <span key={label} className={done ? "met" : ""}>
+          <Check size={12} /> {label}
+        </span>
+      ))}
     </div>
   );
 }
@@ -4627,6 +4684,27 @@ function loadSoundVolume() {
   const saved = Number(localStorage.getItem("interviewprep_sound_volume"));
   if (Number.isFinite(saved)) return Math.max(0, Math.min(100, saved));
   return 40;
+}
+
+function loadTheme() {
+  return localStorage.getItem("interviewprep_theme") === "dark" ? "dark" : "light";
+}
+
+function isStrongPassword(password) {
+  return password.length >= 8 && password.length <= 128 && /[A-Za-z]/.test(password) && /\d/.test(password);
+}
+
+function statusKind(status = "") {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("offline") || normalized.startsWith("error")) return "offline";
+  if (["backend connected", "logged in", "guest mode"].includes(normalized)) return "online";
+  return "working";
+}
+
+function statusText(status = "") {
+  if (status === "Backend Connected") return "Backend connected";
+  if (status === "Backend Offline") return "Backend not connected";
+  return status || "Backend connected";
 }
 
 function selectedPlanTitle(savedPlans, planId) {

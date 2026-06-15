@@ -37,6 +37,22 @@ def test_register_rejects_duplicate_email() -> None:
     assert response.status_code == 409
 
 
+def test_register_rejects_password_without_letter_and_number() -> None:
+    client = _client_with_memory_db()
+
+    no_number = client.post(
+        "/auth/register",
+        json={"name": "Test User", "email": "test1@example.com", "password": "passwordonly"},
+    )
+    no_letter = client.post(
+        "/auth/register",
+        json={"name": "Test User", "email": "test2@example.com", "password": "12345678"},
+    )
+
+    assert no_number.status_code == 422
+    assert no_letter.status_code == 422
+
+
 def test_login_accepts_correct_password_and_rejects_wrong_password() -> None:
     client = _client_with_memory_db()
     client.post(
