@@ -7,6 +7,7 @@ class JobAnalysisRequest(BaseModel):
     job_title: str = Field(default="Auto-detect role", min_length=2, examples=["Backend Software Engineer Intern"])
     job_description: Optional[str] = Field(default=None, min_length=20)
     source_url: Optional[str] = Field(default=None, examples=["https://company.com/jobs/backend-intern"])
+    save_mode: Optional[str] = Field(default=None, examples=["url"])
 
     @model_validator(mode="after")
     def require_description_or_url(self) -> "JobAnalysisRequest":

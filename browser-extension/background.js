@@ -198,6 +198,7 @@ function normalizeJobPayload(payload, sender) {
     job_title: payload.jobTitle || sender?.tab?.title || "Auto-detect role",
     job_description: description || undefined,
     source_url: url || undefined,
+    save_mode: payload.saveMode || undefined,
   };
 }
 

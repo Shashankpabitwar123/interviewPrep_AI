@@ -254,6 +254,14 @@
   gap: 8px;
 }
 
+.ipai-url-mode .ipai-actions {
+  grid-template-columns: 1fr;
+}
+
+.ipai-url-mode .ipai-plan-action {
+  display: none;
+}
+
 .ipai-actions button {
   all: unset;
   display: inline-flex;

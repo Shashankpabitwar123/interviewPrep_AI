@@ -56,8 +56,8 @@
         <input class="ipai-hours" type="number" min="0.5" max="10" step="0.5" value="3" />
       </div>
       <div class="ipai-actions">
-        <button type="button" data-action="save">Save Job</button>
-        <button type="button" data-action="plan">Generate Prep Plan</button>
+        <button type="button" class="ipai-save-action" data-action="save">Save Job</button>
+        <button type="button" class="ipai-plan-action" data-action="plan">Generate Prep Plan</button>
       </div>
       <p class="ipai-status"></p>
     </section>
@@ -88,6 +88,11 @@
     bubble.addEventListener("pointerdown", startDrag);
     window.addEventListener("pointermove", drag);
     window.addEventListener("pointerup", stopDrag);
+    document.addEventListener("pointerdown", closeFromOutside, true);
+
+    bubble.addEventListener("mouseenter", () => {
+      if (!state.dragging) setOpen(true);
+    });
 
     bubble.addEventListener("click", () => {
       if (state.dragging) return;
@@ -150,6 +155,13 @@
   function applyPosition() {
     root.style.setProperty("--ipai-x", `${state.bubbleX}px`);
     root.style.setProperty("--ipai-y", `${state.bubbleY}px`);
+    if (state.panelOpen) positionPanel();
+  }
+
+  function closeFromOutside(event) {
+    if (!state.open && !state.panelOpen) return;
+    if (root.contains(event.target)) return;
+    setOpen(false);
   }
 
   function setOpen(open) {
@@ -178,6 +190,8 @@
 
   async function capture(mode) {
     state.mode = mode;
+    root.classList.toggle("ipai-url-mode", mode === "url");
+    root.querySelector(".ipai-save-action").textContent = mode === "url" ? "Save URL" : "Save Job";
     setOpen(true);
     setPanel(true);
     setStatus("Capturing...");
@@ -191,7 +205,7 @@
     }
     if (mode === "url") {
       state.description = window.location.href;
-      setStatus("Copied the current page URL. Save it now or generate a prep plan from the URL.");
+      setStatus("Copied the current page URL. Save it to your saved jobs.");
     }
     textarea.value = state.description;
     titleInput.value = titleInput.value || guessTitle();
@@ -204,7 +218,7 @@
     const response = await sendMessage({ type: "saveJob", payload: payload() });
     if (!response.ok) return setStatus(response.error);
     const title = response.saved?.role_title || "Job";
-    completeAction(`${title} saved`);
+    completeAction(state.mode === "url" ? "URL saved" : `${title} saved`);
   }
 
   async function generatePlan() {
@@ -222,6 +236,7 @@
       jobTitle: titleInput.value.trim() || guessTitle(),
       description: isUrlMode ? "" : textValue,
       sourceUrl: isUrlMode ? textValue || window.location.href : window.location.href,
+      saveMode: isUrlMode ? "url" : undefined,
       interviewAt: dateInput.value ? new Date(dateInput.value).toISOString() : undefined,
       hoursPerDay: Number(hoursInput.value || 3),
     };

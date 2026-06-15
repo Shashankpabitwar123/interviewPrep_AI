@@ -236,6 +236,13 @@ function App() {
       setExtensionState((current) => ({ ...current, error: response.error || "Could not update extension." }));
       return;
     }
+    setExtensionState((current) => ({
+      ...current,
+      installed: true,
+      checking: false,
+      bubbleEnabled: response.bubbleEnabled ?? response.settings?.bubbleEnabled ?? !current.bubbleEnabled,
+      error: "",
+    }));
     await syncWebsiteSessionToExtension();
   }
 
@@ -622,6 +629,11 @@ function App() {
       const response = await apiFetch(`/jobs/${job.id}`);
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const detail = await response.json();
+      if (isUrlBookmark(detail) && detail.source_url) {
+        window.open(normalizeUrl(detail.source_url), "_blank", "noopener,noreferrer");
+        setStatus("Saved Job URL Opened");
+        return;
+      }
       const planList = savedPlans.length ? savedPlans : await fetchSavedPlansList();
       const matchingPlan = planList.find((savedPlan) => String(savedPlan.job_post_id) === String(job.id));
       setJobTitle(detail.title);
@@ -4006,7 +4018,7 @@ function SettingsView({
           <div className="extension-actions">
             <button
               type="button"
-              className={extensionState?.installed ? "theme-toggle extension-toggle" : "outline-action compact-action"}
+              className={extensionState?.installed ? `theme-toggle extension-toggle ${extensionState?.bubbleEnabled ? "is-on" : ""}` : "outline-action compact-action"}
               onClick={onToggleExtension}
               aria-pressed={Boolean(extensionState?.bubbleEnabled)}
             >
@@ -4910,6 +4922,10 @@ function extensionDescription(extensionState = {}, user) {
   if (!user) return "Login to InterviewPrep AI so saved jobs and prep plans go to your account.";
   if (extensionState.bubbleEnabled) return "The capture bubble will appear on job pages where the extension has permission.";
   return "Turn it on when you want the draggable capture bubble on job pages.";
+}
+
+function isUrlBookmark(job = {}) {
+  return Boolean(job.source_url && String(job.description || job.description_preview || "").startsWith("Saved URL bookmark."));
 }
 
 function selectedPlanTitle(savedPlans, planId) {

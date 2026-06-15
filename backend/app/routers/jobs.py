@@ -20,7 +20,10 @@ def analyze_job(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_request_user),
 ) -> JobAnalysisResponse:
-    description = resolve_job_description(request.job_description, request.source_url)
+    if request.save_mode == "url" and request.source_url and not request.job_description:
+        description = f"Saved URL bookmark. Open the source URL to view the job description. URL: {request.source_url}"
+    else:
+        description = resolve_job_description(request.job_description, request.source_url)
     inferred_title = infer_role_title(request.job_title, description, request.source_url)
     analysis_request = request.model_copy(update={"job_title": inferred_title, "job_description": description})
     analysis = analyze_job_description(analysis_request, settings)

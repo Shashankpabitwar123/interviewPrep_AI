@@ -1779,7 +1779,7 @@ button {
   position: fixed;
   left: 14px;
   bottom: 86px;
-  z-index: 30;
+  z-index: 2000;
   width: 286px;
   max-height: min(520px, calc(100vh - 110px));
   overflow-y: auto;
@@ -1884,6 +1884,20 @@ button {
 }
 
 .theme-toggle.is-dark span::after {
+  transform: translateX(20px);
+}
+
+.extension-toggle.is-on {
+  color: #ecfdf5;
+  border-color: rgba(34, 197, 94, 0.46);
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+}
+
+.extension-toggle.is-on span {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.extension-toggle.is-on span::after {
   transform: translateX(20px);
 }
 
@@ -4702,6 +4716,16 @@ footer {
 .theme-dark .remove-button {
   color: var(--muted);
   background: #0f1729;
+}
+
+.theme-dark .extension-toggle.is-on {
+  color: #ecfdf5;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: linear-gradient(135deg, #15803d, #22c55e);
+}
+
+.theme-dark .extension-toggle.is-on span {
+  background: rgba(236, 253, 245, 0.32);
 }
 
 .theme-dark input,
