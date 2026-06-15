@@ -4919,6 +4919,140 @@ footer {
   background: rgba(34, 197, 94, 0.14);
 }
 
+.theme-dark .panel-title h2,
+.theme-dark .exam-topbar strong,
+.theme-dark .exam-question-focus h2,
+.theme-dark .exam-options.large label strong,
+.theme-dark .review-card h3,
+.theme-dark .review-grid strong,
+.theme-dark .review-feedback strong,
+.theme-dark .study-note-body h3,
+.theme-dark .study-note-body h4,
+.theme-dark .note-empty-editor strong,
+.theme-dark .note-editor-title,
+.theme-dark .note-editor-toolbar strong {
+  color: var(--text);
+}
+
+.theme-dark .panel-title p,
+.theme-dark .exam-question-focus > span,
+.theme-dark .exam-options.large label span,
+.theme-dark .review-grid p,
+.theme-dark .review-feedback p,
+.theme-dark .study-note-body p,
+.theme-dark .study-note-body ul,
+.theme-dark .resource-list span,
+.theme-dark .note-empty-editor,
+.theme-dark .note-empty-editor p {
+  color: var(--muted);
+}
+
+.theme-dark .activity-row,
+.theme-dark .note-editor-page,
+.theme-dark .note-empty-editor,
+.theme-dark .note-color-field,
+.theme-dark .exam-shell,
+.theme-dark .mock-interview-shell,
+.theme-dark .question-map,
+.theme-dark .exam-footer,
+.theme-dark .mock-session-tools,
+.theme-dark .exam-options.large label,
+.theme-dark .review-shell,
+.theme-dark .review-card,
+.theme-dark .review-grid div,
+.theme-dark .review-feedback,
+.theme-dark .study-note-shell,
+.theme-dark .study-note-body section,
+.theme-dark .deep-dive-section article,
+.theme-dark .resource-list a {
+  border-color: var(--line);
+  background: #0b1424;
+}
+
+.theme-dark .activity-row:hover,
+.theme-dark .resource-list a:hover,
+.theme-dark .exam-options.large label:hover {
+  background: #101d35;
+}
+
+.theme-dark .activity-row strong {
+  color: var(--text);
+}
+
+.theme-dark .activity-row span,
+.theme-dark .activity-row small {
+  color: var(--muted);
+}
+
+.theme-dark .exam-modal-backdrop,
+.theme-dark .review-backdrop {
+  background: rgba(2, 6, 23, 0.98);
+}
+
+.theme-dark .exam-topbar {
+  border-color: var(--line);
+  background: #070c17;
+}
+
+.theme-dark .exam-stage,
+.theme-dark .review-stage,
+.theme-dark .study-note-body {
+  background: #050914;
+}
+
+.theme-dark .question-map button {
+  color: var(--text);
+  border-color: var(--line);
+  background: #0f1729;
+}
+
+.theme-dark .question-map button.current {
+  color: #93c5fd;
+  border-color: rgba(37, 99, 235, 0.75);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.theme-dark .question-map button.answered {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.theme-dark .exam-evaluating-overlay {
+  color: var(--text);
+  background: rgba(5, 9, 20, 0.88);
+}
+
+.theme-dark .exam-timer.warning {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.16);
+}
+
+.theme-dark .deep-dive-section {
+  border-color: rgba(167, 139, 250, 0.45);
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.theme-dark .note-summary,
+.theme-dark .topic-chip-section {
+  border-color: rgba(22, 119, 255, 0.32);
+  background: rgba(22, 119, 255, 0.1);
+}
+
+.theme-dark .resource-list a {
+  color: var(--text);
+}
+
+.theme-dark .note-editor-body {
+  color: var(--text);
+}
+
+.theme-dark .readiness-ring {
+  background:
+    radial-gradient(circle at center, #070c17 0 57%, transparent 58%),
+    conic-gradient(var(--blue) calc(var(--score) * 1%), #1d2941 0);
+}
+
 .auth-submit {
   width: 100%;
 }

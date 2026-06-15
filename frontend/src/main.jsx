@@ -109,6 +109,7 @@ function App() {
   const [mockAnswer, setMockAnswer] = useState("");
   const [completedTasks, setCompletedTasks] = useState(() => loadCompletedTasks());
   const [notes, setNotes] = useState(() => loadLocalList("interviewprep_notes"));
+  const [generatedStudyNotes, setGeneratedStudyNotes] = useState(() => loadLocalMap("interviewprep_generated_study_notes"));
   const [noteReader, setNoteReader] = useState(null);
   const [noteFolders, setNoteFolders] = useState(() => loadLocalList("interviewprep_note_folders"));
   const [noteDraft, setNoteDraft] = useState({ title: "", body: "", planId: "", folder: "", subfolder: "" });
@@ -159,6 +160,7 @@ function App() {
     setExamAttempts(loadLocalList("interviewprep_exam_attempts"));
     setMockAttempts(loadLocalList("interviewprep_mock_attempts"));
     setNotes(loadLocalList("interviewprep_notes"));
+    setGeneratedStudyNotes(loadLocalMap("interviewprep_generated_study_notes"));
     setNoteFolders(loadLocalList("interviewprep_note_folders"));
     setCalendarEvents(loadLocalList("interviewprep_calendar_events"));
     setRecentActivity(loadLocalList("interviewprep_recent_activity"));
@@ -1111,6 +1113,7 @@ function App() {
 
   async function startStudyTask(task) {
     const taskKey = task.id || task.title;
+    const cacheKey = `${plan?.prep_plan_id || plan?.job_id || "sample"}:${task.day || selectedPlanDay}:${taskKey}`;
     if (task.task_type === "practice_exam") {
       setPracticeExamPrompt({
         task,
@@ -1118,6 +1121,13 @@ function App() {
         focusTopics: task.topics || [],
         taskKey,
       });
+      return;
+    }
+    const cachedNote = generatedStudyNotes[cacheKey];
+    if (cachedNote?.content) {
+      setNoteReader({ task, content: cachedNote.content });
+      setStatus(cachedNote.content.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
+      addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: cachedNote.content.source || "saved", target: "prep" });
       return;
     }
     setLoadingStudyTaskId(taskKey);
@@ -1139,14 +1149,39 @@ function App() {
         });
         if (response.ok) content = await response.json();
       }
+      setGeneratedStudyNotes((current) => {
+        const next = {
+          ...current,
+          [cacheKey]: {
+            content,
+            taskTitle: task.title,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        saveLocalMap("interviewprep_generated_study_notes", next);
+        return next;
+      });
       setNoteReader({ task, content });
       playGeneratedSound(soundVolume);
       setStatus(content.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
       addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: content.source || "", target: "prep" });
     } catch (error) {
+      const fallbackContent = generateStudyNote(plan, task);
+      setGeneratedStudyNotes((current) => {
+        const next = {
+          ...current,
+          [cacheKey]: {
+            content: fallbackContent,
+            taskTitle: task.title,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        saveLocalMap("interviewprep_generated_study_notes", next);
+        return next;
+      });
       setNoteReader({
         task,
-        content: generateStudyNote(plan, task),
+        content: fallbackContent,
       });
       playGeneratedSound(soundVolume);
       setStatus("Study Notes Ready");
