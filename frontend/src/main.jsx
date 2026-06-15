@@ -50,6 +50,9 @@ import {
 import "./styles.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const EXTENSION_GUIDE_URL = "https://github.com/Shashankpabitwar123/interviewPrep_AI/tree/main/browser-extension";
+const EXTENSION_WEB_SOURCE = "interviewprep-ai-web";
+const EXTENSION_RESPONSE_SOURCE = "interviewprep-ai-extension";
 
 const EXAM_PRESETS = {
   easy: { difficulty: "easy", questionCount: 10, timeLimit: 5, questionTypes: ["auto"] },
@@ -132,6 +135,14 @@ function App() {
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
   const [authMessage, setAuthMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [extensionState, setExtensionState] = useState({
+    installed: false,
+    checking: true,
+    bubbleEnabled: false,
+    signedIn: false,
+    user: null,
+    error: "",
+  });
 
   useEffect(() => {
     resetCreatePrepForm();
@@ -162,6 +173,79 @@ function App() {
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
     return fetch(`${API_URL}${path}`, { ...options, headers });
   }
+
+  function requestExtension(action, payload = {}, timeoutMs = 900) {
+    return new Promise((resolve) => {
+      const requestId = `ipai-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const timer = window.setTimeout(() => {
+        window.removeEventListener("message", handleMessage);
+        resolve({ ok: false, installed: false, error: "Extension not detected." });
+      }, timeoutMs);
+
+      function handleMessage(event) {
+        if (event.source !== window) return;
+        const response = event.data || {};
+        if (response.source !== EXTENSION_RESPONSE_SOURCE || response.requestId !== requestId) return;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", handleMessage);
+        resolve(response);
+      }
+
+      window.addEventListener("message", handleMessage);
+      window.postMessage({
+        source: EXTENSION_WEB_SOURCE,
+        requestId,
+        action,
+        ...payload,
+      }, window.location.origin);
+    });
+  }
+
+  async function refreshExtensionState() {
+    const response = await requestExtension("getState");
+    setExtensionState({
+      installed: Boolean(response.installed && response.ok),
+      checking: false,
+      bubbleEnabled: Boolean(response.bubbleEnabled),
+      signedIn: Boolean(response.signedIn),
+      user: response.user || null,
+      error: response.installed ? response.error || "" : "",
+    });
+    return response;
+  }
+
+  async function syncWebsiteSessionToExtension() {
+    if (!user || !authToken) {
+      const response = await requestExtension("syncSession", { user: null, authToken: "" });
+      if (response.installed) await refreshExtensionState();
+      return response;
+    }
+    const response = await requestExtension("syncSession", { user, authToken });
+    if (response.installed) await refreshExtensionState();
+    return response;
+  }
+
+  async function toggleExtensionBubble() {
+    if (!extensionState.installed) {
+      window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const response = await requestExtension("setBubbleEnabled", { enabled: !extensionState.bubbleEnabled });
+    if (!response.ok) {
+      setExtensionState((current) => ({ ...current, error: response.error || "Could not update extension." }));
+      return;
+    }
+    await syncWebsiteSessionToExtension();
+  }
+
+  useEffect(() => {
+    refreshExtensionState();
+  }, []);
+
+  useEffect(() => {
+    syncWebsiteSessionToExtension();
+  }, [user?.id, user?.email, authToken]);
 
   useEffect(() => {
     if (!savedPlans.length) {
@@ -1443,9 +1527,13 @@ function App() {
               soundVolume={soundVolume}
               setSoundVolume={setSoundVolume}
               deletedJobs={deletedJobs}
+              extensionState={extensionState}
               restoreDeletedJob={restoreDeletedJob}
               clearDeletedJob={clearDeletedJob}
               loading={loading}
+              onToggleExtension={toggleExtensionBubble}
+              onInstallExtension={() => window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer")}
+              onRefreshExtension={refreshExtensionState}
               onClose={() => setSettingsOpen(false)}
               onKnowMore={() => {
                 setSettingsOpen(false);
@@ -3825,7 +3913,24 @@ function isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) {
   return task.task_type === "practice_exam" ? loadingExamTaskId === key : loadingStudyTaskId === key;
 }
 
-function SettingsView({ user, status, theme, setTheme, soundVolume, setSoundVolume, deletedJobs, restoreDeletedJob, clearDeletedJob, loading, onClose, onKnowMore }) {
+function SettingsView({
+  user,
+  status,
+  theme,
+  setTheme,
+  soundVolume,
+  setSoundVolume,
+  deletedJobs,
+  extensionState,
+  restoreDeletedJob,
+  clearDeletedJob,
+  loading,
+  onToggleExtension,
+  onInstallExtension,
+  onRefreshExtension,
+  onClose,
+  onKnowMore,
+}) {
   function updateSoundVolume(value) {
     const nextVolume = Math.max(0, Math.min(100, Number(value)));
     setSoundVolume(nextVolume);
@@ -3891,16 +3996,42 @@ function SettingsView({ user, status, theme, setTheme, soundVolume, setSoundVolu
             </button>
           </div>
         </div>
-        <div className="settings-mini-card">
-          <strong><Sparkles size={16} /> Hovering extension</strong>
-          <span>Install the browser extension to capture jobs from Handshake, LinkedIn, and company career pages.</span>
-          <button
-            type="button"
-            className="outline-action compact-action"
-            onClick={() => window.open("https://github.com/Shashankpabitwar123/interviewPrep_AI/tree/main/browser-extension", "_blank", "noopener,noreferrer")}
-          >
-            Extension guide <ExternalLink size={13} />
-          </button>
+        <div className={`settings-mini-card extension-settings-card ${extensionState?.bubbleEnabled ? "active" : ""}`}>
+          <div className="sound-setting-head">
+            <strong><Sparkles size={16} /> Hovering extension</strong>
+            <span>{extensionLabel(extensionState)}</span>
+          </div>
+          <span>{extensionDescription(extensionState, user)}</span>
+          {extensionState?.error && <small className="extension-error">{extensionState.error}</small>}
+          <div className="extension-actions">
+            <button
+              type="button"
+              className={extensionState?.installed ? "theme-toggle extension-toggle" : "outline-action compact-action"}
+              onClick={onToggleExtension}
+              aria-pressed={Boolean(extensionState?.bubbleEnabled)}
+            >
+              {extensionState?.installed ? (
+                <>
+                  <span />
+                  <strong>{extensionState.bubbleEnabled ? "Bubble on" : "Bubble off"}</strong>
+                </>
+              ) : (
+                <>Install Extension <ExternalLink size={13} /></>
+              )}
+            </button>
+            <button
+              type="button"
+              className="outline-action compact-action"
+              onClick={extensionState?.installed ? onRefreshExtension : onInstallExtension}
+            >
+              {extensionState?.installed ? "Refresh" : "Guide"}
+            </button>
+          </div>
+          {extensionState?.installed && (
+            <small>
+              {extensionState.signedIn ? "Connected to your website login." : "Login on the website to connect the extension account."}
+            </small>
+          )}
         </div>
         <div className="settings-mini-card">
           <strong>Local workspace</strong>
@@ -4765,6 +4896,20 @@ function statusText(status = "") {
   if (status === "Backend Connected") return "Backend connected";
   if (status === "Backend Offline") return "Backend not connected";
   return status || "Backend connected";
+}
+
+function extensionLabel(extensionState = {}) {
+  if (extensionState.checking) return "Checking";
+  if (!extensionState.installed) return "Not installed";
+  return extensionState.bubbleEnabled ? "Active" : "Installed";
+}
+
+function extensionDescription(extensionState = {}, user) {
+  if (extensionState.checking) return "Checking whether the browser extension is available in this browser.";
+  if (!extensionState.installed) return "Install it once, then this toggle can control the capture bubble from the website.";
+  if (!user) return "Login to InterviewPrep AI so saved jobs and prep plans go to your account.";
+  if (extensionState.bubbleEnabled) return "The capture bubble will appear on job pages where the extension has permission.";
+  return "Turn it on when you want the draggable capture bubble on job pages.";
 }
 
 function selectedPlanTitle(savedPlans, planId) {

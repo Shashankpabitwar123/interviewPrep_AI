@@ -4,6 +4,8 @@ This browser extension adds a draggable InterviewPrep AI bubble to job pages so 
 
 ## What Works
 
+- **Website control**: InterviewPrep AI Settings can detect the installed extension and switch the capture bubble on or off.
+- **Website session sync**: after a user logs into InterviewPrep AI, the website can connect that session to the extension.
 - **Capture selected text**: highlight a job description, click the bubble, then choose `Selected`.
 - **Capture page text**: choose `Page` to read the visible job content from the current tab.
 - **Save page URL**: choose `URL` when a site blocks page text capture.
@@ -25,9 +27,12 @@ This browser extension adds a draggable InterviewPrep AI bubble to job pages so 
 ```
 
 6. Pin the extension.
-7. Click the extension icon, login, and keep **Hovering bubble** enabled.
-8. Open a job page on Handshake, LinkedIn, or a company careers page.
-9. Use the bubble to capture selected text, page text, URL, or quick-save the job.
+7. Open InterviewPrep AI and login.
+8. Go to **Settings** and switch **Hovering extension** on.
+9. Open a job page on Handshake, LinkedIn, or a company careers page.
+10. Use the bubble to capture selected text, page text, URL, or quick-save the job.
+
+You can still click the extension icon directly if you want to edit API settings or login from the popup.
 
 ## Production Defaults
 

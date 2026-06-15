@@ -3,6 +3,8 @@
   if (/^(chrome|edge|about|moz-extension|chrome-extension|safari-web-extension):/.test(window.location.protocol)) return;
 
   const extensionApi = globalThis.chrome || globalThis.browser;
+  setupWebsiteBridge();
+  if (isInterviewPrepApp()) return;
 
   const state = {
     open: false,
@@ -276,6 +278,73 @@
         });
       }
     });
+  }
+
+  function setupWebsiteBridge() {
+    if (!isInterviewPrepApp()) return;
+    window.addEventListener("message", async (event) => {
+      if (event.source !== window) return;
+      const request = event.data || {};
+      if (request.source !== "interviewprep-ai-web" || !request.requestId) return;
+
+      const response = await handleWebsiteRequest(request).catch((error) => ({
+        ok: false,
+        error: error.message || "Extension bridge failed.",
+      }));
+
+      window.postMessage({
+        source: "interviewprep-ai-extension",
+        requestId: request.requestId,
+        ...response,
+      }, window.location.origin);
+    });
+  }
+
+  async function handleWebsiteRequest(request) {
+    if (request.action === "getState") {
+      const settings = await sendMessage({ type: "getSettings" });
+      const auth = await sendMessage({ type: "getAuthState" });
+      return {
+        ok: Boolean(settings.ok && auth.ok),
+        installed: true,
+        bubbleEnabled: settings.bubbleEnabled !== false,
+        signedIn: Boolean(auth.signedIn),
+        user: auth.user || settings.user || null,
+        error: settings.error || auth.error,
+      };
+    }
+
+    if (request.action === "setBubbleEnabled") {
+      const result = await sendMessage({ type: "setBubbleEnabled", enabled: Boolean(request.enabled) });
+      return {
+        ...result,
+        installed: true,
+        bubbleEnabled: result.settings?.bubbleEnabled !== false,
+      };
+    }
+
+    if (request.action === "syncSession") {
+      const result = await sendMessage({
+        type: "syncSession",
+        user: request.user || null,
+        authToken: request.authToken || "",
+      });
+      return { ...result, installed: true };
+    }
+
+    if (request.action === "openApp") {
+      return sendMessage({ type: "openApp", path: request.path || "" });
+    }
+
+    return { ok: false, installed: true, error: "Unknown website extension action." };
+  }
+
+  function isInterviewPrepApp() {
+    return [
+      "interview-prep-ai-sable.vercel.app",
+      "localhost",
+      "127.0.0.1",
+    ].includes(window.location.hostname);
   }
 
   function defaultInterviewLocalDate() {

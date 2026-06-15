@@ -28,6 +28,10 @@ async function handleMessage(message, sender) {
       return login(message.email, message.password);
     case "logout":
       return logout();
+    case "syncSession":
+      return syncSession(message.user || null, message.authToken || "");
+    case "setBubbleEnabled":
+      return setBubbleEnabled(Boolean(message.enabled));
     case "saveJob":
       return saveJob(message.payload || {}, sender);
     case "generatePlan":
@@ -80,9 +84,30 @@ async function logout() {
   return { user: null };
 }
 
+async function syncSession(user, authToken) {
+  if (!user || !authToken) {
+    await extensionApi.storage.sync.remove(["authToken", "user"]);
+    return { user: null, signedIn: false };
+  }
+  await extensionApi.storage.sync.set({ authToken, user });
+  return { user, signedIn: true };
+}
+
 async function getAuthState() {
   const settings = await extensionApi.storage.sync.get(["user", "authToken"]);
   return { user: settings.user || null, signedIn: Boolean(settings.authToken) };
+}
+
+async function setBubbleEnabled(enabled) {
+  const settings = await getSettings();
+  const next = {
+    apiUrl: settings.apiUrl,
+    appUrl: settings.appUrl,
+    bubbleEnabled: enabled,
+  };
+  await extensionApi.storage.sync.set(next);
+  await broadcastSettings(next);
+  return { settings: next };
 }
 
 async function saveJob(payload, sender) {
@@ -158,7 +183,10 @@ async function broadcastSettings(settings) {
 
 function sendTabMessage(tabId, message) {
   return new Promise((resolve) => {
-    extensionApi.tabs.sendMessage(tabId, message, () => resolve());
+    extensionApi.tabs.sendMessage(tabId, message, () => {
+      void extensionApi.runtime.lastError;
+      resolve();
+    });
   });
 }
 
