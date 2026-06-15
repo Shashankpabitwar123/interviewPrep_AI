@@ -3910,6 +3910,10 @@ textarea {
   max-width: 100%;
 }
 
+.plan-carousel.no-arrows {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .carousel-arrow {
   display: grid;
   place-items: center;
@@ -4562,6 +4566,14 @@ footer {
   border-color: var(--line);
 }
 
+.theme-dark .page-panel,
+.theme-dark .create-panel,
+.theme-dark .saved-panel,
+.theme-dark .plan-panel,
+.theme-dark .activity-panel {
+  background: linear-gradient(180deg, #0b1220, #070c17);
+}
+
 .theme-dark .topbar {
   background: rgba(7, 12, 23, 0.86);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
@@ -4641,7 +4653,14 @@ footer {
 .theme-dark .icon-button,
 .theme-dark .segmented button,
 .theme-dark .saved-row a,
-.theme-dark .theme-toggle {
+.theme-dark .theme-toggle,
+.theme-dark .outline-action,
+.theme-dark .auth-link,
+.theme-dark .task-row button,
+.theme-dark .carousel-arrow,
+.theme-dark .difficulty-group button,
+.theme-dark .question-types label,
+.theme-dark .remove-button {
   color: var(--muted);
   background: #0f1729;
 }
@@ -4652,7 +4671,19 @@ footer {
 .theme-dark .input-icon,
 .theme-dark .segmented,
 .theme-dark .saved-list,
-.theme-dark .activity-list {
+.theme-dark .activity-list,
+.theme-dark .task-table,
+.theme-dark .month-grid,
+.theme-dark .mock-session,
+.theme-dark .mock-message,
+.theme-dark .note-editor-body,
+.theme-dark .note-card-list,
+.theme-dark .notes-tree,
+.theme-dark .notes-composer,
+.theme-dark .calendar-modal-events article,
+.theme-dark .event-form,
+.theme-dark .difficulty-grid button,
+.theme-dark .mock-controls {
   color: var(--text);
   background: #050914;
   border-color: var(--line);
@@ -4660,13 +4691,65 @@ footer {
 
 .theme-dark .task-row,
 .theme-dark .saved-row,
-.theme-dark .activity-row {
+.theme-dark .activity-row,
+.theme-dark .month-grid > strong,
+.theme-dark .month-day,
+.theme-dark .month-event,
+.theme-dark .mock-message,
+.theme-dark .plan-day-card,
+.theme-dark .tree-row,
+.theme-dark .notes-job-card,
+.theme-dark .calendar-modal-events article {
   border-color: var(--line-soft);
+}
+
+.theme-dark .task-row,
+.theme-dark .study-task-row.exam-task,
+.theme-dark .month-day,
+.theme-dark .month-day.muted,
+.theme-dark .month-grid > strong,
+.theme-dark .month-event,
+.theme-dark .plan-day-card,
+.theme-dark .mock-message,
+.theme-dark .mock-message.candidate,
+.theme-dark .analytics-dev-grid article,
+.theme-dark .capability-grid article,
+.theme-dark .about-capability-matrix,
+.theme-dark .about-mission,
+.theme-dark .notes-job-card,
+.theme-dark .tree-row,
+.theme-dark .note-card,
+.theme-dark .note-editor {
+  background: #0b1424;
+}
+
+.theme-dark .plan-day-card.selected,
+.theme-dark .month-day:hover,
+.theme-dark .month-day.has-events:hover,
+.theme-dark .mock-message.interviewer,
+.theme-dark .tree-row.selected,
+.theme-dark .notes-job-card.selected,
+.theme-dark .difficulty-grid button:hover,
+.theme-dark .difficulty-group button.selected {
+  border-color: rgba(22, 119, 255, 0.48);
+  background: #101d35;
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.25);
+}
+
+.theme-dark .plan-day-card.completed,
+.theme-dark .mock-message.feedback,
+.theme-dark .progress-day-list article.done {
+  border-color: rgba(74, 222, 128, 0.32);
+  background: #0c1d22;
 }
 
 .theme-dark .info-strip,
 .theme-dark .exam-result,
-.theme-dark .next-action-card {
+.theme-dark .next-action-card,
+.theme-dark .month-event,
+.theme-dark .compact-empty-state,
+.theme-dark .task-row em,
+.theme-dark .status-progress {
   background: rgba(22, 119, 255, 0.1);
   border-color: rgba(22, 119, 255, 0.22);
 }
@@ -4679,9 +4762,71 @@ footer {
 .theme-dark .panel-title h2 em,
 .theme-dark .progress-plan-grid footer em,
 .theme-dark .attempt-card em,
-.theme-dark .progress-day-list em {
+.theme-dark .progress-day-list em,
+.theme-dark .exam-task em,
+.theme-dark .status-pending {
   color: #93c5fd;
   background: rgba(22, 119, 255, 0.16);
+}
+
+.theme-dark .status-complete,
+.theme-dark .mock-session-head em {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.theme-dark .task-row button,
+.theme-dark .outline-action,
+.theme-dark .auth-link,
+.theme-dark .carousel-arrow,
+.theme-dark .question-types label,
+.theme-dark .difficulty-group button {
+  border-color: #263a5d;
+  color: #dbeafe;
+}
+
+.theme-dark .task-row button:hover,
+.theme-dark .outline-action:hover,
+.theme-dark .auth-link:hover,
+.theme-dark .carousel-arrow:hover {
+  color: #fff;
+  border-color: rgba(22, 119, 255, 0.6);
+  background: #11264a;
+}
+
+.theme-dark .month-day.has-events > span,
+.theme-dark .month-day > span,
+.theme-dark .month-event button,
+.theme-dark .mock-message strong,
+.theme-dark .mock-message p,
+.theme-dark .plan-day-card li,
+.theme-dark .upcoming-head,
+.theme-dark .task-row span,
+.theme-dark .difficulty-group button,
+.theme-dark .question-types label,
+.theme-dark .note-card strong,
+.theme-dark .tree-row strong,
+.theme-dark .notes-job-card strong,
+.theme-dark .calendar-modal-events article strong,
+.theme-dark .analytics-dev-grid article strong,
+.theme-dark .capability-grid article strong {
+  color: var(--text);
+}
+
+.theme-dark .month-grid > strong,
+.theme-dark .task-row small,
+.theme-dark .month-event span,
+.theme-dark .mock-session-head span,
+.theme-dark .note-card small,
+.theme-dark .calendar-modal-events article span {
+  color: var(--muted);
+}
+
+.theme-dark .remove-button,
+.theme-dark .more:hover {
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(127, 29, 29, 0.2);
 }
 
 .theme-dark input::placeholder,

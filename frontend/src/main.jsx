@@ -1591,6 +1591,7 @@ function App() {
               completedTasks={completedTasks}
               plan={plan}
               onSelectDay={setSelectedPlanDay}
+              showArrows={false}
             />
 
             <div className="upcoming-head">Upcoming Tasks (Day {selectedPlanDay})</div>
@@ -2067,17 +2068,19 @@ function PlanStepper({ days, selectedDay, onSelectDay }) {
   );
 }
 
-function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay, compact = false }) {
+function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay, compact = false, showArrows = true }) {
   const scrollerRef = useRef(null);
   function move(direction) {
     scrollerRef.current?.scrollBy({ left: direction * 500, behavior: "smooth" });
   }
 
   return (
-    <div className={`plan-carousel ${compact ? "compact" : ""}`}>
-      <button type="button" className="carousel-arrow" aria-label="Previous days" onClick={() => move(-1)}>
-        <ChevronRight size={18} />
-      </button>
+    <div className={`plan-carousel ${compact ? "compact" : ""} ${showArrows ? "" : "no-arrows"}`}>
+      {showArrows && (
+        <button type="button" className="carousel-arrow" aria-label="Previous days" onClick={() => move(-1)}>
+          <ChevronRight size={18} />
+        </button>
+      )}
       <div className={`plan-cards ${compact ? "compact-plan-cards" : ""}`} ref={scrollerRef}>
         {days.map((day, index) => (
           <PlanDayCard
@@ -2090,9 +2093,11 @@ function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay,
           />
         ))}
       </div>
-      <button type="button" className="carousel-arrow" aria-label="Next days" onClick={() => move(1)}>
-        <ChevronRight size={18} />
-      </button>
+      {showArrows && (
+        <button type="button" className="carousel-arrow" aria-label="Next days" onClick={() => move(1)}>
+          <ChevronRight size={18} />
+        </button>
+      )}
     </div>
   );
 }
