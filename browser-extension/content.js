@@ -18,7 +18,6 @@
     status: "",
     hoverCloseTimer: null,
     toastTimer: null,
-    lastSelection: "",
     settings: { bubbleEnabled: true },
   };
 
@@ -82,6 +81,7 @@
 
   async function init() {
     dateInput.value = defaultInterviewLocalDate();
+    dateInput.min = todayLocalDateTime();
     await refreshSettings();
     applyPosition();
     wireEvents();
@@ -92,7 +92,6 @@
     window.addEventListener("pointermove", drag);
     window.addEventListener("pointerup", stopDrag);
     document.addEventListener("pointerdown", closeFromOutside, true);
-    document.addEventListener("selectionchange", rememberSelection);
 
     hoverTargets.forEach((target) => {
       target.addEventListener("pointerdown", (event) => event.preventDefault());
@@ -221,12 +220,6 @@
     root.style.setProperty("--ipai-panel-y", `${panelTop}px`);
   }
 
-  function rememberSelection() {
-    if (root.contains(document.activeElement)) return;
-    const text = String(window.getSelection?.() || "").trim();
-    if (text) state.lastSelection = text.slice(0, 25000);
-  }
-
   async function capture(mode) {
     state.mode = mode;
     root.classList.toggle("ipai-url-mode", mode === "url");
@@ -279,11 +272,6 @@
       interviewAt: dateInput.value ? new Date(dateInput.value).toISOString() : undefined,
       hoursPerDay: Number(hoursInput.value || 3),
     };
-  }
-
-  function selectedText() {
-    const text = String(window.getSelection?.() || "").trim();
-    return (text || state.lastSelection || "").slice(0, 25000);
   }
 
   function pageText() {
@@ -456,6 +444,12 @@
     const date = new Date();
     date.setDate(date.getDate() + 7);
     date.setHours(9, 0, 0, 0);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  }
+
+  function todayLocalDateTime() {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   }
 

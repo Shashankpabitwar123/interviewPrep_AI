@@ -57,6 +57,12 @@ class JobDescriptionBrief(BaseModel):
     responsibilities: list[str] = Field(default_factory=list)
     looking_for: list[str] = Field(default_factory=list)
     interview_signals: list[str] = Field(default_factory=list)
+    must_prepare: list[str] = Field(default_factory=list)
+    resume_keywords: list[str] = Field(default_factory=list)
+    candidate_positioning: list[str] = Field(default_factory=list)
+    possible_interview_questions: list[str] = Field(default_factory=list)
+    red_flags_to_avoid: list[str] = Field(default_factory=list)
+    company_context: list[str] = Field(default_factory=list)
     prep_advice: list[str] = Field(default_factory=list)
     source: str = "openai"
 

@@ -78,10 +78,10 @@
 
 .ipai-radial {
   position: fixed;
-  left: calc(var(--ipai-x) - 178px);
-  top: calc(var(--ipai-y) - 86px);
-  width: 250px;
-  height: 228px;
+  left: calc(var(--ipai-x) - 220px);
+  top: calc(var(--ipai-y) - 116px);
+  width: 290px;
+  height: 286px;
   pointer-events: none;
   opacity: 0;
   transform: scale(0.86) translateX(12px);
@@ -100,7 +100,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 168px;
+  width: 176px;
   min-height: 38px;
   padding: 0 12px;
   border: 1px solid rgba(216, 226, 240, 0.92);
@@ -137,20 +137,20 @@
 }
 
 .ipai-radial [data-action="auto"] {
-  left: 32px;
-  top: 20px;
+  left: 64px;
+  top: 8px;
   transition-delay: 0.01s;
 }
 
-.ipai-radial [data-action="selected"] {
+.ipai-radial [data-action="manual"] {
   left: 0;
-  top: 82px;
+  top: 98px;
   transition-delay: 0.04s;
 }
 
 .ipai-radial [data-action="url"] {
-  left: 38px;
-  top: 144px;
+  left: 64px;
+  top: 188px;
   transition-delay: 0.07s;
 }
 

@@ -3962,6 +3962,12 @@ textarea {
   color: #166534;
 }
 
+.job-brief-answer-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .jobs-feature-toolbar {
   display: flex;
   justify-content: flex-end;

@@ -54,6 +54,7 @@ const EXTENSION_GUIDE_URL = "https://github.com/Shashankpabitwar123/interviewPre
 const EXTENSION_WEB_SOURCE = "interviewprep-ai-web";
 const EXTENSION_RESPONSE_SOURCE = "interviewprep-ai-extension";
 const JOB_BRIEF_CACHE_KEY = "interviewprep_job_briefs";
+const JOB_BRIEF_CACHE_VERSION = 2;
 
 const EXAM_PRESETS = {
   easy: { difficulty: "easy", questionCount: 10, timeLimit: 5, questionTypes: ["auto"] },
@@ -87,7 +88,7 @@ function App() {
   const [jobBrief, setJobBrief] = useState(null);
   const [jobBriefLoading, setJobBriefLoading] = useState(false);
   const [jobBriefQuestion, setJobBriefQuestion] = useState("");
-  const [jobBriefAnswer, setJobBriefAnswer] = useState(null);
+  const [jobBriefAnswers, setJobBriefAnswers] = useState([]);
   const [confirmDeleteJob, setConfirmDeleteJob] = useState(null);
   const [selectedJobIds, setSelectedJobIds] = useState([]);
   const [confirmBulkDeleteJobs, setConfirmBulkDeleteJobs] = useState(false);
@@ -153,9 +154,13 @@ function App() {
   useEffect(() => {
     resetCreatePrepForm();
     setInterviewDate(defaultInterviewDate());
-    reloadLocalWorkspaceState();
-    refreshJobs();
-    refreshSavedPlans();
+    if (authToken) {
+      reloadLocalWorkspaceState();
+      refreshJobs();
+      refreshSavedPlans();
+    } else {
+      clearVisibleWorkspaceState();
+    }
   }, []);
 
   useEffect(() => {
@@ -188,13 +193,32 @@ function App() {
     setCompletedTasks(loadCompletedTasks());
   }
 
+  function clearVisibleWorkspaceState() {
+    setJobs([]);
+    setSavedPlans([]);
+    setPlan(null);
+    setRecentActivity([]);
+    setDeletedJobs([]);
+    setArchivedJobIds([]);
+    setExamAttempts([]);
+    setMockAttempts([]);
+    setCalendarEvents([]);
+    setCompletedTasks({});
+    setNotes([]);
+    setNoteFolders([]);
+    setGeneratedStudyNotes({});
+  }
+
   async function apiFetch(path, options = {}) {
     const headers = {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
     };
-    if (authToken) headers.Authorization = `Bearer ${authToken}`;
-    return fetch(`${API_URL}${path}`, { ...options, headers });
+    const token = options.authTokenOverride ?? authToken;
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const requestOptions = { ...options, headers };
+    delete requestOptions.authTokenOverride;
+    return fetch(`${API_URL}${path}`, requestOptions);
   }
 
   function requestExtension(action, payload = {}, timeoutMs = 1500) {
@@ -374,9 +398,9 @@ function App() {
     return () => window.clearInterval(timer);
   }, [mockSession?.attemptId, mockSession?.questionNumber, mockSession?.remainingSeconds]);
 
-  async function refreshJobs(markers = jobMarkers, archivedIds = archivedJobIds) {
+  async function refreshJobs(markers = jobMarkers, archivedIds = archivedJobIds, tokenOverride = authToken) {
     try {
-      const response = await apiFetch(`/jobs`);
+      const response = await apiFetch(`/jobs`, { authTokenOverride: tokenOverride });
       if (!response.ok) return;
       const saved = await response.json();
       const hidden = new Set(archivedIds.map(String));
@@ -396,9 +420,9 @@ function App() {
     }
   }
 
-  async function refreshSavedPlans(archivedIds = archivedJobIds) {
+  async function refreshSavedPlans(archivedIds = archivedJobIds, tokenOverride = authToken) {
     try {
-      const response = await apiFetch(`/prep-plans`);
+      const response = await apiFetch(`/prep-plans`, { authTokenOverride: tokenOverride });
       if (!response.ok) return;
       const plans = await response.json();
       const hidden = new Set(archivedIds.map(String));
@@ -422,6 +446,10 @@ function App() {
     setLoading(true);
     setStatus("Generating Plan");
     try {
+      const minDate = minInterviewDateTime();
+      if (!interviewDate || interviewDate < minDate) {
+        throw new Error("Choose today or a future interview date.");
+      }
       const payload = {
         job_title: jobTitle.trim() || "Auto-detect role",
         company: company.trim() || "Auto-detect company",
@@ -719,10 +747,10 @@ function App() {
 
   async function openJobDescription(job) {
     setJobBriefLoading(true);
-    setJobBriefAnswer(null);
+    setJobBriefAnswers([]);
     setJobBriefQuestion("");
     const cachedBrief = loadLocalMap(JOB_BRIEF_CACHE_KEY)[String(job.id)];
-    if (cachedBrief?.brief) {
+    if (cachedBrief?.brief && cachedBrief.version === JOB_BRIEF_CACHE_VERSION) {
       setJobBrief({
         job: cachedBrief.job || job,
         brief: sanitizeJobBrief(cachedBrief.brief, cachedBrief.job || {}, job),
@@ -762,7 +790,7 @@ function App() {
       });
       saveLocalMap(JOB_BRIEF_CACHE_KEY, {
         ...loadLocalMap(JOB_BRIEF_CACHE_KEY),
-        [String(job.id)]: { job: cleanJob, brief, cachedAt: new Date().toISOString() },
+        [String(job.id)]: { version: JOB_BRIEF_CACHE_VERSION, job: cleanJob, brief, cachedAt: new Date().toISOString() },
       });
       addActivity({ type: "job", title: "Job description reviewed", detail: detail.title || job.title, badge: brief.source || "", target: "jobs" });
     } catch (error) {
@@ -777,24 +805,30 @@ function App() {
 
   async function askJobBriefQuestion() {
     if (!jobBrief?.job?.id || !jobBriefQuestion.trim()) return;
+    const questionText = jobBriefQuestion.trim();
     setJobBriefLoading(true);
     try {
       const response = await apiFetch(`/jobs/${jobBrief.job.id}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: jobBriefQuestion.trim() }),
+        body: JSON.stringify({ question: questionText }),
       });
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const answer = await response.json();
-      setJobBriefAnswer(answer);
+      setJobBriefAnswers((current) => [
+        { id: crypto.randomUUID?.() || `${Date.now()}`, question: questionText, ...answer },
+        ...current,
+      ]);
       setJobBriefQuestion("");
     } catch (error) {
-      setJobBriefAnswer({
+      setJobBriefAnswers((current) => [{
+        id: crypto.randomUUID?.() || `${Date.now()}`,
+        question: questionText,
         answer: error.message || "Could not answer this question right now.",
         interview_use: "Try again after checking the backend connection.",
         next_steps: [],
         source: "error",
-      });
+      }, ...current]);
     } finally {
       setJobBriefLoading(false);
     }
@@ -1251,9 +1285,19 @@ function App() {
     if (!wasDone) addActivity({ type: "practice", title: "Task completed", detail: task.title, badge: "done", target: task.task_type === "practice_exam" ? "exams" : "prep" });
   }
 
+  function studyNoteCacheKey(task) {
+    const taskKey = task.id || task.title;
+    return `${plan?.prep_plan_id || plan?.job_id || "sample"}:${task.day || selectedPlanDay}:${taskKey}`;
+  }
+
+  function isStudyNoteGenerated(task) {
+    if (task?.task_type === "practice_exam") return false;
+    return Boolean(generatedStudyNotes[studyNoteCacheKey(task)]?.content);
+  }
+
   async function startStudyTask(task) {
     const taskKey = task.id || task.title;
-    const cacheKey = `${plan?.prep_plan_id || plan?.job_id || "sample"}:${task.day || selectedPlanDay}:${taskKey}`;
+    const cacheKey = studyNoteCacheKey(task);
     if (task.task_type === "practice_exam") {
       setPracticeExamPrompt({
         task,
@@ -1634,8 +1678,8 @@ function App() {
       setAuthForm({ name: "", email: body.user.email, password: "" });
       reloadLocalWorkspaceState();
       setStatus(authMode === "register" ? "Account Created" : "Logged In");
-      refreshJobs();
-      refreshSavedPlans();
+      refreshJobs(jobMarkers, archivedJobIds, body.access_token);
+      refreshSavedPlans(archivedJobIds, body.access_token);
     } catch (error) {
       setAuthMessage(error.message);
     } finally {
@@ -1651,9 +1695,8 @@ function App() {
     setJobs([]);
     setSavedPlans([]);
     setPlan(null);
+    clearVisibleWorkspaceState();
     setStatus("Guest Mode");
-    refreshJobs();
-    refreshSavedPlans();
   }
 
   const activity = recentActivity.map((item) => ({ ...item, time: relativeTime(item.createdAt), target: item.target || targetForActivity(item.type) }));
@@ -1806,7 +1849,7 @@ function App() {
             <div className="form-grid">
               <label>
                 Interview Date <sup>*</sup>
-                <div className="input-icon"><Calendar size={16} /><input autoComplete="off" type="datetime-local" value={interviewDate} onChange={(event) => setInterviewDate(event.target.value)} /></div>
+                <div className="input-icon"><Calendar size={16} /><input autoComplete="off" type="datetime-local" min={minInterviewDateTime()} value={interviewDate} onChange={(event) => setInterviewDate(normalizeFutureInterviewDate(event.target.value))} /></div>
               </label>
               <label>
                 Hours Per Day <sup>*</sup>
@@ -1888,7 +1931,7 @@ function App() {
                   <small>{task.topics?.join(", ") || ["Python", "Data Structures", "SQL"][index % 3]}</small>
                   <em>{task.task_type === "practice_exam" ? "Practice exam" : "Study notes"}</em>
                   <button type="button" onClick={() => startStudyTask(task)} disabled={isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId)}>
-                    {isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) ? <><Loader2 className="spin" size={15} /> Generating...</> : "Start"}
+                    {isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) ? <><Loader2 className="spin" size={15} /> Generating...</> : isStudyNoteGenerated(task) ? "Open" : "Start"}
                   </button>
                 </div>
               ))}
@@ -1948,6 +1991,7 @@ function App() {
             removePrepPlan={removePrepPlan}
             generateExam={generateExam}
             startStudyTask={startStudyTask}
+            isStudyNoteGenerated={isStudyNoteGenerated}
             loading={loading}
             loadingStudyTaskId={loadingStudyTaskId}
             loadingExamTaskId={loadingExamTaskId}
@@ -2276,7 +2320,7 @@ function App() {
           loading={jobBriefLoading}
           question={jobBriefQuestion}
           setQuestion={setJobBriefQuestion}
-          answer={jobBriefAnswer}
+          answers={jobBriefAnswers}
           onAsk={askJobBriefQuestion}
           onClose={() => setJobBrief(null)}
         />
@@ -2982,7 +3026,7 @@ function StudyNoteModal({ reader, onDone, onClose }) {
   );
 }
 
-function JobDescriptionModal({ jobBrief, loading, question, setQuestion, answer, onAsk, onClose }) {
+function JobDescriptionModal({ jobBrief, loading, question, setQuestion, answers = [], onAsk, onClose }) {
   const brief = jobBrief.brief;
   const job = jobBrief.job || {};
   const company = brief?.company || job.company || inferCompanyName("", job.description || "", job.source_url || "");
@@ -3039,7 +3083,13 @@ function JobDescriptionModal({ jobBrief, loading, question, setQuestion, answer,
                 <JobBriefSection title="Responsibilities" items={brief?.responsibilities} fallback="Responsibilities were not separated clearly in the post." />
                 <JobBriefSection title="What They Are Looking For" items={brief?.looking_for} fallback="Prepare examples that show motivation, communication, and ability to learn quickly." />
                 <JobBriefSection title="Interview Signals" items={brief?.interview_signals} fallback="Expect questions that test practical judgment, role fit, and examples from your past work." />
+                <JobBriefSection title="Must Prepare Before Interview" items={brief?.must_prepare} fallback="Review the most repeated skills and responsibilities before generating exams." />
+                <JobBriefSection title="How To Position Yourself" items={brief?.candidate_positioning} fallback="Frame your answers around impact, learning speed, and role-specific examples." />
+                <JobBriefSection title="Likely Interview Questions" items={brief?.possible_interview_questions} fallback="Expect questions about your fit, projects, and how you would handle the posted responsibilities." />
+                <JobBriefSection title="Red Flags To Avoid" items={brief?.red_flags_to_avoid} fallback="Avoid generic answers that do not connect back to the job description." />
               </div>
+              <JobBriefSection title="Resume Keywords To Mirror" items={brief?.resume_keywords} fallback="Mirror the clearest skill keywords from the posting in your preparation and resume talking points." />
+              <JobBriefSection title="Company / Role Context" items={brief?.company_context} fallback="Use the source page or company website to verify details not included in the pasted description." />
               <JobBriefSection title="Prep Advice" items={brief?.prep_advice} fallback="Prepare two project stories, one failure or learning story, and one question for the interviewer." />
               <section className="job-brief-card ask-job-card">
                 <h3>Ask AI About This Description</h3>
@@ -3050,17 +3100,23 @@ function JobDescriptionModal({ jobBrief, loading, question, setQuestion, answer,
                     Ask AI
                   </button>
                 </form>
-                {answer && (
-                  <div className="job-brief-answer">
-                    <strong>Answer</strong>
-                    <p>{answer.answer}</p>
-                    <strong>How to use it in an interview</strong>
-                    <p>{answer.interview_use}</p>
-                    {answer.next_steps?.length > 0 && (
-                      <ul>
-                        {answer.next_steps.map((step) => <li key={step}>{step}</li>)}
-                      </ul>
-                    )}
+                {answers.length > 0 && (
+                  <div className="job-brief-answer-stack">
+                    {answers.map((answer) => (
+                      <div className="job-brief-answer" key={answer.id}>
+                        <strong>You asked</strong>
+                        <p>{answer.question}</p>
+                        <strong>Answer</strong>
+                        <p>{answer.answer}</p>
+                        <strong>How to use it in an interview</strong>
+                        <p>{answer.interview_use}</p>
+                        {answer.next_steps?.length > 0 && (
+                          <ul>
+                            {answer.next_steps.map((step) => <li key={step}>{step}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </section>
@@ -3093,19 +3149,46 @@ function sanitizeJobBrief(brief = {}, detail = {}, job = {}) {
   const company = brief.company || detail.company || job.company || inferCompanyName("", detail.description || job.description || "", detail.source_url || job.source_url || "");
   const requirements = cleanBriefItems(brief.requirements);
   const responsibilities = cleanBriefItems(brief.responsibilities);
+  const description = detail.description || job.description || "";
+  const fallbackSignals = fallbackInterviewSignals(roleTitle);
   return {
     ...brief,
     company,
     role_title: roleTitle,
     overview: cleanBriefText(brief.overview) || `This posting is for ${roleTitle}${company ? ` at ${company}` : ""}. Review the requirements, responsibilities, and interview signals before building your prep plan.`,
-    requirements: requirements.length ? requirements : fallbackRequirements(detail.description || job.description || ""),
-    responsibilities: responsibilities.length ? responsibilities : fallbackResponsibilities(detail.description || job.description || ""),
+    requirements: requirements.length ? requirements : fallbackRequirements(description),
+    responsibilities: responsibilities.length ? responsibilities : fallbackResponsibilities(description),
     looking_for: cleanBriefItems(brief.looking_for).length
       ? cleanBriefItems(brief.looking_for)
-      : fallbackLookingFor(detail.description || job.description || "", requirements, responsibilities),
+      : fallbackLookingFor(description, requirements, responsibilities),
     interview_signals: cleanBriefItems(brief.interview_signals).length
       ? cleanBriefItems(brief.interview_signals)
-      : fallbackInterviewSignals(roleTitle),
+      : fallbackSignals,
+    must_prepare: cleanBriefItems(brief.must_prepare, 10).length
+      ? cleanBriefItems(brief.must_prepare, 10)
+      : [...(requirements.length ? requirements.slice(0, 4) : fallbackRequirements(description).slice(0, 3)), ...fallbackSignals.slice(0, 2)],
+    resume_keywords: cleanBriefItems(brief.resume_keywords, 12).length
+      ? cleanBriefItems(brief.resume_keywords, 12)
+      : extractResumeKeywords(description),
+    candidate_positioning: cleanBriefItems(brief.candidate_positioning, 8).length
+      ? cleanBriefItems(brief.candidate_positioning, 8)
+      : fallbackLookingFor(description, requirements, responsibilities),
+    possible_interview_questions: cleanBriefItems(brief.possible_interview_questions, 10).length
+      ? cleanBriefItems(brief.possible_interview_questions, 10)
+      : fallbackLikelyQuestions(roleTitle, requirements, responsibilities),
+    red_flags_to_avoid: cleanBriefItems(brief.red_flags_to_avoid, 8).length
+      ? cleanBriefItems(brief.red_flags_to_avoid, 8)
+      : [
+          "Giving generic answers that do not mention the actual tools or responsibilities in this posting.",
+          "Claiming experience without a concrete project, class, or work example to support it.",
+          "Ignoring communication, ownership, or teamwork signals if the role description emphasizes them.",
+        ],
+    company_context: cleanBriefItems(brief.company_context, 8).length
+      ? cleanBriefItems(brief.company_context, 8)
+      : [
+          company ? `Research ${company}'s product, customers, and recent work before the interview.` : "Confirm company context from the source page or company website.",
+          "Prepare one question about team workflow, success metrics, and how this role contributes to business outcomes.",
+        ],
     prep_advice: cleanBriefItems(brief.prep_advice).length
       ? cleanBriefItems(brief.prep_advice)
       : [
@@ -3114,6 +3197,24 @@ function sanitizeJobBrief(brief = {}, detail = {}, job = {}) {
           "Practice connecting your projects to the company’s real work and role outcomes.",
         ],
   };
+}
+
+function extractResumeKeywords(description = "") {
+  const keywords = ["Python", "JavaScript", "TypeScript", "React", "SQL", "PostgreSQL", "API", "REST", "Docker", "AWS", "C#", ".NET", "Angular", "communication", "project management", "client", "analytics", "testing", "design", "estimating"];
+  const lower = description.toLowerCase();
+  const found = keywords.filter((keyword) => lower.includes(keyword.toLowerCase()));
+  return found.length ? found.slice(0, 12).map((keyword) => `Mention ${keyword} only where you can connect it to a real example.`) : ["Mirror the clearest tools, responsibilities, and soft-skill words from the posting in your prep stories."];
+}
+
+function fallbackLikelyQuestions(roleTitle, requirements = [], responsibilities = []) {
+  const topic = requirements[0] || responsibilities[0] || "this role";
+  return [
+    `Why are you interested in the ${roleTitle} position?`,
+    `Walk me through a project or experience that proves you can handle ${topic}.`,
+    "Tell me about a time you learned a new tool quickly and used it on real work.",
+    "How do you prioritize when multiple tasks or stakeholders need attention?",
+    "What would you do in your first month to become useful to this team?",
+  ];
 }
 
 function cleanBriefItems(items, limit = 8) {
@@ -3243,7 +3344,7 @@ function JobsView({ jobs, onSelectJob, onOpenDescription, menuId, onToggleMenu, 
   );
 }
 
-function PrepPlanView({ plan, savedPlans, selectedPlanDay, setSelectedPlanDay, completedTasks, toggleTaskDone, loadPrepPlan, removePrepPlan, generateExam, startStudyTask, loading, loadingStudyTaskId, loadingExamTaskId, jobMarkers }) {
+function PrepPlanView({ plan, savedPlans, selectedPlanDay, setSelectedPlanDay, completedTasks, toggleTaskDone, loadPrepPlan, removePrepPlan, generateExam, startStudyTask, isStudyNoteGenerated, loading, loadingStudyTaskId, loadingExamTaskId, jobMarkers }) {
   const planDays = buildPlanMilestones(plan, "");
   const selectedTasks = buildDailyStudyTasks(plan, selectedPlanDay);
   return (
@@ -3282,7 +3383,7 @@ function PrepPlanView({ plan, savedPlans, selectedPlanDay, setSelectedPlanDay, c
                       <small>{task.topics?.join(", ")}</small>
                       <em>{task.task_type === "practice_exam" ? "Practice exam" : "Study notes"}</em>
                       <button type="button" onClick={() => startStudyTask(task)} disabled={isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId)}>
-                        {isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) ? <><Loader2 className="spin" size={15} /> Generating...</> : "Start"}
+                        {isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) ? <><Loader2 className="spin" size={15} /> Generating...</> : isStudyNoteGenerated?.(task) ? "Open" : "Start"}
                       </button>
                     </div>
                   ))}
@@ -4359,6 +4460,18 @@ function isTaskComplete(task, completedTasks) {
 function isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) {
   const key = task.id || task.title;
   return task.task_type === "practice_exam" ? hasLoadingId(loadingExamTaskId, key) : hasLoadingId(loadingStudyTaskId, key);
+}
+
+function minInterviewDateTime() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function normalizeFutureInterviewDate(value) {
+  if (!value) return value;
+  const minDate = minInterviewDateTime();
+  return value < minDate ? minDate : value;
 }
 
 function hasLoadingId(value, key) {

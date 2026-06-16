@@ -324,7 +324,11 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
                 "content": (
                     "You turn job descriptions into structured interview-prep briefs. "
                     "Return only JSON with keys: company, role_title, overview, requirements, responsibilities, "
-                    "looking_for, interview_signals, prep_advice. Use concise but specific bullets. "
+                    "looking_for, interview_signals, must_prepare, resume_keywords, candidate_positioning, "
+                    "possible_interview_questions, red_flags_to_avoid, company_context, prep_advice. "
+                    "Think like a senior interview coach: identify what the candidate must understand, "
+                    "what the employer is truly testing, how to position their background, likely screening "
+                    "and interview questions, and what mistakes would weaken the interview. Use concise but specific bullets. "
                     "Detect company from job-board headers if present. Every list field must be an array of "
                     "complete phrases or sentences. Never return one long string for a list field, and never "
                     "return single-letter bullets."
@@ -344,6 +348,12 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
     lower = description.lower()
     looking_for = _json_list(data.get("looking_for"), 6) or _fallback_profile(lower, requirements, responsibilities)
     interview_signals = _json_list(data.get("interview_signals"), 6) or fallback.interview_signals
+    must_prepare = _json_list(data.get("must_prepare"), 10) or fallback.must_prepare
+    resume_keywords = _json_list(data.get("resume_keywords"), 12) or fallback.resume_keywords
+    candidate_positioning = _json_list(data.get("candidate_positioning"), 8) or fallback.candidate_positioning
+    possible_interview_questions = _json_list(data.get("possible_interview_questions"), 10) or fallback.possible_interview_questions
+    red_flags_to_avoid = _json_list(data.get("red_flags_to_avoid"), 8) or fallback.red_flags_to_avoid
+    company_context = _json_list(data.get("company_context"), 8) or fallback.company_context
     prep_advice = _json_list(data.get("prep_advice"), 6) or fallback.prep_advice
 
     return JobDescriptionBrief(
@@ -354,6 +364,12 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
         responsibilities=responsibilities,
         looking_for=looking_for,
         interview_signals=interview_signals,
+        must_prepare=must_prepare,
+        resume_keywords=resume_keywords,
+        candidate_positioning=candidate_positioning,
+        possible_interview_questions=possible_interview_questions,
+        red_flags_to_avoid=red_flags_to_avoid,
+        company_context=company_context,
         prep_advice=prep_advice,
         source="openai",
     )
@@ -372,7 +388,10 @@ def _description_answer_with_openai(title: str, description: str, question: str,
                 "content": (
                     "Answer questions about a job description for an interview candidate. "
                     "Return only JSON with keys: answer, interview_use, next_steps. "
-                    "Be specific to the role and explain how to use the answer in an interview."
+                    "Use only the job description and the user's question. Be specific to the role, "
+                    "explain what the candidate should say or prepare, give practical examples when useful, "
+                    "and explain exactly how to turn the answer into an interview response. If the description "
+                    "does not contain enough evidence, say what to verify instead of inventing facts."
                 ),
             },
             {
@@ -405,6 +424,19 @@ def _heuristic_brief(title: str, description: str, source_url: str | None, sourc
         responsibilities = [line for line in lines if re.search(r"(?i)^(assist|create|develop|prepare|coordinate|support|collaborate|produce|manage)\b", line)][:6]
     if not looking_for:
         looking_for = _fallback_profile(lower, requirements, responsibilities)
+    signals = [
+        "Prepare concrete examples that prove you can do the listed responsibilities.",
+        "Expect questions about tools, workflow, communication, prioritization, and project ownership.",
+        "Connect every answer back to the company context and the role outcomes.",
+    ]
+    keywords = _keyword_summary(lower)
+    possible_questions = [
+        f"Why are you interested in the {role} role?",
+        f"Which past project or experience best proves you can handle {requirements[0] if requirements else 'the core responsibilities'}?",
+        "Tell me about a time you learned a new tool quickly and used it on real work.",
+        "How would you prioritize when design, technical, and communication tasks compete for time?",
+        "What would you do in your first month to become useful to this team?",
+    ]
     return JobDescriptionBrief(
         company=company,
         role_title=role,
@@ -412,10 +444,23 @@ def _heuristic_brief(title: str, description: str, source_url: str | None, sourc
         requirements=requirements[:8],
         responsibilities=responsibilities[:8],
         looking_for=looking_for[:6],
-        interview_signals=[
-            "Prepare concrete examples that prove you can do the listed responsibilities.",
-            "Expect questions about tools, workflow, communication, prioritization, and project ownership.",
-            "Connect every answer back to the company context and the role outcomes.",
+        interview_signals=signals,
+        must_prepare=[
+            *(requirements[:4] or keywords[:4]),
+            "A concise story that connects your experience to the most repeated responsibility in the posting.",
+            "One thoughtful question about how success is measured in this role.",
+        ][:8],
+        resume_keywords=[f"Mirror {keyword} only where you can support it with a real example." for keyword in keywords[:8]],
+        candidate_positioning=_fallback_profile(lower, requirements, responsibilities),
+        possible_interview_questions=possible_questions,
+        red_flags_to_avoid=[
+            "Do not answer with generic enthusiasm without naming the actual responsibilities in the job post.",
+            "Do not claim tool expertise unless you can describe a project, class, or task where you used it.",
+            "Do not ignore communication and ownership signals if the role involves cross-functional work.",
+        ],
+        company_context=[
+            f"Verify {company}'s product, customers, and recent work before the interview." if company else "Verify company context from the source page or company website.",
+            "Prepare a question about mentorship, team workflow, and what strong performance looks like.",
         ],
         prep_advice=[
             "Create one story for each major responsibility.",
