@@ -266,6 +266,51 @@ def _clean_company_candidate(value: str) -> str:
     return cleaned
 
 
+def _json_list(value: Any, limit: int = 8) -> list[str]:
+    """Normalize AI list fields without accidentally turning a string into letters."""
+
+    if isinstance(value, list):
+        raw_items = value
+    elif isinstance(value, str):
+        raw_items = re.split(r"(?:\n+|•|;|\s+-\s+)", value)
+    else:
+        raw_items = []
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = re.sub(r"\s+", " ", str(item or "")).strip(" .:-•")
+        if len(text) < 6 or not re.search(r"[A-Za-z]{3}", text):
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _fallback_profile(lower: str, requirements: list[str], responsibilities: list[str]) -> list[str]:
+    themes: list[str] = []
+    if any(term in lower for term in ["software", "developer", ".net", "sql", "angular", "api", "c#"]):
+        themes.append("A candidate who can connect technical tools to reliable, maintainable software outcomes.")
+    if any(term in lower for term in ["client", "customer", "communication", "collaborate", "stakeholder"]):
+        themes.append("Someone who communicates clearly with teammates or stakeholders and can explain tradeoffs.")
+    if any(term in lower for term in ["high-volume", "scalable", "mission-critical", "robust", "performance"]):
+        themes.append("Evidence of practical judgment around scalability, reliability, testing, and production quality.")
+    if requirements:
+        themes.append(f"Hands-on familiarity with core requirements such as {', '.join(requirements[:3])}.")
+    if responsibilities:
+        themes.append(f"Confidence owning work similar to: {responsibilities[0]}.")
+    return themes[:6] or [
+        "A candidate who can prove they understand the role through concrete project or work examples.",
+        "Someone who can learn quickly, communicate clearly, and connect past experience to the posted responsibilities.",
+        "Interview answers that show practical decision-making, not just memorized definitions.",
+    ]
+
+
 def _brief_with_openai(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
     from openai import OpenAI
 
@@ -280,7 +325,9 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
                     "You turn job descriptions into structured interview-prep briefs. "
                     "Return only JSON with keys: company, role_title, overview, requirements, responsibilities, "
                     "looking_for, interview_signals, prep_advice. Use concise but specific bullets. "
-                    "Detect company from job-board headers if present."
+                    "Detect company from job-board headers if present. Every list field must be an array of "
+                    "complete phrases or sentences. Never return one long string for a list field, and never "
+                    "return single-letter bullets."
                 ),
             },
             {
@@ -291,15 +338,23 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
         temperature=0.2,
     )
     data = json.loads(completion.choices[0].message.content or "{}")
+    fallback = _heuristic_brief(title, description, source_url, source="heuristic_fallback")
+    requirements = _json_list(data.get("requirements"), 8) or fallback.requirements
+    responsibilities = _json_list(data.get("responsibilities"), 8) or fallback.responsibilities
+    lower = description.lower()
+    looking_for = _json_list(data.get("looking_for"), 6) or _fallback_profile(lower, requirements, responsibilities)
+    interview_signals = _json_list(data.get("interview_signals"), 6) or fallback.interview_signals
+    prep_advice = _json_list(data.get("prep_advice"), 6) or fallback.prep_advice
+
     return JobDescriptionBrief(
         company=data.get("company") or infer_company_name("", description, source_url),
         role_title=data.get("role_title") or title,
         overview=data.get("overview") or f"Preparation brief for {title}.",
-        requirements=list(data.get("requirements") or []),
-        responsibilities=list(data.get("responsibilities") or []),
-        looking_for=list(data.get("looking_for") or []),
-        interview_signals=list(data.get("interview_signals") or []),
-        prep_advice=list(data.get("prep_advice") or []),
+        requirements=requirements,
+        responsibilities=responsibilities,
+        looking_for=looking_for,
+        interview_signals=interview_signals,
+        prep_advice=prep_advice,
         source="openai",
     )
 
@@ -331,7 +386,7 @@ def _description_answer_with_openai(title: str, description: str, question: str,
     return JobDescriptionAskResponse(
         answer=data.get("answer") or "Focus on the role requirements and prepare a concrete example.",
         interview_use=data.get("interview_use") or "Use this as a concise interview talking point connected to the job description.",
-        next_steps=list(data.get("next_steps") or []),
+        next_steps=_json_list(data.get("next_steps"), 5),
         source="openai",
     )
 
@@ -348,6 +403,8 @@ def _heuristic_brief(title: str, description: str, source_url: str | None, sourc
         requirements = _keyword_summary(lower)
     if not responsibilities:
         responsibilities = [line for line in lines if re.search(r"(?i)^(assist|create|develop|prepare|coordinate|support|collaborate|produce|manage)\b", line)][:6]
+    if not looking_for:
+        looking_for = _fallback_profile(lower, requirements, responsibilities)
     return JobDescriptionBrief(
         company=company,
         role_title=role,

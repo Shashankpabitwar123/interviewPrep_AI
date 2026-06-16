@@ -8,7 +8,7 @@
   const state = {
     open: false,
     panelOpen: false,
-    mode: "selected",
+    mode: "manual",
     dragging: false,
     startX: 0,
     startY: 0,
@@ -40,7 +40,7 @@
     </button>
     <div class="ipai-radial" aria-hidden="true">
       <button type="button" data-action="auto" title="Automatically detect the job description">Auto copy description</button>
-      <button type="button" data-action="selected" title="Copy the text you highlighted">Copy selected text</button>
+      <button type="button" data-action="manual" title="Paste the job description yourself">Paste manually</button>
       <button type="button" data-action="url" title="Copy the current page URL">Copy URL</button>
     </div>
     <section class="ipai-panel" aria-label="InterviewPrep AI capture panel">
@@ -51,7 +51,7 @@
         </div>
         <button type="button" data-action="close" aria-label="Close">×</button>
       </header>
-      <textarea placeholder="Auto-copy, selected text, or URL will appear here. You can edit before saving."></textarea>
+      <textarea placeholder="Auto-copy, manual paste, or URL will appear here. You can edit before saving."></textarea>
       <div class="ipai-capture-meta">
         <input class="ipai-title" placeholder="Job title (AI can detect)" />
         <input class="ipai-date" type="datetime-local" />
@@ -110,7 +110,7 @@
     root.addEventListener("click", async (event) => {
       const action = event.target?.dataset?.action;
       if (!action) return;
-      if (["auto", "selected", "url"].includes(action)) await capture(action);
+      if (["auto", "manual", "url"].includes(action)) await capture(action);
       if (action === "save") await saveJob();
       if (action === "plan") await generatePlan();
       if (action === "close") setPanel(false);
@@ -123,6 +123,12 @@
 
     extensionApi.runtime.onMessage.addListener((message) => {
       if (message?.type === "settingsUpdated") applySettings(message.settings);
+      if (message?.type === "captureEvent" && isInterviewPrepApp()) {
+        window.postMessage({
+          source: "interviewprep-ai-extension",
+          ...(message.payload || {}),
+        }, window.location.origin);
+      }
     });
   }
 
@@ -230,11 +236,11 @@
     setStatus("Capturing...");
     if (mode === "auto") {
       state.description = pageText();
-      if (!state.description) setStatus("Could not auto-detect text. Highlight the description or copy the URL.");
+      if (!state.description) setStatus("Could not auto-detect text. Paste the description manually or copy the URL.");
     }
-    if (mode === "selected") {
-      state.description = selectedText();
-      if (!state.description) setStatus("No selected text found. Highlight the job description first or use Auto copy description.");
+    if (mode === "manual") {
+      state.description = "";
+      setStatus("Paste the job description here, then save the job or generate a prep plan.");
     }
     if (mode === "url") {
       state.description = window.location.href;
@@ -302,7 +308,7 @@
   function updateSubtitle() {
     const modeLabels = {
       auto: "auto description",
-      selected: "selected text",
+      manual: "manual paste",
       url: "URL",
     };
     root.querySelector(".ipai-panel-subtitle").textContent = `${modeLabels[state.mode] || "capture"} • ${textarea.value.length.toLocaleString()} chars`;

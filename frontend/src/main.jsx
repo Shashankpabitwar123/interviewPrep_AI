@@ -53,6 +53,7 @@ const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const EXTENSION_GUIDE_URL = "https://github.com/Shashankpabitwar123/interviewPrep_AI/tree/main/browser-extension";
 const EXTENSION_WEB_SOURCE = "interviewprep-ai-web";
 const EXTENSION_RESPONSE_SOURCE = "interviewprep-ai-extension";
+const JOB_BRIEF_CACHE_KEY = "interviewprep_job_briefs";
 
 const EXAM_PRESETS = {
   easy: { difficulty: "easy", questionCount: 10, timeLimit: 5, questionTypes: ["auto"] },
@@ -196,7 +197,7 @@ function App() {
     return fetch(`${API_URL}${path}`, { ...options, headers });
   }
 
-  function requestExtension(action, payload = {}, timeoutMs = 900) {
+  function requestExtension(action, payload = {}, timeoutMs = 1500) {
     return new Promise((resolve) => {
       const requestId = `ipai-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const timer = window.setTimeout(() => {
@@ -275,6 +276,42 @@ function App() {
   useEffect(() => {
     syncWebsiteSessionToExtension();
   }, [user?.id, user?.email, authToken]);
+
+  useEffect(() => {
+    function handleExtensionEvent(event) {
+      if (event.source !== window) return;
+      const message = event.data || {};
+      if (message.source !== EXTENSION_RESPONSE_SOURCE || !message.event) return;
+
+      if (message.event === "captureStatus") {
+        setStatus(message.status || (message.action === "plan" ? "Generating Prep Plan From Bubble" : "Saving Job From Bubble"));
+        return;
+      }
+
+      if (message.event === "captureError") {
+        setStatus(`Extension Error: ${message.status || "Capture failed"}`);
+        return;
+      }
+
+      if (message.event === "captureCompleted") {
+        const isPlan = message.action === "plan";
+        setStatus(isPlan ? "Prep Plan Saved From Bubble" : "Job Saved From Bubble");
+        playGeneratedSound(soundVolume);
+        refreshJobs();
+        refreshSavedPlans();
+        addActivity({
+          type: isPlan ? "plan" : "job",
+          title: isPlan ? "Prep plan generated from bubble" : "Job saved from bubble",
+          detail: message.title || "Captured job",
+          badge: "extension",
+          target: isPlan ? "prep" : "jobs",
+        });
+      }
+    }
+
+    window.addEventListener("message", handleExtensionEvent);
+    return () => window.removeEventListener("message", handleExtensionEvent);
+  }, [soundVolume, jobMarkers, archivedJobIds]);
 
   useEffect(() => {
     if (!savedPlans.length) {
@@ -684,6 +721,18 @@ function App() {
     setJobBriefLoading(true);
     setJobBriefAnswer(null);
     setJobBriefQuestion("");
+    const cachedBrief = loadLocalMap(JOB_BRIEF_CACHE_KEY)[String(job.id)];
+    if (cachedBrief?.brief) {
+      setJobBrief({
+        job: cachedBrief.job || job,
+        brief: sanitizeJobBrief(cachedBrief.brief, cachedBrief.job || {}, job),
+        error: "",
+      });
+      setJobBriefLoading(false);
+      addActivity({ type: "job", title: "Job description reviewed", detail: cachedBrief.job?.title || job.title, badge: "saved", target: "jobs" });
+      return;
+    }
+
     setJobBrief({
       job,
       brief: null,
@@ -697,17 +746,23 @@ function App() {
       if (!detailResponse.ok) throw new Error(`Job returned ${detailResponse.status}`);
       if (!briefResponse.ok) throw new Error(`Brief returned ${briefResponse.status}`);
       const detail = await detailResponse.json();
-      const brief = await briefResponse.json();
+      const rawBrief = await briefResponse.json();
+      const cleanJob = {
+        ...job,
+        title: detail.title || job.title,
+        company: rawBrief.company || inferCompanyName(job.company || "", detail.description || "", detail.source_url || job.source_url || ""),
+        description: detail.description || "",
+        source_url: detail.source_url || job.source_url || "",
+      };
+      const brief = sanitizeJobBrief(rawBrief, cleanJob, job);
       setJobBrief({
-        job: {
-          ...job,
-          title: detail.title || job.title,
-          company: brief.company || inferCompanyName(job.company || "", detail.description || "", detail.source_url || job.source_url || ""),
-          description: detail.description || "",
-          source_url: detail.source_url || job.source_url || "",
-        },
+        job: cleanJob,
         brief,
         error: "",
+      });
+      saveLocalMap(JOB_BRIEF_CACHE_KEY, {
+        ...loadLocalMap(JOB_BRIEF_CACHE_KEY),
+        [String(job.id)]: { job: cleanJob, brief, cachedAt: new Date().toISOString() },
       });
       addActivity({ type: "job", title: "Job description reviewed", detail: detail.title || job.title, badge: brief.source || "", target: "jobs" });
     } catch (error) {
@@ -2318,18 +2373,31 @@ function PlanStepper({ days, selectedDay, onSelectDay }) {
 function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay, compact = false, showArrows = true }) {
   const scrollerRef = useRef(null);
   const scrollTimerRef = useRef(null);
+  const programmaticScrollRef = useRef(false);
+  const userScrollRef = useRef(false);
   function move(direction) {
+    userScrollRef.current = true;
     scrollerRef.current?.scrollBy({ left: direction * 500, behavior: "smooth" });
   }
 
   useEffect(() => {
     const selectedCard = scrollerRef.current?.querySelector(`[data-day="${selectedDay}"]`);
+    if (!selectedCard) return undefined;
+    programmaticScrollRef.current = true;
     selectedCard?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const timer = window.setTimeout(() => {
+      programmaticScrollRef.current = false;
+    }, 420);
+    return () => window.clearTimeout(timer);
   }, [selectedDay, days.length]);
+
+  function markUserScroll() {
+    if (!programmaticScrollRef.current) userScrollRef.current = true;
+  }
 
   function syncSelectedDayFromScroll() {
     const scroller = scrollerRef.current;
-    if (!scroller) return;
+    if (!scroller || programmaticScrollRef.current || !userScrollRef.current) return;
     window.clearTimeout(scrollTimerRef.current);
     scrollTimerRef.current = window.setTimeout(() => {
       const cards = [...scroller.querySelectorAll("[data-day]")];
@@ -2342,6 +2410,7 @@ function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay,
       }, null);
       const day = Number(closest?.card?.dataset?.day);
       if (day && day !== selectedDay) onSelectDay(day);
+      userScrollRef.current = false;
     }, 120);
   }
 
@@ -2352,7 +2421,14 @@ function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay,
           <ChevronRight size={18} />
         </button>
       )}
-      <div className={`plan-cards ${compact ? "compact-plan-cards" : ""}`} ref={scrollerRef} onScroll={syncSelectedDayFromScroll}>
+      <div
+        className={`plan-cards ${compact ? "compact-plan-cards" : ""}`}
+        ref={scrollerRef}
+        onScroll={syncSelectedDayFromScroll}
+        onWheel={markUserScroll}
+        onPointerDown={markUserScroll}
+        onTouchStart={markUserScroll}
+      >
         {days.map((day, index) => (
           <PlanDayCard
             key={day.day}
@@ -2997,7 +3073,7 @@ function JobDescriptionModal({ jobBrief, loading, question, setQuestion, answer,
 }
 
 function JobBriefSection({ title, items = [], fallback }) {
-  const cleanItems = items.filter(Boolean);
+  const cleanItems = cleanBriefItems(items);
   return (
     <section className="job-brief-card">
       <h3>{title}</h3>
@@ -3010,6 +3086,88 @@ function JobBriefSection({ title, items = [], fallback }) {
       )}
     </section>
   );
+}
+
+function sanitizeJobBrief(brief = {}, detail = {}, job = {}) {
+  const roleTitle = brief.role_title || detail.title || job.title || "Saved job";
+  const company = brief.company || detail.company || job.company || inferCompanyName("", detail.description || job.description || "", detail.source_url || job.source_url || "");
+  const requirements = cleanBriefItems(brief.requirements);
+  const responsibilities = cleanBriefItems(brief.responsibilities);
+  return {
+    ...brief,
+    company,
+    role_title: roleTitle,
+    overview: cleanBriefText(brief.overview) || `This posting is for ${roleTitle}${company ? ` at ${company}` : ""}. Review the requirements, responsibilities, and interview signals before building your prep plan.`,
+    requirements: requirements.length ? requirements : fallbackRequirements(detail.description || job.description || ""),
+    responsibilities: responsibilities.length ? responsibilities : fallbackResponsibilities(detail.description || job.description || ""),
+    looking_for: cleanBriefItems(brief.looking_for).length
+      ? cleanBriefItems(brief.looking_for)
+      : fallbackLookingFor(detail.description || job.description || "", requirements, responsibilities),
+    interview_signals: cleanBriefItems(brief.interview_signals).length
+      ? cleanBriefItems(brief.interview_signals)
+      : fallbackInterviewSignals(roleTitle),
+    prep_advice: cleanBriefItems(brief.prep_advice).length
+      ? cleanBriefItems(brief.prep_advice)
+      : [
+          "Prepare one concrete story for each major responsibility.",
+          "Review the required tools and explain where you used similar skills.",
+          "Practice connecting your projects to the company’s real work and role outcomes.",
+        ],
+  };
+}
+
+function cleanBriefItems(items, limit = 8) {
+  const rawItems = Array.isArray(items) ? items : String(items || "").split(/\n+|•|;|\s-\s/);
+  const seen = new Set();
+  return rawItems
+    .map((item) => cleanBriefText(item))
+    .filter((item) => item.length >= 6 && /[A-Za-z]{3}/.test(item))
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function cleanBriefText(value) {
+  return String(value || "").replace(/\s+/g, " ").replace(/^[•\-.:\s]+/, "").trim();
+}
+
+function fallbackRequirements(description) {
+  const text = description || "";
+  const skills = ["SQL", "API", "C#", ".NET", "Angular", "JavaScript", "Python", "communication", "problem-solving"].filter((skill) => text.toLowerCase().includes(skill.toLowerCase()));
+  return skills.length
+    ? skills.slice(0, 6).map((skill) => `Working knowledge of ${skill} as it appears in the job description.`)
+    : ["Ability to connect your past projects, coursework, or work experience to the responsibilities in the posting."];
+}
+
+function fallbackResponsibilities(description) {
+  const lines = String(description || "").split(/\r?\n/).map((line) => cleanBriefText(line)).filter(Boolean);
+  const actionLines = lines.filter((line) => /^(build|develop|create|support|collaborate|prepare|coordinate|plan|assist|manage|utilize|produce)\b/i.test(line));
+  return actionLines.slice(0, 6).length ? actionLines.slice(0, 6) : ["Explain how you would approach the main work, communicate progress, and validate quality for this role."];
+}
+
+function fallbackLookingFor(description, requirements = [], responsibilities = []) {
+  const lower = String(description || "").toLowerCase();
+  const items = [];
+  if (lower.includes("high-volume") || lower.includes("robust") || lower.includes("scalable")) items.push("A candidate who understands reliability, scalability, and how to build software that holds up in production.");
+  if (lower.includes("collabor") || lower.includes("communication") || lower.includes("stakeholder")) items.push("Someone who can communicate clearly, collaborate with others, and explain technical tradeoffs.");
+  if (requirements.length) items.push(`Practical experience with the core requirements, especially ${requirements.slice(0, 3).join(", ")}.`);
+  if (responsibilities.length) items.push(`Confidence taking ownership of work similar to: ${responsibilities[0]}.`);
+  return items.slice(0, 6).length ? items.slice(0, 6) : [
+    "A candidate who can prove they understand the role through concrete examples.",
+    "Someone who can learn quickly, communicate clearly, and connect experience to the posted responsibilities.",
+  ];
+}
+
+function fallbackInterviewSignals(roleTitle) {
+  return [
+    `Expect questions that test how your experience connects to the ${roleTitle} responsibilities.`,
+    "Prepare to explain tradeoffs, implementation choices, and how you validate your work.",
+    "Use specific examples instead of general claims whenever possible.",
+  ];
 }
 
 function JobsView({ jobs, onSelectJob, onOpenDescription, menuId, onToggleMenu, onRequestDelete, selectedJobIds, setSelectedJobIds, onRequestBulkDelete, loading, savedPlans, onOpenPlan, removePrepPlan, jobMarkers }) {

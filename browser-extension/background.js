@@ -111,31 +111,46 @@ async function setBubbleEnabled(enabled) {
 }
 
 async function saveJob(payload, sender) {
-  const response = await authedFetch("/jobs/analyze", {
-    method: "POST",
-    body: JSON.stringify(normalizeJobPayload(payload, sender)),
-  });
-  const saved = await response.json();
-  await rememberCapture("job", saved.role_title || payload.jobTitle || "Saved job");
-  return { saved };
+  const normalized = normalizeJobPayload(payload, sender);
+  const title = normalized.job_title || payload.jobTitle || "Captured job";
+  await broadcastCaptureEvent({ event: "captureStatus", action: "job", status: "Saving job from bubble", title });
+  try {
+    const response = await authedFetch("/jobs/analyze", {
+      method: "POST",
+      body: JSON.stringify(normalized),
+    });
+    const saved = await response.json();
+    await rememberCapture("job", saved.role_title || title);
+    return { saved };
+  } catch (error) {
+    await broadcastCaptureEvent({ event: "captureError", action: "job", status: error.message || "Could not save job.", title });
+    throw error;
+  }
 }
 
 async function generatePlan(payload, sender) {
   const normalized = normalizeJobPayload(payload, sender);
-  const response = await authedFetch("/prep-plans", {
-    method: "POST",
-    body: JSON.stringify({
-      job_title: normalized.job_title,
-      job_description: normalized.job_description,
-      source_url: normalized.source_url,
-      interview_at: payload.interviewAt || defaultInterviewDate(),
-      hours_per_day: Number(payload.hoursPerDay || 3),
-      comfort_level: payload.comfortLevel || "intermediate",
-    }),
-  });
-  const plan = await response.json();
-  await rememberCapture("plan", plan.job_title || normalized.job_title || "Prep plan");
-  return { plan };
+  const title = normalized.job_title || "Captured job";
+  await broadcastCaptureEvent({ event: "captureStatus", action: "plan", status: "Generating prep plan from bubble", title });
+  try {
+    const response = await authedFetch("/prep-plans", {
+      method: "POST",
+      body: JSON.stringify({
+        job_title: normalized.job_title,
+        job_description: normalized.job_description,
+        source_url: normalized.source_url,
+        interview_at: payload.interviewAt || defaultInterviewDate(),
+        hours_per_day: Number(payload.hoursPerDay || 3),
+        comfort_level: payload.comfortLevel || "intermediate",
+      }),
+    });
+    const plan = await response.json();
+    await rememberCapture("plan", plan.job_title || normalized.job_title || "Prep plan");
+    return { plan };
+  } catch (error) {
+    await broadcastCaptureEvent({ event: "captureError", action: "plan", status: error.message || "Could not generate prep plan.", title });
+    throw error;
+  }
 }
 
 async function authedFetch(path, options = {}) {
@@ -165,13 +180,27 @@ async function openApp(path = "") {
 }
 
 async function rememberCapture(type, title) {
+  const at = new Date().toISOString();
   await extensionApi.storage.local.set({
     lastCapture: {
       type,
       title,
-      at: new Date().toISOString(),
+      at,
     },
   });
+  await broadcastCaptureEvent({
+    event: "captureCompleted",
+    action: type,
+    title,
+    at,
+  });
+}
+
+async function broadcastCaptureEvent(payload) {
+  const tabs = await extensionApi.tabs.query({});
+  await Promise.all(tabs.map((tab) => (
+    tab.id ? sendTabMessage(tab.id, { type: "captureEvent", payload }) : null
+  )));
 }
 
 async function broadcastSettings(settings) {
@@ -193,7 +222,7 @@ function sendTabMessage(tabId, message) {
 function normalizeJobPayload(payload, sender) {
   const description = String(payload.description || "").trim();
   const url = payload.sourceUrl || sender?.tab?.url || "";
-  if (!description && !url) throw new Error("Capture selected text, page text, or a URL first.");
+  if (!description && !url) throw new Error("Paste a job description, auto-copy page text, or save the URL first.");
   return {
     job_title: payload.jobTitle || sender?.tab?.title || "Auto-detect role",
     job_description: description || undefined,
