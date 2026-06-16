@@ -18,6 +18,7 @@
     status: "",
     hoverCloseTimer: null,
     toastTimer: null,
+    lastSelection: "",
     settings: { bubbleEnabled: true },
   };
 
@@ -91,8 +92,10 @@
     window.addEventListener("pointermove", drag);
     window.addEventListener("pointerup", stopDrag);
     document.addEventListener("pointerdown", closeFromOutside, true);
+    document.addEventListener("selectionchange", rememberSelection);
 
     hoverTargets.forEach((target) => {
+      target.addEventListener("pointerdown", (event) => event.preventDefault());
       target.addEventListener("pointerenter", openFromHover);
       target.addEventListener("mouseenter", openFromHover);
       target.addEventListener("pointerleave", scheduleHoverClose);
@@ -178,7 +181,7 @@
   }
 
   function isPointerOverCaptureControls() {
-    return Boolean(root.querySelector(".ipai-bubble:hover, .ipai-radial button:hover"));
+    return Boolean(root.querySelector(".ipai-bubble:hover, .ipai-radial:hover, .ipai-panel:hover"));
   }
 
   function closeFromOutside(event) {
@@ -210,6 +213,12 @@
     const panelTop = clamp(state.bubbleY - 34, 16, window.innerHeight - 430);
     root.style.setProperty("--ipai-panel-x", `${clamp(panelLeft, 16, window.innerWidth - 390)}px`);
     root.style.setProperty("--ipai-panel-y", `${panelTop}px`);
+  }
+
+  function rememberSelection() {
+    if (root.contains(document.activeElement)) return;
+    const text = String(window.getSelection?.() || "").trim();
+    if (text) state.lastSelection = text.slice(0, 25000);
   }
 
   async function capture(mode) {
@@ -267,7 +276,8 @@
   }
 
   function selectedText() {
-    return String(window.getSelection?.() || "").trim().slice(0, 25000);
+    const text = String(window.getSelection?.() || "").trim();
+    return (text || state.lastSelection || "").slice(0, 25000);
   }
 
   function pageText() {

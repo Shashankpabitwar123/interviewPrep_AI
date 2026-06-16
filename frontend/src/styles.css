@@ -1793,6 +1793,14 @@ button {
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.14);
 }
 
+.settings-dismiss-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1999;
+  background: transparent;
+  cursor: default;
+}
+
 .settings-popover header {
   display: flex;
   align-items: center;
@@ -3647,7 +3655,7 @@ textarea {
 
 .saved-row {
   display: grid;
-  grid-template-columns: 10px 38px minmax(0, 1fr) 88px auto 28px;
+  grid-template-columns: 10px 38px minmax(0, 1fr) 78px minmax(82px, auto) auto 28px;
   gap: 12px;
   align-items: center;
   min-height: 70px;
@@ -3656,7 +3664,7 @@ textarea {
 }
 
 .saved-row.selectable {
-  grid-template-columns: 22px 10px 38px minmax(0, 1fr) 88px auto 28px;
+  grid-template-columns: 22px 10px 38px minmax(0, 1fr) 78px minmax(82px, auto) auto 28px;
 }
 
 .saved-row > input[type="checkbox"] {
@@ -3764,6 +3772,26 @@ textarea {
   text-decoration: none;
 }
 
+.description-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 999px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.description-chip:hover {
+  color: #fff;
+  background: var(--blue);
+}
+
 .more {
   display: grid;
   place-items: center;
@@ -3808,6 +3836,130 @@ textarea {
 
 .job-action-menu button:hover {
   background: #fff1f1;
+}
+
+.job-brief-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1120px, calc(100vw - 44px));
+  max-height: calc(100vh - 44px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.2);
+}
+
+.job-brief-shell .exam-topbar {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.job-brief-body {
+  display: grid;
+  gap: 16px;
+  overflow: auto;
+  padding: 18px;
+  background: #f7faff;
+}
+
+.job-brief-loading,
+.job-brief-card,
+.job-brief-hero {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.job-brief-loading {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-height: 250px;
+  padding: 38px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.job-brief-loading strong {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.job-brief-hero {
+  display: grid;
+  gap: 8px;
+  padding: 22px;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(34, 197, 94, 0.08)),
+    #fff;
+}
+
+.job-brief-hero span {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.job-brief-hero h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 26px;
+}
+
+.job-brief-hero p,
+.job-brief-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.58;
+}
+
+.job-brief-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.job-brief-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.job-brief-card h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.job-brief-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: #344054;
+  line-height: 1.48;
+}
+
+.ask-job-card form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.job-brief-answer {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid rgba(34, 197, 94, 0.22);
+  border-radius: 10px;
+  color: #1f2937;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.job-brief-answer strong {
+  color: #166534;
 }
 
 .jobs-feature-toolbar {
@@ -4951,6 +5103,11 @@ footer {
 .theme-dark .note-editor-page,
 .theme-dark .note-empty-editor,
 .theme-dark .note-color-field,
+.theme-dark .job-brief-shell,
+.theme-dark .job-brief-loading,
+.theme-dark .job-brief-card,
+.theme-dark .job-brief-hero,
+.theme-dark .job-brief-answer,
 .theme-dark .exam-shell,
 .theme-dark .mock-interview-shell,
 .theme-dark .question-map,
@@ -4975,13 +5132,76 @@ footer {
   background: #101d35;
 }
 
+.theme-dark .description-chip {
+  color: #93c5fd;
+  border-color: rgba(22, 119, 255, 0.38);
+  background: rgba(22, 119, 255, 0.12);
+}
+
+.theme-dark .description-chip:hover {
+  color: #fff;
+  background: #1677ff;
+}
+
 .theme-dark .activity-row strong {
   color: var(--text);
 }
 
 .theme-dark .activity-row span,
-.theme-dark .activity-row small {
+.theme-dark .activity-row small,
+.theme-dark .analytics-dev-copy p,
+.theme-dark .capability-grid span,
+.theme-dark .job-brief-card p,
+.theme-dark .job-brief-hero p,
+.theme-dark .job-brief-card ul,
+.theme-dark .job-brief-loading span {
   color: var(--muted);
+}
+
+.theme-dark .analytics-dev-copy h2,
+.theme-dark .analytics-dev-grid article strong,
+.theme-dark .job-brief-loading strong,
+.theme-dark .job-brief-card h3,
+.theme-dark .job-brief-hero h2,
+.theme-dark .job-brief-answer,
+.theme-dark .job-brief-answer strong {
+  color: var(--text);
+}
+
+.theme-dark .analytics-dev-copy > span,
+.theme-dark .job-brief-hero span {
+  color: #93c5fd;
+  background: rgba(22, 119, 255, 0.16);
+}
+
+.theme-dark .job-brief-body {
+  background: #050914;
+}
+
+.theme-dark .job-brief-hero {
+  background:
+    linear-gradient(135deg, rgba(22, 119, 255, 0.14), rgba(34, 197, 94, 0.08)),
+    #0b1424;
+}
+
+.theme-dark .job-brief-answer {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.theme-dark .note-empty-editor .outline-action,
+.theme-dark .notes-composer .outline-action {
+  color: #dbeafe;
+  border-color: #263a5d;
+  background: #0f1729;
+}
+
+.theme-dark .note-empty-editor .outline-action:disabled,
+.theme-dark .notes-composer .outline-action:disabled {
+  color: #74829b;
+  border-color: #1d2941;
+  background: #0b1424;
+  opacity: 0.72;
 }
 
 .theme-dark .exam-modal-backdrop,

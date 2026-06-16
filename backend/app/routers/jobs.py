@@ -4,8 +4,21 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas.job_analysis import JobAnalysisRequest, JobAnalysisResponse, JobPostDetail, JobPostSummary
-from app.services.job_analyzer import analyze_job_description, infer_role_title
+from app.schemas.job_analysis import (
+    JobAnalysisRequest,
+    JobAnalysisResponse,
+    JobDescriptionAskRequest,
+    JobDescriptionAskResponse,
+    JobDescriptionBrief,
+    JobPostDetail,
+    JobPostSummary,
+)
+from app.services.job_analyzer import (
+    analyze_job_description,
+    answer_job_description_question,
+    build_job_description_brief,
+    infer_role_title,
+)
 from app.services.job_source import resolve_job_description
 from app.services.persistence import delete_job, get_job_detail, list_jobs, save_job_analysis
 from app.services.auth_service import get_request_user
@@ -48,6 +61,33 @@ def get_job(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.get("/{job_post_id}/brief", response_model=JobDescriptionBrief)
+def get_job_brief(
+    job_post_id: int,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> JobDescriptionBrief:
+    job = get_job_detail(db, job_post_id, current_user)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return build_job_description_brief(job.title, job.description, job.source_url, settings)
+
+
+@router.post("/{job_post_id}/ask", response_model=JobDescriptionAskResponse)
+def ask_job_description(
+    job_post_id: int,
+    request: JobDescriptionAskRequest,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> JobDescriptionAskResponse:
+    job = get_job_detail(db, job_post_id, current_user)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return answer_job_description_question(job.title, job.description, request.question, settings)
 
 
 @router.delete("/{job_post_id}", status_code=204)

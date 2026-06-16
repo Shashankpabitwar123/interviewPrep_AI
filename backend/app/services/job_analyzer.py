@@ -3,7 +3,13 @@ import re
 from typing import Any
 
 from app.config import Settings
-from app.schemas.job_analysis import InterviewFocus, JobAnalysisRequest, JobAnalysisResponse
+from app.schemas.job_analysis import (
+    InterviewFocus,
+    JobAnalysisRequest,
+    JobAnalysisResponse,
+    JobDescriptionAskResponse,
+    JobDescriptionBrief,
+)
 from app.services.planner import SKILL_KEYWORDS
 
 
@@ -70,6 +76,64 @@ def infer_role_title(provided_title: str, description: str, source_url: str | No
     return "Interview Role"
 
 
+def infer_company_name(provided_company: str | None, description: str, source_url: str | None = None) -> str:
+    clean_company = (provided_company or "").strip()
+    if clean_company and clean_company.lower() not in {"auto-detect company", "auto detect company"}:
+        return clean_company
+
+    header_company = _company_from_job_board_header(description or "")
+    if header_company:
+        return header_company
+
+    patterns = [
+        r"(?i)\b(?:company|employer|organization)\s*[:\-]\s*([A-Z][A-Za-z0-9&.' -]{1,60})(?:[\n\r.]|$)",
+        r"(?i)\b(?:about|join|at)\s+([A-Z][A-Za-z0-9&.' -]{1,45})(?:\s+is|\s+we|\s+as|,|\.|$)",
+        r"(?i)\b([A-Z][A-Za-z0-9&.' -]{1,45})\s+is\s+(?:looking|hiring|seeking)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, description or "")
+        candidate = _clean_company_candidate(match.group(1) if match else "")
+        if candidate:
+            return candidate
+
+    if source_url:
+        host = re.sub(r"^https?://", "", source_url).split("/")[0].lower()
+        parts = [part for part in host.split(".") if part]
+        ignored = {"www", "careers", "jobs", "boards", "apply", "greenhouse", "lever", "workdayjobs", "myworkdayjobs", "joinhandshake", "handshake"}
+        for part in parts:
+            if part not in ignored and "myworkdayjobs" not in part and len(part) > 2:
+                return part.replace("-", " ").title()
+
+    return ""
+
+
+def build_job_description_brief(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
+    if settings.openai_enabled:
+        try:
+            return _brief_with_openai(title, description, source_url, settings)
+        except Exception:
+            return _heuristic_brief(title, description, source_url, source="heuristic_fallback")
+    return _heuristic_brief(title, description, source_url, source="heuristic")
+
+
+def answer_job_description_question(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
+    if settings.openai_enabled:
+        try:
+            return _description_answer_with_openai(title, description, question, settings)
+        except Exception:
+            pass
+    return JobDescriptionAskResponse(
+        answer=(
+            f"For {title}, focus on the exact responsibilities in the description. "
+            f"A strong answer to your question should mention the role context, one practical example, "
+            f"and how you would prove you can handle that responsibility."
+        ),
+        interview_use="Turn it into a short STAR-style story: situation, action, result, then connect it back to the job requirements.",
+        next_steps=["Highlight the requirement you are unsure about.", "Prepare one project or class example for it.", "Ask a follow-up question about how the team uses it."],
+        source="heuristic",
+    )
+
+
 def _role_title_from_job_board_header(description: str) -> str:
     """Detect titles from pasted job-board blocks: company, industry, then role."""
 
@@ -128,6 +192,206 @@ def _role_title_from_job_board_header(description: str) -> str:
             return _clean_role_title(line)
 
     return ""
+
+
+def _company_from_job_board_header(description: str) -> str:
+    lines = [line.strip() for line in description.splitlines() if line.strip()]
+    skipped = {
+        "save",
+        "share",
+        "apply",
+        "at a glance",
+        "job",
+        "job description",
+        "full-time",
+        "part-time",
+    }
+    industry_markers = (
+        "architecture",
+        "planning",
+        "software",
+        "technology",
+        "health",
+        "finance",
+        "education",
+        "marketing",
+        "design",
+        "landscape",
+        "consulting",
+        "retail",
+    )
+    role_markers = (
+        "intern",
+        "engineer",
+        "developer",
+        "analyst",
+        "writer",
+        "designer",
+        "estimator",
+        "manager",
+        "specialist",
+        "coordinator",
+        "assistant",
+        "architect",
+    )
+    clean_lines = [
+        line for line in lines[:18]
+        if line.lower() not in skipped
+        and "logo" not in line.lower()
+        and not line.lower().startswith("posted ")
+        and "apply by" not in line.lower()
+    ]
+    for index, line in enumerate(clean_lines[:10]):
+        lower = line.lower()
+        next_lower = clean_lines[index + 1].lower() if index + 1 < len(clean_lines) else ""
+        second_next_lower = clean_lines[index + 2].lower() if index + 2 < len(clean_lines) else ""
+        if any(marker in next_lower for marker in industry_markers) and any(marker in second_next_lower for marker in role_markers):
+            return _clean_company_candidate(line)
+        if any(marker in next_lower for marker in role_markers) and not any(marker in lower for marker in role_markers):
+            return _clean_company_candidate(line)
+    return ""
+
+
+def _clean_company_candidate(value: str) -> str:
+    if not value:
+        return ""
+    cleaned = re.split(r"[\n\r|•]", value.strip())[0]
+    cleaned = re.sub(r"(?i)\s+logo$", "", cleaned)
+    cleaned = re.sub(r"(?i)\b(inc|llc|ltd|corp|corporation)\b\.?$", "", cleaned)
+    cleaned = re.sub(r"(?i)\b(is|are|we|our|a|an|the|looking|hiring|seeking).*", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .:-")
+    blocked = {"job", "job description", "at a glance", "apply", "save", "share", "full-time", "part-time"}
+    if not cleaned or cleaned.lower() in blocked or len(cleaned) < 2 or len(cleaned) > 70:
+        return ""
+    return cleaned
+
+
+def _brief_with_openai(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    completion = client.chat.completions.create(
+        model=settings.openai_model,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You turn job descriptions into structured interview-prep briefs. "
+                    "Return only JSON with keys: company, role_title, overview, requirements, responsibilities, "
+                    "looking_for, interview_signals, prep_advice. Use concise but specific bullets. "
+                    "Detect company from job-board headers if present."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Role title hint: {title}\nSource URL: {source_url or ''}\n\nJob description:\n{description[:9000]}",
+            },
+        ],
+        temperature=0.2,
+    )
+    data = json.loads(completion.choices[0].message.content or "{}")
+    return JobDescriptionBrief(
+        company=data.get("company") or infer_company_name("", description, source_url),
+        role_title=data.get("role_title") or title,
+        overview=data.get("overview") or f"Preparation brief for {title}.",
+        requirements=list(data.get("requirements") or []),
+        responsibilities=list(data.get("responsibilities") or []),
+        looking_for=list(data.get("looking_for") or []),
+        interview_signals=list(data.get("interview_signals") or []),
+        prep_advice=list(data.get("prep_advice") or []),
+        source="openai",
+    )
+
+
+def _description_answer_with_openai(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    completion = client.chat.completions.create(
+        model=settings.openai_model,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Answer questions about a job description for an interview candidate. "
+                    "Return only JSON with keys: answer, interview_use, next_steps. "
+                    "Be specific to the role and explain how to use the answer in an interview."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Role: {title}\nQuestion: {question}\n\nJob description:\n{description[:9000]}",
+            },
+        ],
+        temperature=0.25,
+    )
+    data = json.loads(completion.choices[0].message.content or "{}")
+    return JobDescriptionAskResponse(
+        answer=data.get("answer") or "Focus on the role requirements and prepare a concrete example.",
+        interview_use=data.get("interview_use") or "Use this as a concise interview talking point connected to the job description.",
+        next_steps=list(data.get("next_steps") or []),
+        source="openai",
+    )
+
+
+def _heuristic_brief(title: str, description: str, source_url: str | None, source: str) -> JobDescriptionBrief:
+    lines = [line.strip(" •-") for line in description.splitlines() if line.strip()]
+    company = infer_company_name("", description, source_url)
+    role = infer_role_title(title, description, source_url)
+    lower = description.lower()
+    requirements = _lines_after_headings(lines, ["software experience required", "requirements", "required", "qualifications", "ideal candidate"], 8)
+    responsibilities = _lines_after_headings(lines, ["what you'll do", "responsibilities", "what you will do", "duties"], 8)
+    looking_for = _lines_after_headings(lines, ["ideal candidate", "who you are", "we're looking for", "looking for"], 6)
+    if not requirements:
+        requirements = _keyword_summary(lower)
+    if not responsibilities:
+        responsibilities = [line for line in lines if re.search(r"(?i)^(assist|create|develop|prepare|coordinate|support|collaborate|produce|manage)\b", line)][:6]
+    return JobDescriptionBrief(
+        company=company,
+        role_title=role,
+        overview=f"{company + ' is hiring ' if company else 'This posting is for '}{role}. The role emphasizes {', '.join(_keyword_summary(lower)[:4]) or 'role-specific skills'} and interview preparation should connect examples to the posted responsibilities.",
+        requirements=requirements[:8],
+        responsibilities=responsibilities[:8],
+        looking_for=looking_for[:6],
+        interview_signals=[
+            "Prepare concrete examples that prove you can do the listed responsibilities.",
+            "Expect questions about tools, workflow, communication, prioritization, and project ownership.",
+            "Connect every answer back to the company context and the role outcomes.",
+        ],
+        prep_advice=[
+            "Create one story for each major responsibility.",
+            "Review the listed tools and be ready to explain when and why you used them.",
+            "Prepare two thoughtful questions about team workflow, mentorship, and success metrics.",
+        ],
+        source=source,
+    )
+
+
+def _lines_after_headings(lines: list[str], headings: list[str], limit: int) -> list[str]:
+    results: list[str] = []
+    for index, line in enumerate(lines):
+        if line.lower().strip(":") in headings:
+            for candidate in lines[index + 1:index + 1 + limit]:
+                if len(candidate) > 2 and not candidate.endswith(":"):
+                    results.append(candidate)
+            break
+    return results
+
+
+def _keyword_summary(text: str) -> list[str]:
+    topics = []
+    for label, keywords in {
+        "technical tools": ["python", "rhino", "twinmotion", "sql", "docker", "api", "adobe", "illustrator"],
+        "communication": ["communication", "client", "presentation", "feedback", "spanish"],
+        "project ownership": ["project management", "scheduling", "coordinate", "ownership"],
+        "design judgment": ["design", "creative", "visual", "rendering", "architecture"],
+        "problem solving": ["problem-solving", "estimate", "proposal", "change-order"],
+    }.items():
+        if any(keyword in text for keyword in keywords):
+            topics.append(label)
+    return topics or ["communication", "problem solving", "role fundamentals"]
 
 
 def _analyze_with_openai(request: JobAnalysisRequest, settings: Settings) -> JobAnalysisResponse:

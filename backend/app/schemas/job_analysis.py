@@ -47,3 +47,26 @@ class JobPostDetail(BaseModel):
     description: str
     source_url: Optional[str] = None
     analysis: Optional[JobAnalysisResponse] = None
+
+
+class JobDescriptionBrief(BaseModel):
+    company: str = ""
+    role_title: str
+    overview: str
+    requirements: list[str] = Field(default_factory=list)
+    responsibilities: list[str] = Field(default_factory=list)
+    looking_for: list[str] = Field(default_factory=list)
+    interview_signals: list[str] = Field(default_factory=list)
+    prep_advice: list[str] = Field(default_factory=list)
+    source: str = "openai"
+
+
+class JobDescriptionAskRequest(BaseModel):
+    question: str = Field(min_length=2)
+
+
+class JobDescriptionAskResponse(BaseModel):
+    answer: str
+    interview_use: str
+    next_steps: list[str] = Field(default_factory=list)
+    source: str = "openai"

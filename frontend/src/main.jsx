@@ -83,6 +83,10 @@ function App() {
   const [jobModalOpen, setJobModalOpen] = useState(false);
   const [jobDraft, setJobDraft] = useState({ title: "", description: "", sourceUrl: "", color: "#2563eb" });
   const [jobActionMenuId, setJobActionMenuId] = useState(null);
+  const [jobBrief, setJobBrief] = useState(null);
+  const [jobBriefLoading, setJobBriefLoading] = useState(false);
+  const [jobBriefQuestion, setJobBriefQuestion] = useState("");
+  const [jobBriefAnswer, setJobBriefAnswer] = useState(null);
   const [confirmDeleteJob, setConfirmDeleteJob] = useState(null);
   const [selectedJobIds, setSelectedJobIds] = useState([]);
   const [confirmBulkDeleteJobs, setConfirmBulkDeleteJobs] = useState(false);
@@ -121,8 +125,8 @@ function App() {
   const [status, setStatus] = useState("Backend Connected");
   const [theme, setTheme] = useState(() => loadTheme());
   const [loading, setLoading] = useState(false);
-  const [loadingStudyTaskId, setLoadingStudyTaskId] = useState(null);
-  const [loadingExamTaskId, setLoadingExamTaskId] = useState(null);
+  const [loadingStudyTaskId, setLoadingStudyTaskId] = useState([]);
+  const [loadingExamTaskId, setLoadingExamTaskId] = useState([]);
   const [improvingNoteId, setImprovingNoteId] = useState("");
   const [soundVolume, setSoundVolume] = useState(() => loadSoundVolume());
   const [activeView, setActiveView] = useState("dashboard");
@@ -152,6 +156,22 @@ function App() {
     refreshJobs();
     refreshSavedPlans();
   }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) return undefined;
+    function closeSettingsFromOutside(event) {
+      if (event.target.closest?.(".settings-popover") || event.target.closest?.("[data-settings-toggle='true']")) return;
+      setSettingsOpen(false);
+    }
+    document.addEventListener("pointerdown", closeSettingsFromOutside, true);
+    document.addEventListener("mousedown", closeSettingsFromOutside, true);
+    document.addEventListener("click", closeSettingsFromOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeSettingsFromOutside, true);
+      document.removeEventListener("mousedown", closeSettingsFromOutside, true);
+      document.removeEventListener("click", closeSettingsFromOutside, true);
+    };
+  }, [settingsOpen]);
 
   function reloadLocalWorkspaceState() {
     setJobMarkers(loadLocalMap("interviewprep_job_markers"));
@@ -660,6 +680,71 @@ function App() {
     }
   }
 
+  async function openJobDescription(job) {
+    setJobBriefLoading(true);
+    setJobBriefAnswer(null);
+    setJobBriefQuestion("");
+    setJobBrief({
+      job,
+      brief: null,
+      error: "",
+    });
+    try {
+      const [detailResponse, briefResponse] = await Promise.all([
+        apiFetch(`/jobs/${job.id}`),
+        apiFetch(`/jobs/${job.id}/brief`),
+      ]);
+      if (!detailResponse.ok) throw new Error(`Job returned ${detailResponse.status}`);
+      if (!briefResponse.ok) throw new Error(`Brief returned ${briefResponse.status}`);
+      const detail = await detailResponse.json();
+      const brief = await briefResponse.json();
+      setJobBrief({
+        job: {
+          ...job,
+          title: detail.title || job.title,
+          company: brief.company || inferCompanyName(job.company || "", detail.description || "", detail.source_url || job.source_url || ""),
+          description: detail.description || "",
+          source_url: detail.source_url || job.source_url || "",
+        },
+        brief,
+        error: "",
+      });
+      addActivity({ type: "job", title: "Job description reviewed", detail: detail.title || job.title, badge: brief.source || "", target: "jobs" });
+    } catch (error) {
+      setJobBrief((current) => ({
+        ...current,
+        error: error.message || "Could not load the job description brief.",
+      }));
+    } finally {
+      setJobBriefLoading(false);
+    }
+  }
+
+  async function askJobBriefQuestion() {
+    if (!jobBrief?.job?.id || !jobBriefQuestion.trim()) return;
+    setJobBriefLoading(true);
+    try {
+      const response = await apiFetch(`/jobs/${jobBrief.job.id}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: jobBriefQuestion.trim() }),
+      });
+      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      const answer = await response.json();
+      setJobBriefAnswer(answer);
+      setJobBriefQuestion("");
+    } catch (error) {
+      setJobBriefAnswer({
+        answer: error.message || "Could not answer this question right now.",
+        interview_use: "Try again after checking the backend connection.",
+        next_steps: [],
+        source: "error",
+      });
+    } finally {
+      setJobBriefLoading(false);
+    }
+  }
+
   async function fetchSavedPlansList(archivedIds = archivedJobIds) {
     try {
       const response = await apiFetch(`/prep-plans`);
@@ -719,7 +804,7 @@ function App() {
   async function generateExam(day = selectedPlanDay, options = {}) {
     const sourcePlan = options.planOverride || plan;
     if (!sourcePlan?.prep_plan_id) return;
-    if (options.taskKey) setLoadingExamTaskId(options.taskKey);
+    if (options.taskKey) setLoadingExamTaskId((current) => addLoadingId(current, options.taskKey));
     const effectiveSettings = normalizeExamSettings(options.settingsOverride || examSettings);
     const questionTypes = effectiveSettings.questionTypes.includes("auto")
       ? ["multiple_choice", "short_answer", "one_word", "fill_blank", "multiple_select", "coding"]
@@ -773,7 +858,7 @@ function App() {
     } catch (error) {
       setStatus(`Error: ${error.message}`);
     } finally {
-      if (options.taskKey) setLoadingExamTaskId(null);
+      if (options.taskKey) setLoadingExamTaskId((current) => removeLoadingId(current, options.taskKey));
       setLoading(false);
     }
   }
@@ -1130,7 +1215,7 @@ function App() {
       addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: cachedNote.content.source || "saved", target: "prep" });
       return;
     }
-    setLoadingStudyTaskId(taskKey);
+    setLoadingStudyTaskId((current) => addLoadingId(current, taskKey));
     setLoading(true);
     setStatus("Generating Study Notes");
     try {
@@ -1186,7 +1271,7 @@ function App() {
       playGeneratedSound(soundVolume);
       setStatus("Study Notes Ready");
     } finally {
-      setLoadingStudyTaskId(null);
+      setLoadingStudyTaskId((current) => removeLoadingId(current, taskKey));
       setLoading(false);
     }
   }
@@ -1563,30 +1648,33 @@ function App() {
         </div>
 
         <div className="sidebar-footer">
-          <NavItem icon={Settings} label="Settings" active={settingsOpen} onClick={() => setSettingsOpen((current) => !current)} />
+          <NavItem icon={Settings} label="Settings" active={settingsOpen} onClick={() => setSettingsOpen((current) => !current)} settingsToggle />
           <NavItem icon={LogOut} label="Log out" onClick={logout} />
           {settingsOpen && (
-            <SettingsView
-              user={user}
-              status={status}
-              theme={theme}
-              setTheme={setTheme}
-              soundVolume={soundVolume}
-              setSoundVolume={setSoundVolume}
-              deletedJobs={deletedJobs}
-              extensionState={extensionState}
-              restoreDeletedJob={restoreDeletedJob}
-              clearDeletedJob={clearDeletedJob}
-              loading={loading}
-              onToggleExtension={toggleExtensionBubble}
-              onInstallExtension={() => window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer")}
-              onRefreshExtension={refreshExtensionState}
-              onClose={() => setSettingsOpen(false)}
-              onKnowMore={() => {
-                setSettingsOpen(false);
-                setActiveView("about");
-              }}
-            />
+            <>
+              <button type="button" className="settings-dismiss-layer" aria-label="Close settings" onClick={() => setSettingsOpen(false)} />
+              <SettingsView
+                user={user}
+                status={status}
+                theme={theme}
+                setTheme={setTheme}
+                soundVolume={soundVolume}
+                setSoundVolume={setSoundVolume}
+                deletedJobs={deletedJobs}
+                extensionState={extensionState}
+                restoreDeletedJob={restoreDeletedJob}
+                clearDeletedJob={clearDeletedJob}
+                loading={loading}
+                onToggleExtension={toggleExtensionBubble}
+                onInstallExtension={() => window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer")}
+                onRefreshExtension={refreshExtensionState}
+                onClose={() => setSettingsOpen(false)}
+                onKnowMore={() => {
+                  setSettingsOpen(false);
+                  setActiveView("about");
+                }}
+              />
+            </>
           )}
         </div>
       </aside>
@@ -1697,6 +1785,7 @@ function App() {
                     menuOpen={jobActionMenuId === job.id}
                     onToggleMenu={setJobActionMenuId}
                     onRequestDelete={setConfirmDeleteJob}
+                    onOpenDescription={openJobDescription}
                   />
                 ))
               ) : (
@@ -1774,6 +1863,7 @@ function App() {
           <JobsView
             jobs={jobs}
             onSelectJob={useSavedJob}
+            onOpenDescription={openJobDescription}
             menuId={jobActionMenuId}
             onToggleMenu={setJobActionMenuId}
             onRequestDelete={setConfirmDeleteJob}
@@ -2124,13 +2214,25 @@ function App() {
           onClose={() => setNoteReader(null)}
         />
       )}
+
+      {jobBrief && (
+        <JobDescriptionModal
+          jobBrief={jobBrief}
+          loading={jobBriefLoading}
+          question={jobBriefQuestion}
+          setQuestion={setJobBriefQuestion}
+          answer={jobBriefAnswer}
+          onAsk={askJobBriefQuestion}
+          onClose={() => setJobBrief(null)}
+        />
+      )}
     </div>
   );
 }
 
-function NavItem({ icon: Icon, label, active, onClick }) {
+function NavItem({ icon: Icon, label, active, onClick, settingsToggle = false }) {
   return (
-    <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}>
+    <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick} data-settings-toggle={settingsToggle ? "true" : undefined}>
       <Icon size={20} />
       {label}
     </button>
@@ -2152,7 +2254,7 @@ function PanelTitle({ icon: Icon, title, subtitle, action, badge, secondaryBadge
   );
 }
 
-function SavedJob({ job, onSelect, menuOpen, onToggleMenu, onRequestDelete, selectable = false, selected = false, onToggleSelect }) {
+function SavedJob({ job, onSelect, menuOpen, onToggleMenu, onRequestDelete, onOpenDescription, selectable = false, selected = false, onToggleSelect }) {
   return (
     <div className={`saved-row ${selectable ? "selectable" : ""}`} role="button" tabIndex={0} onClick={() => onSelect?.(job)}>
       {selectable && (
@@ -2177,6 +2279,16 @@ function SavedJob({ job, onSelect, menuOpen, onToggleMenu, onRequestDelete, sele
       <a href={normalizeUrl(job.source_url)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
         {displayUrl(job.source_url)} <ExternalLink size={13} />
       </a>
+      <button
+        type="button"
+        className="description-chip"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenDescription?.(job);
+        }}
+      >
+        Description
+      </button>
       <div className="job-menu-wrap">
         <button className="more" title="Job actions" onClick={(event) => { event.stopPropagation(); onToggleMenu?.(menuOpen ? null : job.id); }}><MoreVertical size={18} /></button>
         {menuOpen && (
@@ -2205,8 +2317,32 @@ function PlanStepper({ days, selectedDay, onSelectDay }) {
 
 function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay, compact = false, showArrows = true }) {
   const scrollerRef = useRef(null);
+  const scrollTimerRef = useRef(null);
   function move(direction) {
     scrollerRef.current?.scrollBy({ left: direction * 500, behavior: "smooth" });
+  }
+
+  useEffect(() => {
+    const selectedCard = scrollerRef.current?.querySelector(`[data-day="${selectedDay}"]`);
+    selectedCard?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [selectedDay, days.length]);
+
+  function syncSelectedDayFromScroll() {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    window.clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = window.setTimeout(() => {
+      const cards = [...scroller.querySelectorAll("[data-day]")];
+      if (!cards.length) return;
+      const center = scroller.getBoundingClientRect().left + scroller.clientWidth / 2;
+      const closest = cards.reduce((best, card) => {
+        const rect = card.getBoundingClientRect();
+        const distance = Math.abs(rect.left + rect.width / 2 - center);
+        return !best || distance < best.distance ? { card, distance } : best;
+      }, null);
+      const day = Number(closest?.card?.dataset?.day);
+      if (day && day !== selectedDay) onSelectDay(day);
+    }, 120);
   }
 
   return (
@@ -2216,7 +2352,7 @@ function PlanDayCarousel({ days, selectedDay, completedTasks, plan, onSelectDay,
           <ChevronRight size={18} />
         </button>
       )}
-      <div className={`plan-cards ${compact ? "compact-plan-cards" : ""}`} ref={scrollerRef}>
+      <div className={`plan-cards ${compact ? "compact-plan-cards" : ""}`} ref={scrollerRef} onScroll={syncSelectedDayFromScroll}>
         {days.map((day, index) => (
           <PlanDayCard
             key={day.day}
@@ -2245,7 +2381,7 @@ function PlanDayCard({ day, index, selected, completed, onSelect }) {
   const statusText = completed ? "Completed" : selected ? "Selected" : "Pending";
   const statusClass = completed ? "status-complete" : selected ? "status-progress" : "status-pending";
   return (
-    <button type="button" className={`plan-day-card ${selected ? "selected" : ""} ${completed ? "completed" : ""}`} onClick={onSelect}>
+    <button type="button" data-day={day.day} className={`plan-day-card ${selected ? "selected" : ""} ${completed ? "completed" : ""}`} onClick={onSelect}>
       <div className={`card-icon ${tones[index % tones.length]}`}>
         <Icon size={17} />
       </div>
@@ -2770,7 +2906,113 @@ function StudyNoteModal({ reader, onDone, onClose }) {
   );
 }
 
-function JobsView({ jobs, onSelectJob, menuId, onToggleMenu, onRequestDelete, selectedJobIds, setSelectedJobIds, onRequestBulkDelete, loading, savedPlans, onOpenPlan, removePrepPlan, jobMarkers }) {
+function JobDescriptionModal({ jobBrief, loading, question, setQuestion, answer, onAsk, onClose }) {
+  const brief = jobBrief.brief;
+  const job = jobBrief.job || {};
+  const company = brief?.company || job.company || inferCompanyName("", job.description || "", job.source_url || "");
+  const roleTitle = brief?.role_title || job.title || "Saved job";
+  const isUrlOnly = isUrlBookmark(job);
+
+  function submitQuestion(event) {
+    event.preventDefault();
+    onAsk();
+  }
+
+  return (
+    <div className="exam-modal-backdrop review-backdrop" role="dialog" aria-modal="true">
+      <div className="job-brief-shell">
+        <header className="exam-topbar">
+          <div>
+            <strong>{roleTitle}</strong>
+            <span>{company || "Company will be inferred from description"} {brief?.source && `• ${sourceLabel(brief.source)}`}</span>
+          </div>
+          {job.source_url && (
+            <a className="outline-action compact-action" href={normalizeUrl(job.source_url)} target="_blank" rel="noreferrer">
+              Source <ExternalLink size={14} />
+            </a>
+          )}
+          <button className="icon-button" onClick={onClose}><X size={19} /></button>
+        </header>
+
+        <main className="job-brief-body">
+          {loading && !brief ? (
+            <section className="job-brief-loading">
+              <Loader2 className="spin" size={22} />
+              <strong>Organizing job description...</strong>
+              <span>AI is extracting company, requirements, responsibilities, and interview signals.</span>
+            </section>
+          ) : jobBrief.error ? (
+            <section className="job-brief-loading error-state">
+              <strong>Could not load description</strong>
+              <span>{jobBrief.error}</span>
+            </section>
+          ) : isUrlOnly ? (
+            <section className="job-brief-card">
+              <h3>Saved URL</h3>
+              <p>This job was saved as a URL bookmark. Open the source link to view the full description, or paste the description into the dashboard to generate a structured brief.</p>
+            </section>
+          ) : (
+            <>
+              <section className="job-brief-hero">
+                <span>{company || "Detected company"}</span>
+                <h2>{roleTitle}</h2>
+                <p>{brief?.overview || "This saved job is ready for interview preparation."}</p>
+              </section>
+              <div className="job-brief-grid">
+                <JobBriefSection title="Requirements" items={brief?.requirements} fallback="No explicit requirements were found, so focus on the responsibilities and tools mentioned." />
+                <JobBriefSection title="Responsibilities" items={brief?.responsibilities} fallback="Responsibilities were not separated clearly in the post." />
+                <JobBriefSection title="What They Are Looking For" items={brief?.looking_for} fallback="Prepare examples that show motivation, communication, and ability to learn quickly." />
+                <JobBriefSection title="Interview Signals" items={brief?.interview_signals} fallback="Expect questions that test practical judgment, role fit, and examples from your past work." />
+              </div>
+              <JobBriefSection title="Prep Advice" items={brief?.prep_advice} fallback="Prepare two project stories, one failure or learning story, and one question for the interviewer." />
+              <section className="job-brief-card ask-job-card">
+                <h3>Ask AI About This Description</h3>
+                <form onSubmit={submitQuestion}>
+                  <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask what to prepare, how to answer a requirement, or what questions may come up..." />
+                  <button className="primary compact-action" disabled={loading || !question.trim()}>
+                    {loading ? <Loader2 className="spin" size={15} /> : <MessageSquareText size={15} />}
+                    Ask AI
+                  </button>
+                </form>
+                {answer && (
+                  <div className="job-brief-answer">
+                    <strong>Answer</strong>
+                    <p>{answer.answer}</p>
+                    <strong>How to use it in an interview</strong>
+                    <p>{answer.interview_use}</p>
+                    {answer.next_steps?.length > 0 && (
+                      <ul>
+                        {answer.next_steps.map((step) => <li key={step}>{step}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function JobBriefSection({ title, items = [], fallback }) {
+  const cleanItems = items.filter(Boolean);
+  return (
+    <section className="job-brief-card">
+      <h3>{title}</h3>
+      {cleanItems.length ? (
+        <ul>
+          {cleanItems.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      ) : (
+        <p>{fallback}</p>
+      )}
+    </section>
+  );
+}
+
+function JobsView({ jobs, onSelectJob, onOpenDescription, menuId, onToggleMenu, onRequestDelete, selectedJobIds, setSelectedJobIds, onRequestBulkDelete, loading, savedPlans, onOpenPlan, removePrepPlan, jobMarkers }) {
   const [bulkMode, setBulkMode] = useState(false);
   const allSelected = jobs.length > 0 && selectedJobIds.length === jobs.length;
   function toggleJobSelection(jobId) {
@@ -2817,6 +3059,7 @@ function JobsView({ jobs, onSelectJob, menuId, onToggleMenu, onRequestDelete, se
               menuOpen={menuId === job.id}
               onToggleMenu={onToggleMenu}
               onRequestDelete={onRequestDelete}
+              onOpenDescription={onOpenDescription}
               selectable={bulkMode}
               selected={selectedJobIds.includes(job.id)}
               onToggleSelect={toggleJobSelection}
@@ -3957,7 +4200,21 @@ function isTaskComplete(task, completedTasks) {
 
 function isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) {
   const key = task.id || task.title;
-  return task.task_type === "practice_exam" ? loadingExamTaskId === key : loadingStudyTaskId === key;
+  return task.task_type === "practice_exam" ? hasLoadingId(loadingExamTaskId, key) : hasLoadingId(loadingStudyTaskId, key);
+}
+
+function hasLoadingId(value, key) {
+  return Array.isArray(value) ? value.includes(key) : value === key;
+}
+
+function addLoadingId(current, key) {
+  const list = Array.isArray(current) ? current : current ? [current] : [];
+  return list.includes(key) ? list : [...list, key];
+}
+
+function removeLoadingId(current, key) {
+  const list = Array.isArray(current) ? current : current ? [current] : [];
+  return list.filter((item) => item !== key);
 }
 
 function SettingsView({
@@ -4743,44 +5000,55 @@ function companyFromUrl(url) {
   const host = displayUrl(url);
   if (!host || host === "saved") return "";
   const parts = host.split(".").filter(Boolean);
-  const ignored = new Set(["www", "careers", "jobs", "boards", "apply", "greenhouse", "lever"]);
-  const companyPart = parts.find((part) => !ignored.has(part.toLowerCase())) || parts[0];
+  const ignored = new Set(["www", "careers", "jobs", "boards", "apply", "greenhouse", "lever", "joinhandshake", "handshake", "workdayjobs", "myworkdayjobs"]);
+  const companyPart = parts.find((part) => !ignored.has(part.toLowerCase()) && !part.includes("myworkdayjobs"));
+  if (!companyPart) return "";
   return titleCaseCompany(companyPart);
 }
 
 function inferCompanyName(providedCompany, description, url) {
   if (providedCompany?.trim()) return providedCompany.trim();
-  const urlCompany = companyFromUrl(url);
-  if (urlCompany) return urlCompany;
   const headerCompany = companyFromJobBoardHeader(description);
   if (headerCompany) return headerCompany;
   const text = (description || "").replace(/\s+/g, " ").trim();
-  if (!text) return "";
-  const patterns = [
-    /\bcompany\s*:\s*([A-Z][A-Za-z0-9&.' -]{1,45})/i,
-    /\bemployer\s*:\s*([A-Z][A-Za-z0-9&.' -]{1,45})/i,
-    /\babout\s+([A-Z][A-Za-z0-9&.' -]{1,45})(?:\.|,|\s+is|\s+we|\s+our)/,
-    /\bjoin\s+([A-Z][A-Za-z0-9&.' -]{1,35})(?:\s+as|\s+and|\.|,)/,
-    /\bat\s+([A-Z][A-Za-z0-9&.' -]{1,35})(?:,|\s+we|\s+you|\s+our)/,
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    const candidate = cleanCompanyCandidate(match?.[1]);
-    if (candidate) return candidate;
+  if (text) {
+    const patterns = [
+      /\bcompany\s*:\s*([A-Z][A-Za-z0-9&.' -]{1,45})/i,
+      /\bemployer\s*:\s*([A-Z][A-Za-z0-9&.' -]{1,45})/i,
+      /\b(?:at|with)\s+([A-Z][A-Za-z0-9&.' -]{1,40})\s+(?:is|we|you|our|as|in)\b/,
+      /\babout\s+([A-Z][A-Za-z0-9&.' -]{1,45})(?:\.|,|\s+is|\s+we|\s+our)/,
+      /\bjoin\s+([A-Z][A-Za-z0-9&.' -]{1,35})(?:\s+as|\s+and|\.|,)/,
+    ];
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      const candidate = cleanCompanyCandidate(match?.[1]);
+      if (candidate) return candidate;
+    }
   }
-  return "";
+  return companyFromUrl(url);
 }
 
 function companyFromJobBoardHeader(description) {
-  const lines = (description || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const industryWords = ["architecture", "planning", "software", "technology", "health", "finance", "education", "marketing", "design"];
-  const skipped = new Set(["save", "share", "apply", "at a glance", "job", "job description"]);
+  const lines = (description || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/\s+logo$/i, "").trim())
+    .filter(Boolean);
+  const industryWords = ["architecture", "planning", "software", "technology", "health", "finance", "education", "marketing", "design", "landscape", "engineering", "consulting"];
+  const roleWords = ["intern", "engineer", "designer", "estimator", "manager", "developer", "analyst", "associate", "assistant", "specialist"];
+  const skipped = new Set(["save", "share", "apply", "at a glance", "job", "job description", "full-time", "part-time"]);
   for (let index = 0; index < Math.min(lines.length, 10); index += 1) {
     const line = lines[index];
     const lower = line.toLowerCase();
     if (skipped.has(lower) || lower.includes("logo") || lower.startsWith("posted ") || lower.includes("apply by")) continue;
     const next = lines[index + 1]?.toLowerCase() || "";
-    if (industryWords.some((word) => next.includes(word))) {
+    const previous = lines[index - 1]?.toLowerCase() || "";
+    const looksLikeCompany = /^[A-Z0-9][A-Za-z0-9&.' -]{1,45}$/.test(line)
+      && !roleWords.some((word) => lower.includes(word))
+      && !lower.includes("$")
+      && !lower.includes("://");
+    if (looksLikeCompany && (industryWords.some((word) => next.includes(word)) || roleWords.some((word) => next.includes(word)) || previous.includes("logo"))) {
       return cleanCompanyCandidate(line);
     }
   }
