@@ -2132,10 +2132,33 @@ function App() {
             recentActivity={activity}
             savedPlans={savedPlans}
             jobs={jobs}
+            apiFetch={apiFetch}
             onOpenPlan={async (prepPlanId) => {
               await loadPrepPlan(prepPlanId);
               setActiveView("prep");
             }}
+          />
+        )}
+
+        {activeView === "data" && (
+          <InterviewDataView
+            jobs={jobs}
+            savedPlans={savedPlans}
+            plan={plan}
+            completedTasks={completedTasks}
+            examAttempts={examAttempts}
+            mockAttempts={mockAttempts}
+            notes={notes}
+            generatedStudyNotes={generatedStudyNotes}
+            calendarEvents={calendarEvents}
+            recentActivity={activity}
+            apiFetch={apiFetch}
+            onOpenPlan={async (prepPlanId) => {
+              await loadPrepPlan(prepPlanId);
+              setActiveView("prep");
+            }}
+            onOpenExams={() => setActiveView("exams")}
+            onOpenNotes={() => setActiveView("notes")}
           />
         )}
 
@@ -2144,10 +2167,27 @@ function App() {
         )}
 
         {activeView === "analytics" && (
-          <AnalyticsDevelopmentView />
+          <AnalyticsView
+            plan={plan}
+            savedPlans={savedPlans}
+            jobs={jobs}
+            completedTasks={completedTasks}
+            examAttempts={examAttempts}
+            mockAttempts={mockAttempts}
+            notes={notes}
+            generatedStudyNotes={generatedStudyNotes}
+            calendarEvents={calendarEvents}
+            recentActivity={activity}
+            apiFetch={apiFetch}
+            onOpenPlan={async (prepPlanId) => {
+              await loadPrepPlan(prepPlanId);
+              setActiveView("prep");
+            }}
+            onOpenProgress={() => setActiveView("progress")}
+          />
         )}
 
-        {!["dashboard", "jobs", "prep", "exams", "calendar", "notes", "progress", "about", "analytics"].includes(activeView) && (
+        {!["dashboard", "jobs", "prep", "exams", "calendar", "notes", "progress", "data", "about", "analytics"].includes(activeView) && (
           <PlaceholderView title={viewTitle(activeView)} />
         )}
 
@@ -4045,7 +4085,473 @@ function NotesView({ savedPlans, notes, noteFolders, noteDraft, setNoteDraft, sa
     </section>
   );
 }
-function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recentActivity, savedPlans, jobs, onOpenPlan }) {
+
+function InterviewDataView({
+  jobs,
+  savedPlans,
+  plan,
+  completedTasks,
+  examAttempts,
+  mockAttempts,
+  notes,
+  generatedStudyNotes,
+  calendarEvents,
+  recentActivity,
+  apiFetch,
+  onOpenPlan,
+  onOpenExams,
+  onOpenNotes,
+}) {
+  const detailedPlans = useSavedPlanDetails(savedPlans, plan, apiFetch);
+  const rows = buildInterviewDataRows({ jobs, savedPlans, detailedPlans, examAttempts, mockAttempts, notes, generatedStudyNotes, calendarEvents });
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState(() => rows[0]?.id || "general");
+  const [questionFilter, setQuestionFilter] = useState("all");
+  const [copied, setCopied] = useState(false);
+  const filteredRows = rows.filter((row) => {
+    const haystack = `${row.title} ${row.company} ${row.topics.join(" ")}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
+
+  useEffect(() => {
+    if (!rows.length) return;
+    if (!rows.some((row) => row.id === selectedId)) setSelectedId(rows[0].id);
+  }, [rows.map((row) => row.id).join("|"), selectedId]);
+
+  const selected = rows.find((row) => row.id === selectedId) || rows[0] || null;
+  const bank = buildQuestionBank({ examAttempts, mockAttempts, scope: selected });
+  const visibleBank = bank.filter((item) => questionFilter === "all" || item.kind === questionFilter);
+  const dataQuality = selected ? buildDataQuality(selected) : [];
+  const interviewSignals = selected ? buildInterviewSignals(selected, visibleBank) : [];
+
+  async function copyPacket() {
+    if (!selected) return;
+    const packet = [
+      `InterviewPrep AI data packet`,
+      `Role: ${selected.title}`,
+      `Company: ${selected.company || "Unknown"}`,
+      `Plans: ${selected.plans.length}`,
+      `Notes: ${selected.noteCount}`,
+      `Exams: ${selected.examAttempts.length}`,
+      `Mocks: ${selected.mockAttempts.length}`,
+      `Topics: ${selected.topics.join(", ") || "Not enough topic data yet"}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(packet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <section className="page-stack interview-data-page">
+      <section className="panel page-panel data-hero-panel">
+        <div>
+          <PanelTitle
+            icon={Database}
+            title="Interview Data"
+            subtitle="A role-by-role preparation library built from saved jobs, prep plans, notes, exams, mocks, calendar events, and activity."
+            badge={`${rows.length} job profile${rows.length === 1 ? "" : "s"}`}
+          />
+          <div className="data-search-row">
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search roles, companies, topics, or skills..." />
+            <button type="button" className="outline-action compact-action" onClick={copyPacket} disabled={!selected}>
+              <Save size={15} /> {copied ? "Copied" : "Copy data packet"}
+            </button>
+          </div>
+        </div>
+        <div className="data-hero-stats">
+          <DataMetric label="Saved jobs" value={jobs.length} detail="Role sources" />
+          <DataMetric label="Prep plans" value={savedPlans.length} detail="Generated plans" />
+          <DataMetric label="Questions" value={bank.length} detail="Exam and mock bank" />
+          <DataMetric label="Evidence" value={selected ? selected.evidenceCount : 0} detail="Tracked items" />
+        </div>
+      </section>
+
+      <section className="data-layout">
+        <aside className="panel page-panel data-library-panel">
+          <div className="data-panel-head">
+            <strong>Job intelligence library</strong>
+            <span>{filteredRows.length} visible</span>
+          </div>
+          <div className="data-job-list">
+            {filteredRows.map((row) => (
+              <button className={row.id === selected?.id ? "selected" : ""} key={row.id} onClick={() => setSelectedId(row.id)}>
+                <span className="job-color-dot" style={{ background: row.color }} />
+                <div>
+                  <strong>{row.title}</strong>
+                  <small>{row.company || "Company not detected"} • {row.daysLabel}</small>
+                  <em>{row.evidenceCount} data points</em>
+                </div>
+              </button>
+            ))}
+            {!filteredRows.length && <EmptyState text="No job data matches that search." />}
+          </div>
+        </aside>
+
+        <section className="data-detail-stack">
+          {selected ? (
+            <>
+              <section className="panel page-panel data-profile-card">
+                <div className="data-profile-title">
+                  <span className="job-color-dot large" style={{ background: selected.color }} />
+                  <div>
+                    <h2>{selected.title}</h2>
+                    <p>{selected.company || "Company not detected yet"} • {selected.source}</p>
+                  </div>
+                </div>
+                <div className="data-action-row">
+                  <button type="button" className="primary" disabled={!selected.primaryPlanId} onClick={() => onOpenPlan?.(selected.primaryPlanId)}>
+                    <ClipboardList size={16} /> Open prep plan
+                  </button>
+                  <button type="button" className="outline-action compact-action" onClick={onOpenExams}>
+                    <FileQuestion size={15} /> Exams
+                  </button>
+                  <button type="button" className="outline-action compact-action" onClick={onOpenNotes}>
+                    <NotebookText size={15} /> Notes
+                  </button>
+                </div>
+                <div className="data-quality-grid">
+                  {dataQuality.map((item) => (
+                    <article key={item.label} className={item.done ? "done" : ""}>
+                      <CheckCircle2 size={16} />
+                      <div>
+                        <strong>{item.label}</strong>
+                        <span>{item.detail}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="data-grid-2">
+                <article className="panel page-panel">
+                  <div className="data-panel-head">
+                    <strong>Role signals</strong>
+                    <span>What the app knows</span>
+                  </div>
+                  <div className="data-signal-list">
+                    {interviewSignals.map((signal) => (
+                      <div key={signal.title}>
+                        <strong>{signal.title}</strong>
+                        <span>{signal.detail}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+                <article className="panel page-panel">
+                  <div className="data-panel-head">
+                    <strong>Preparation evidence</strong>
+                    <span>From real user actions</span>
+                  </div>
+                  <div className="evidence-grid">
+                    <DataMetric label="Plans" value={selected.plans.length} detail="Connected plans" />
+                    <DataMetric label="Notes" value={selected.noteCount} detail="Saved and generated" />
+                    <DataMetric label="Exams" value={selected.examAttempts.length} detail="Ready or complete" />
+                    <DataMetric label="Mocks" value={selected.mockAttempts.length} detail="Ready or complete" />
+                  </div>
+                </article>
+              </section>
+
+              <section className="panel page-panel question-bank-panel">
+                <div className="data-panel-head">
+                  <div>
+                    <strong>Interview question bank</strong>
+                    <span>Questions collected from generated exams and mock interviews for this role.</span>
+                  </div>
+                  <div className="data-filter-tabs">
+                    {["all", "exam", "mock"].map((kind) => (
+                      <button className={questionFilter === kind ? "selected" : ""} key={kind} onClick={() => setQuestionFilter(kind)}>
+                        {kind === "all" ? "All" : kind}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="question-bank-list">
+                  {visibleBank.slice(0, 12).map((item) => (
+                    <article key={item.id}>
+                      <span>{item.kind}</span>
+                      <div>
+                        <strong>{item.prompt}</strong>
+                        <small>{item.context}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {!visibleBank.length && <EmptyState text="Generate exams or mock interviews for this job and the questions will appear here." />}
+                </div>
+              </section>
+
+              <section className="panel page-panel data-timeline-panel">
+                <div className="data-panel-head">
+                  <strong>Recent evidence trail</strong>
+                  <span>Latest prep events connected to this workspace</span>
+                </div>
+                <div className="progress-timeline compact">
+                  {recentActivity.slice(0, 8).map((item, index) => (
+                    <article key={`${item.title}-${index}`}>
+                      <span className={`activity-icon ${item.type}`}><Activity size={15} /></span>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p>{item.detail}</p>
+                      </div>
+                      <small>{item.time}</small>
+                    </article>
+                  ))}
+                  {!recentActivity.length && <EmptyState text="Recent activity will appear after jobs, notes, exams, and mocks are created." />}
+                </div>
+              </section>
+            </>
+          ) : (
+            <section className="panel page-panel">
+              <EmptyState text="Save a job or generate a prep plan to build interview data." />
+            </section>
+          )}
+        </section>
+      </section>
+    </section>
+  );
+}
+
+function AnalyticsView({
+  plan,
+  savedPlans,
+  jobs,
+  completedTasks,
+  examAttempts,
+  mockAttempts,
+  notes,
+  generatedStudyNotes,
+  calendarEvents,
+  recentActivity,
+  apiFetch,
+  onOpenPlan,
+  onOpenProgress,
+}) {
+  const detailedPlans = useSavedPlanDetails(savedPlans, plan, apiFetch);
+  const [selectedPlanId, setSelectedPlanId] = useState("all");
+  const selectedPlan = selectedPlanId === "all"
+    ? null
+    : detailedPlans.find((item) => String(item.prep_plan_id || item.id) === String(selectedPlanId)) || null;
+  const scoped = buildAnalyticsScope({ selectedPlan, detailedPlans, completedTasks, examAttempts, mockAttempts, notes, generatedStudyNotes, calendarEvents, recentActivity });
+  const scoreTrend = buildScoreTrend(scoped.completeAttempts);
+  const topicInsights = buildTopicInsights(scoped.completeExams);
+  const reviewQueue = buildReviewQueue(scoped.completeExams, scoped.completeMocks);
+  const planComparisons = detailedPlans.map((item) => buildAnalyticsPlanSummary(item, completedTasks, examAttempts, mockAttempts));
+  const readinessReport = selectedPlan
+    ? buildReadinessReport({
+        plan: selectedPlan,
+        planProgress: scoped.planProgress,
+        noteTasks: scoped.noteTasks,
+        completedNotes: scoped.completedNotes,
+        selectedCompleteExams: scoped.completeExams,
+        selectedCompleteMocks: scoped.completeMocks,
+        selectedExamAttempts: scoped.examAttempts,
+        selectedMockAttempts: scoped.mockAttempts,
+        reviewQueue,
+      })
+    : buildOverallReadiness({ planComparisons, scoped, reviewQueue });
+  const nextInsight = buildAnalyticsInsight({ selectedPlan, scoped, topicInsights, reviewQueue, readinessScore: readinessReport.score });
+
+  return (
+    <section className="page-stack analytics-page">
+      <section className="panel page-panel analytics-hero-panel">
+        <div>
+          <PanelTitle
+            icon={BarChart3}
+            title="Analytics"
+            subtitle="A live reporting layer for readiness, scores, study coverage, weak spots, calendar pressure, and job-by-job comparison."
+            badge={selectedPlan ? selectedPlan.job_title : "All prep plans"}
+          />
+          <div className="analytics-controls">
+            <select value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
+              <option value="all">Overall performance</option>
+              {detailedPlans.map((item) => (
+                <option key={item.prep_plan_id || item.id} value={item.prep_plan_id || item.id}>{item.job_title}</option>
+              ))}
+            </select>
+            <button type="button" className="outline-action compact-action" onClick={onOpenProgress}>
+              <Activity size={15} /> Open progress center
+            </button>
+          </div>
+        </div>
+        <div className="analytics-readiness-card">
+          <div className="readiness-ring" style={{ "--score": readinessReport.score }}>
+            <strong>{readinessReport.score}%</strong>
+            <span>Ready</span>
+          </div>
+          <div>
+            <strong>{readinessLabel(readinessReport.score)}</strong>
+            <p>{nextInsight}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="analytics-kpi-grid">
+        <DataMetric label="Jobs saved" value={jobs.length} detail="Total role sources" />
+        <DataMetric label="Plans tracked" value={detailedPlans.length} detail="Generated prep plans" />
+        <DataMetric label="Avg exam score" value={scoped.averageExamScore ? `${scoped.averageExamScore}%` : "N/A"} detail={`${scoped.completeExams.length} submitted exams`} />
+        <DataMetric label="Avg mock score" value={scoped.averageMockScore ? `${scoped.averageMockScore}%` : "N/A"} detail={`${scoped.completeMocks.length} completed mocks`} />
+        <DataMetric label="Notes completed" value={`${scoped.completedNotes}/${scoped.noteTasks.length || 0}`} detail="Checked study notes" />
+        <DataMetric label="Review queue" value={reviewQueue.length} detail="Answers needing attention" />
+      </section>
+
+      <section className="analytics-grid">
+        <article className="panel page-panel analytics-chart-card">
+          <div className="data-panel-head">
+            <strong>Score trend</strong>
+            <span>Exam and mock submissions over time</span>
+          </div>
+          <div className="score-trend">
+            {scoreTrend.length ? scoreTrend.map((point) => (
+              <div key={point.id}>
+                <span style={{ height: `${Math.max(8, point.score)}%` }} />
+                <small>{point.label}</small>
+                <em>{point.score}%</em>
+              </div>
+            )) : <EmptyState text="Submit exams or mock interviews to see score trends." />}
+          </div>
+        </article>
+
+        <article className="panel page-panel analytics-chart-card">
+          <div className="data-panel-head">
+            <strong>Readiness formula</strong>
+            <span>Weighted preparation signals</span>
+          </div>
+          <div className="analytics-formula-list">
+            {readinessReport.components.map((item) => (
+              <div key={item.label}>
+                <span>{item.label}</span>
+                <div><i style={{ width: `${item.value}%` }} /></div>
+                <strong>{item.value}%</strong>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="panel page-panel analytics-chart-card">
+          <div className="data-panel-head">
+            <strong>Plan comparison</strong>
+            <span>Which job is furthest along</span>
+          </div>
+          <div className="plan-comparison-list">
+            {planComparisons.map((summary) => (
+              <button key={summary.id} onClick={() => { setSelectedPlanId(summary.id); onOpenPlan?.(summary.id); }}>
+                <div>
+                  <strong>{summary.title}</strong>
+                  <span>{summary.tasksDone}/{summary.tasksTotal} tasks • {summary.attempts} attempts</span>
+                </div>
+                <div className="progress-mini-bar"><span style={{ width: `${summary.progress}%` }} /></div>
+                <em>{summary.progress}%</em>
+              </button>
+            ))}
+            {!planComparisons.length && <EmptyState text="Generate prep plans to compare job readiness." />}
+          </div>
+        </article>
+
+        <article className="panel page-panel analytics-chart-card">
+          <div className="data-panel-head">
+            <strong>Weak topic radar</strong>
+            <span>From scored exam and mock feedback</span>
+          </div>
+          <div className="analytics-topic-grid">
+            <ProgressPillList title="Strengths" items={topicInsights.strengths} empty="High-scoring topics will appear here." />
+            <ProgressPillList title="Needs work" tone="warning" items={topicInsights.weaknesses.concat(reviewQueue.map((item) => item.title)).slice(0, 10)} empty="Weak topics will appear after graded attempts." />
+          </div>
+        </article>
+
+        <article className="panel page-panel analytics-chart-card">
+          <div className="data-panel-head">
+            <strong>Preparation funnel</strong>
+            <span>From saved job to review</span>
+          </div>
+          <div className="analytics-funnel">
+            {buildPrepFunnel({ jobs, detailedPlans, scoped, reviewQueue }).map((item) => (
+              <div key={item.label}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <div><i style={{ width: `${item.percent}%` }} /></div>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="panel page-panel analytics-chart-card">
+          <div className="data-panel-head">
+            <strong>Upcoming pressure</strong>
+            <span>Calendar and interview timing</span>
+          </div>
+          <div className="analytics-event-list">
+            {scoped.upcomingEvents.slice(0, 6).map((event) => (
+              <article key={event.id || `${event.title}-${event.date}`}>
+                <Calendar size={15} />
+                <div>
+                  <strong>{event.title}</strong>
+                  <span>{event.date || event.start || "Scheduled event"}</span>
+                </div>
+              </article>
+            ))}
+            {!scoped.upcomingEvents.length && <EmptyState text="Calendar events tied to prep plans will appear here." />}
+          </div>
+        </article>
+      </section>
+    </section>
+  );
+}
+
+function DataMetric({ label, value, detail }) {
+  return (
+    <article className="data-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </article>
+  );
+}
+
+function useSavedPlanDetails(savedPlans, activePlan, apiFetch) {
+  const [details, setDetails] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchDetails() {
+      if (!apiFetch || !savedPlans.length) return;
+      const missing = savedPlans.filter((savedPlan) => !details[savedPlan.id] && String(activePlan?.prep_plan_id || "") !== String(savedPlan.id));
+      if (!missing.length) return;
+      const entries = await Promise.all(missing.map(async (savedPlan) => {
+        try {
+          const response = await apiFetch(`/prep-plans/${savedPlan.id}`);
+          if (!response.ok) return null;
+          return [savedPlan.id, await response.json()];
+        } catch {
+          return null;
+        }
+      }));
+      if (!cancelled) setDetails((current) => ({ ...current, ...Object.fromEntries(entries.filter(Boolean)) }));
+    }
+    fetchDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlans.map((item) => item.id).join("|"), activePlan?.prep_plan_id]);
+
+  return savedPlans.map((savedPlan) => {
+    if (activePlan?.prep_plan_id && String(activePlan.prep_plan_id) === String(savedPlan.id)) return { ...activePlan, id: savedPlan.id };
+    if (details[savedPlan.id]) return { ...details[savedPlan.id], id: savedPlan.id };
+    return {
+      id: savedPlan.id,
+      prep_plan_id: savedPlan.id,
+      job_title: savedPlan.job_title,
+      job_post_id: savedPlan.job_post_id,
+      days_until_interview: savedPlan.days_until_interview,
+      task_count: savedPlan.task_count,
+      tasks: [],
+      summaryOnly: true,
+    };
+  });
+}
+
+function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recentActivity, savedPlans, jobs, apiFetch, onOpenPlan }) {
   const [openSections, setOpenSections] = useState({
     plan: true,
     allPlans: true,
@@ -4367,6 +4873,268 @@ function ProgressPillList({ title, items, empty, tone = "good" }) {
       ) : <p>{empty}</p>}
     </div>
   );
+}
+
+function buildInterviewDataRows({ jobs, savedPlans, detailedPlans, examAttempts, mockAttempts, notes, generatedStudyNotes, calendarEvents }) {
+  const rows = new Map();
+  const allPlans = detailedPlans.length ? detailedPlans : savedPlans;
+  jobs.forEach((job) => {
+    rows.set(`job:${job.id}`, {
+      id: `job:${job.id}`,
+      jobId: job.id,
+      title: job.title || "Saved job",
+      company: job.company || companyFromUrl(job.source_url) || "",
+      color: job.color || colorForJobId(job.id),
+      source: job.source_url ? companyFromUrl(job.source_url) || "Saved URL" : "Saved description",
+      sourceUrl: job.source_url || "",
+      daysLabel: "Saved job",
+      plans: [],
+      examAttempts: [],
+      mockAttempts: [],
+      notes: [],
+      generatedNotes: [],
+      calendarEvents: [],
+      topics: [],
+      primaryPlanId: "",
+      evidenceCount: 1,
+    });
+  });
+
+  allPlans.forEach((item) => {
+    const planId = item.prep_plan_id || item.id;
+    const jobId = item.job_post_id;
+    const key = jobId && rows.has(`job:${jobId}`) ? `job:${jobId}` : `plan:${planId}`;
+    if (!rows.has(key)) {
+      rows.set(key, {
+        id: key,
+        jobId,
+        title: item.job_title || "Prep plan",
+        company: item.company || "",
+        color: colorForJobId(jobId || planId),
+        source: "Generated prep plan",
+        sourceUrl: "",
+        daysLabel: `${item.days_until_interview ?? 0} days left`,
+        plans: [],
+        examAttempts: [],
+        mockAttempts: [],
+        notes: [],
+        generatedNotes: [],
+        calendarEvents: [],
+        topics: [],
+        primaryPlanId: planId,
+        evidenceCount: 0,
+      });
+    }
+    const row = rows.get(key);
+    row.title = item.job_title || row.title;
+    row.daysLabel = `${item.days_until_interview ?? row.daysLabel} days left`;
+    row.primaryPlanId ||= planId;
+    row.plans.push(item);
+    row.topics.push(...topicsForWholePlan(item));
+  });
+
+  const rowList = [...rows.values()];
+  const findRow = (attempt) => {
+    if (attempt.jobPostId) {
+      const byJob = rowList.find((row) => String(row.jobId) === String(attempt.jobPostId));
+      if (byJob) return byJob;
+    }
+    if (attempt.prepPlanId) {
+      const byPlan = rowList.find((row) => row.plans.some((item) => String(item.prep_plan_id || item.id) === String(attempt.prepPlanId)));
+      if (byPlan) return byPlan;
+    }
+    return rowList.find((row) => attempt.jobTitle && row.title === attempt.jobTitle);
+  };
+
+  examAttempts.forEach((attempt) => {
+    const row = findRow(attempt);
+    if (!row) return;
+    row.examAttempts.push(attempt);
+    row.topics.push(...attemptTopics(attempt));
+  });
+  mockAttempts.forEach((attempt) => {
+    const row = findRow(attempt);
+    if (!row) return;
+    row.mockAttempts.push(attempt);
+    row.topics.push(...attemptTopics(attempt));
+  });
+  notes.forEach((note) => {
+    const row = rowList.find((item) => item.primaryPlanId && String(item.primaryPlanId) === String(note.planId));
+    if (row) row.notes.push(note);
+  });
+  Object.values(generatedStudyNotes || {}).forEach((note) => {
+    const row = rowList.find((item) => item.primaryPlanId && String(item.primaryPlanId) === String(note.planId));
+    if (row) row.generatedNotes.push(note);
+  });
+  calendarEvents.forEach((event) => {
+    const row = rowList.find((item) => item.primaryPlanId && String(item.primaryPlanId) === String(event.planId));
+    if (row) row.calendarEvents.push(event);
+  });
+
+  return rowList.map((row) => ({
+    ...row,
+    topics: [...new Set(row.topics.filter(Boolean))].slice(0, 18),
+    noteCount: row.notes.length + row.generatedNotes.length,
+    evidenceCount: row.plans.length + row.examAttempts.length + row.mockAttempts.length + row.notes.length + row.generatedNotes.length + row.calendarEvents.length,
+  })).sort((a, b) => b.evidenceCount - a.evidenceCount || a.title.localeCompare(b.title));
+}
+
+function attemptTopics(attempt) {
+  if (attempt.exam?.questions) return attempt.exam.questions.flatMap((question) => question.topics || []);
+  if (attempt.interview?.questions) return attempt.interview.questions.flatMap((question) => question.topics || [question.section]).filter(Boolean);
+  return attempt.topics || [];
+}
+
+function buildQuestionBank({ examAttempts, mockAttempts, scope }) {
+  const matchesScope = (attempt) => {
+    if (!scope) return true;
+    if (scope.jobId && String(attempt.jobPostId) === String(scope.jobId)) return true;
+    if (scope.primaryPlanId && String(attempt.prepPlanId) === String(scope.primaryPlanId)) return true;
+    return attempt.jobTitle && attempt.jobTitle === scope.title;
+  };
+  const examQuestions = examAttempts.filter(matchesScope).flatMap((attempt) => (attempt.exam?.questions || []).map((question, index) => ({
+    id: `${attempt.id || attempt.exam?.id}-exam-${question.id || index}`,
+    kind: "exam",
+    prompt: question.prompt || "Exam question",
+    context: `${attempt.exam?.title || "Generated exam"} • ${(question.topics || []).join(", ") || attempt.difficulty || "practice"}`,
+  })));
+  const mockQuestions = mockAttempts.filter(matchesScope).flatMap((attempt) => (attempt.interview?.questions || []).map((question, index) => ({
+    id: `${attempt.id || attempt.interview?.id}-mock-${question.id || index}`,
+    kind: "mock",
+    prompt: question.prompt || question.question || "Mock interview question",
+    context: `${mockSectionLabel(question, index + 1)} • ${attempt.difficulty || "mock interview"}`,
+  })));
+  return [...examQuestions, ...mockQuestions];
+}
+
+function buildDataQuality(row) {
+  return [
+    { label: "Job source", detail: row.sourceUrl ? "URL saved" : "Description saved", done: true },
+    { label: "Prep plan", detail: row.plans.length ? `${row.plans.length} generated` : "No plan yet", done: row.plans.length > 0 },
+    { label: "Study notes", detail: row.noteCount ? `${row.noteCount} notes captured` : "No notes yet", done: row.noteCount > 0 },
+    { label: "Scored practice", detail: `${row.examAttempts.filter((item) => item.status === "complete").length + row.mockAttempts.filter((item) => item.status === "complete").length} completed`, done: row.examAttempts.some((item) => item.status === "complete") || row.mockAttempts.some((item) => item.status === "complete") },
+  ];
+}
+
+function buildInterviewSignals(row, questions) {
+  const topTopics = row.topics.slice(0, 6);
+  const completeAttempts = [...row.examAttempts, ...row.mockAttempts].filter((item) => item.status === "complete");
+  const avgScore = averageScorePercent(completeAttempts);
+  return [
+    { title: "Likely interview focus", detail: topTopics.length ? topTopics.join(", ") : "Generate a prep plan or exam to extract role topics." },
+    { title: "Question coverage", detail: questions.length ? `${questions.length} generated questions found for this role.` : "No questions generated yet." },
+    { title: "Performance signal", detail: avgScore ? `${avgScore}% average across completed attempts.` : "Submit an exam or mock interview to create a score signal." },
+    { title: "Prep evidence", detail: `${row.evidenceCount} tracked item${row.evidenceCount === 1 ? "" : "s"} connected to this job.` },
+  ];
+}
+
+function buildAnalyticsScope({ selectedPlan, detailedPlans, completedTasks, examAttempts, mockAttempts, notes, generatedStudyNotes, calendarEvents, recentActivity }) {
+  const planIds = selectedPlan ? new Set([String(selectedPlan.prep_plan_id || selectedPlan.id)]) : new Set(detailedPlans.map((item) => String(item.prep_plan_id || item.id)));
+  const inScope = (attempt) => !planIds.size || planIds.has(String(attempt.prepPlanId));
+  const scopedExamAttempts = examAttempts.filter(inScope);
+  const scopedMockAttempts = mockAttempts.filter(inScope);
+  const completeExams = scopedExamAttempts.filter((attempt) => attempt.status === "complete");
+  const completeMocks = scopedMockAttempts.filter((attempt) => attempt.status === "complete");
+  const completeAttempts = [...completeExams, ...completeMocks];
+  const selectedPlans = selectedPlan ? [selectedPlan] : detailedPlans;
+  const detailedSelectedPlans = selectedPlans.filter((item) => Array.isArray(item.tasks) && item.tasks.length);
+  const noteTasks = detailedSelectedPlans.flatMap((item) => buildPlanMilestones(item, "").filter((day) => !day.isFinal).flatMap((day) => buildDailyStudyTasks(item, day.day)));
+  const completedNotes = countCompletedDayTasks(noteTasks.filter((task) => task.task_type === "study_note"), completedTasks);
+  const completedDays = detailedSelectedPlans.reduce((sum, item) => {
+    const days = buildPlanMilestones(item, "").filter((day) => !day.isFinal);
+    return sum + days.filter((day) => isPlanDayComplete(item, day.day, completedTasks)).length;
+  }, 0);
+  const totalDays = detailedSelectedPlans.reduce((sum, item) => sum + buildPlanMilestones(item, "").filter((day) => !day.isFinal).length, 0);
+  const scopedPlanIds = new Set(selectedPlans.map((item) => String(item.prep_plan_id || item.id)));
+  const upcomingEvents = calendarEvents.filter((event) => !scopedPlanIds.size || scopedPlanIds.has(String(event.planId || ""))).sort((a, b) => String(a.date || a.start || "").localeCompare(String(b.date || b.start || "")));
+  const savedGeneratedNotes = Object.values(generatedStudyNotes || {}).filter((note) => !scopedPlanIds.size || scopedPlanIds.has(String(note.planId)));
+  return {
+    examAttempts: scopedExamAttempts,
+    mockAttempts: scopedMockAttempts,
+    completeExams,
+    completeMocks,
+    completeAttempts,
+    averageExamScore: averageScorePercent(completeExams),
+    averageMockScore: averageScorePercent(completeMocks),
+    noteTasks: noteTasks.filter((task) => task.task_type === "study_note"),
+    completedNotes,
+    planProgress: totalDays ? Math.round((completedDays / totalDays) * 100) : 0,
+    notes: notes.filter((note) => !scopedPlanIds.size || scopedPlanIds.has(String(note.planId || ""))),
+    generatedNotes: savedGeneratedNotes,
+    upcomingEvents,
+    recentActivity,
+  };
+}
+
+function averageScorePercent(attempts) {
+  const scores = attempts.map((attempt) => Number(attempt.score)).filter(Number.isFinite);
+  if (!scores.length) return 0;
+  return Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 100);
+}
+
+function buildAnalyticsPlanSummary(plan, completedTasks, examAttempts, mockAttempts) {
+  if (!plan?.tasks?.length) {
+    const planId = plan.prep_plan_id || plan.id;
+    const attempts = [...examAttempts, ...mockAttempts].filter((attempt) => String(attempt.prepPlanId) === String(planId));
+    return {
+      id: planId,
+      title: plan.job_title || "Prep plan",
+      daysLeft: plan.days_until_interview ?? 0,
+      tasksDone: 0,
+      tasksTotal: Number(plan.task_count || 0),
+      attempts: attempts.length,
+      progress: 0,
+    };
+  }
+  return buildPlanProgressSummary(plan, completedTasks, examAttempts, mockAttempts);
+}
+
+function buildScoreTrend(attempts) {
+  return attempts
+    .map((attempt, index) => ({
+      id: attempt.id || `${attempt.kind}-${index}`,
+      label: attempt.kind === "mock" ? "Mock" : "Exam",
+      score: Math.round(Number(attempt.score || 0) * 100),
+      createdAt: attempt.completedAt || attempt.createdAt || "",
+    }))
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    .slice(-10);
+}
+
+function buildOverallReadiness({ planComparisons, scoped, reviewQueue }) {
+  const planScore = planComparisons.length ? Math.round(planComparisons.reduce((sum, item) => sum + item.progress, 0) / planComparisons.length) : 0;
+  const notesScore = scoped.noteTasks.length ? Math.round((scoped.completedNotes / scoped.noteTasks.length) * 100) : 0;
+  const examsScore = scoped.averageExamScore || 0;
+  const mocksScore = scoped.averageMockScore || 0;
+  const reviewScore = scoped.completeAttempts.length ? Math.max(0, Math.min(100, 100 - reviewQueue.length * 8)) : 20;
+  const components = [
+    { label: "Plan", value: planScore, weight: 0.2 },
+    { label: "Notes", value: notesScore, weight: 0.2 },
+    { label: "Exams", value: examsScore, weight: 0.25 },
+    { label: "Mocks", value: mocksScore, weight: 0.2 },
+    { label: "Review", value: reviewScore, weight: 0.15 },
+  ];
+  return { components, score: Math.round(components.reduce((sum, item) => sum + item.value * item.weight, 0)) };
+}
+
+function buildAnalyticsInsight({ selectedPlan, scoped, topicInsights, reviewQueue, readinessScore }) {
+  if (!selectedPlan && !scoped.completeAttempts.length) return "Start by generating a plan, reading notes, and submitting a first practice exam so analytics can measure real progress.";
+  if (reviewQueue.length) return `Review queue has ${reviewQueue.length} weak answer${reviewQueue.length === 1 ? "" : "s"}. Fixing those will raise readiness faster than creating more random practice.`;
+  if (topicInsights.weaknesses.length) return `Focus next on ${topicInsights.weaknesses.slice(0, 3).join(", ")}. These topics are dragging down score quality.`;
+  if (readinessScore >= 80) return "The current trend is strong. Keep one final hard mock interview and a light review before the interview.";
+  return "The next best move is to complete today’s notes, then submit a scoped practice exam to create a sharper feedback loop.";
+}
+
+function buildPrepFunnel({ jobs, detailedPlans, scoped, reviewQueue }) {
+  const max = Math.max(1, jobs.length, detailedPlans.length, scoped.noteTasks.length, scoped.completeExams.length, scoped.completeMocks.length, reviewQueue.length);
+  return [
+    { label: "Saved jobs", value: jobs.length },
+    { label: "Prep plans", value: detailedPlans.length },
+    { label: "Note tasks", value: scoped.noteTasks.length },
+    { label: "Submitted exams", value: scoped.completeExams.length },
+    { label: "Completed mocks", value: scoped.completeMocks.length },
+    { label: "Review items", value: reviewQueue.length },
+  ].map((item) => ({ ...item, percent: Math.max(6, Math.round((item.value / max) * 100)) }));
 }
 
 function buildReadinessReport({ plan, planProgress, noteTasks, completedNotes, selectedCompleteExams, selectedCompleteMocks, selectedExamAttempts, selectedMockAttempts, reviewQueue }) {
@@ -4791,28 +5559,6 @@ function PasswordCriteria({ password }) {
   );
 }
 
-function AnalyticsDevelopmentView() {
-  return (
-    <section className="page-stack">
-      <section className="panel page-panel analytics-dev-panel">
-        <div className="analytics-dev-copy">
-          <span>Analytics</span>
-          <h2>Still in development</h2>
-          <p>
-            This section will become the deeper reporting layer for InterviewPrep AI: topic performance,
-            exam trends, mock interview growth, weak-area heatmaps, time-to-interview readiness, and job-by-job comparisons.
-          </p>
-        </div>
-        <div className="analytics-dev-grid">
-          <article><BarChart3 size={20} /><strong>Score trends</strong><span>Track exam and mock scores over time.</span></article>
-          <article><Gauge size={20} /><strong>Readiness signals</strong><span>Connect notes, attempts, review, and completion.</span></article>
-          <article><BrainCircuit size={20} /><strong>AI insights</strong><span>Summarize what the user should improve next.</span></article>
-        </div>
-      </section>
-    </section>
-  );
-}
-
 function AboutView({ onBack }) {
   const features = [
     {
@@ -4850,8 +5596,22 @@ function AboutView({ onBack }) {
       visual: ["Score", "Feedback", "Readiness"],
       metric: "05",
     },
+    {
+      title: "Interview data and analytics",
+      body: "The product turns preparation into a living data layer: saved jobs, generated plans, completed notes, exam history, mock feedback, calendar pressure, and recent activity all connect back to the role.",
+      detail: "Interview Data gives each job its own intelligence packet and question bank. Analytics compares readiness, trends, weak topics, and next actions across all saved prep plans.",
+      visual: ["Data packet", "Trends", "Next action"],
+      metric: "06",
+    },
+    {
+      title: "Browser capture bubble",
+      body: "The extension lets users capture job descriptions while browsing job boards, save URLs, paste manually, or send selected job content into InterviewPrep AI without breaking their application workflow.",
+      detail: "The bubble connects to the logged-in account, saves jobs directly, and can trigger prep plan generation from the page where the opportunity was found.",
+      visual: ["Capture", "Save", "Prepare"],
+      metric: "07",
+    },
   ];
-  const pipeline = ["Job Description", "AI Analysis", "Prep Plan", "Daily Notes", "Focused Exam", "Mock Interview", "Review Loop"];
+  const pipeline = ["Job Description", "AI Analysis", "Prep Plan", "Daily Notes", "Focused Exam", "Mock Interview", "Review Loop", "Analytics"];
   return (
     <section className="about-page">
       <section className="about-hero">
@@ -4943,6 +5703,10 @@ function AboutView({ onBack }) {
             ["Notes", "Organize job-specific notes into folders, edit them, and improve them with AI."],
             ["Mock Interviews", "Practice spoken answers with timed, voice-read questions and review feedback."],
             ["Progress", "Track readiness across notes, exams, mocks, review queue, and saved prep plans."],
+            ["Interview Data", "Browse a role-by-role data library with job signals, evidence, question banks, and preparation packets."],
+            ["Analytics", "Measure readiness trends, score history, topic weaknesses, completion funnel, and upcoming schedule pressure."],
+            ["Calendar", "See prep work, interviews, custom events, and plan tasks in a calendar workflow."],
+            ["Capture Bubble", "Save job descriptions or URLs from job boards through the browser extension."],
           ].map(([name, detail]) => (
             <article key={name}>
               <strong>{name}</strong>
