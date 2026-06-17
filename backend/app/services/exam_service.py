@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import AnswerAttempt, Exam, PrepPlan, Question, User
+from app.ai_policy import require_ai_result
 from app.schemas.exam import (
     AnswerResult,
     ExamGenerateRequest,
@@ -37,6 +38,11 @@ class AIExamOutput(BaseModel):
     questions: list[AIExamQuestion]
 
 
+class AIAnswerScore(BaseModel):
+    score: float = Field(ge=0, le=1)
+    feedback: str
+
+
 def generate_exam_for_plan(
     db: Session,
     request: ExamGenerateRequest,
@@ -61,6 +67,9 @@ def generate_exam_for_plan(
 
     generated = _generate_questions_with_ai(plan, topics, request, settings) or []
     if len(generated) < request.question_count:
+        require_ai_result(
+            "AI exam generation did not return enough questions. Enable local fallback in settings to fill the exam with offline questions."
+        )
         generated.extend(_generate_questions(topics, request.question_count - len(generated), request.difficulty, request.question_types))
     generated = [_constrain_question_topics(question, topics, index) for index, question in enumerate(generated)]
     db_questions: list[Question] = []
@@ -103,7 +112,13 @@ def submit_exam_answers(
         answer_text = (submitted_answers.get(question.id) or "").strip()
 
         if answer_text:
-            score, feedback = _score_answer_with_ai(question, answer_text, settings) or _score_answer(question, answer_text)
+            ai_score = _score_answer_with_ai(question, answer_text, settings)
+            if ai_score:
+                score, feedback = ai_score
+            else:
+                if question.question_type not in {"multiple_choice", "multiple_select", "one_word", "fill_blank"}:
+                    require_ai_result("AI exam scoring failed. Enable local fallback in settings to score written answers offline.")
+                score, feedback = _score_answer(question, answer_text)
         else:
             score, feedback = 0.0, "Not answered. This question counts as zero so the exam score reflects the full attempt."
         db.add(
@@ -189,6 +204,7 @@ def _generate_questions_with_ai(
     settings: Optional[Settings],
 ) -> Optional[list[dict]]:
     if not settings or not settings.ai_enabled:
+        require_ai_result("No AI provider is configured for exam generation. Enable local fallback in settings to create an offline exam.")
         return None
 
     prompt = _exam_prompt(plan, topics, request)
@@ -205,9 +221,11 @@ def _generate_questions_with_ai(
             data = generate_gemini_json(settings, prompt, _gemini_exam_schema())
         except Exception as exc:
             logger.warning("Gemini exam generation failed: %s", exc)
+            require_ai_result("AI exam generation failed. Enable local fallback in settings to create an offline exam.")
             return None
 
     if data is None:
+        require_ai_result("AI exam generation failed. Enable local fallback in settings to create an offline exam.")
         return None
 
     raw_questions = data if isinstance(data, list) else data.get("questions", [])
@@ -228,7 +246,10 @@ def _generate_questions_with_ai(
                 "options": _normalize_options(item.get("options"), question_type, index),
             }
         )
-    return questions[: request.question_count] or None
+    if not questions:
+        require_ai_result("AI exam generation returned no usable questions. Enable local fallback in settings to create an offline exam.")
+        return None
+    return questions[: request.question_count]
 
 
 def _generate_questions_with_openai(prompt: str, settings: Settings) -> dict:
@@ -486,7 +507,7 @@ def _score_answer_with_ai(
     answer_text: str,
     settings: Optional[Settings],
 ) -> Optional[tuple[float, str]]:
-    if not settings or not settings.gemini_enabled or question.question_type in {"multiple_choice", "multiple_select", "one_word", "fill_blank"}:
+    if not settings or not settings.ai_enabled or question.question_type in {"multiple_choice", "multiple_select", "one_word", "fill_blank"}:
         return None
 
     prompt = (
@@ -496,13 +517,37 @@ def _score_answer_with_ai(
         f"Expected answer notes: {question.expected_answer}\n"
         f"Candidate answer: {answer_text}"
     )
-    try:
-        data = generate_gemini_json(settings, prompt, _gemini_score_schema())
-    except Exception as exc:
-        logger.warning("Gemini exam scoring failed: %s", exc)
-        return None
 
-    return round(float(data["score"]), 2), data["feedback"]
+    if settings.openai_enabled:
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=settings.openai_api_key)
+            response = client.responses.parse(
+                model=settings.openai_model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": "You score interview exam answers as structured JSON with strict, fair grading.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                text_format=AIAnswerScore,
+            )
+            data = response.output_parsed
+            return round(float(data.score), 2), data.feedback
+        except Exception as exc:
+            logger.warning("OpenAI exam scoring failed: %s", exc)
+
+    if settings.gemini_enabled:
+        try:
+            data = generate_gemini_json(settings, prompt, _gemini_score_schema())
+            return round(float(data["score"]), 2), data["feedback"]
+        except Exception as exc:
+            logger.warning("Gemini exam scoring failed: %s", exc)
+
+    require_ai_result("AI exam scoring failed. Enable local fallback in settings to score written answers offline.")
+    return None
 
 
 def _gemini_exam_schema() -> dict:

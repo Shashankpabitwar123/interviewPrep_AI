@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import MockInterview, MockMessage, PrepPlan
+from app.ai_policy import require_ai_result
 from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest
 from app.services.gemini_service import generate_gemini_json
 
@@ -44,7 +45,12 @@ def start_mock_interview(
     config = _mock_config(request)
     db.add(MockMessage(mock_interview_id=interview.id, role="meta", content=json.dumps(config)))
     question_type = config["question_types"][0]
-    question = _question_with_ai(plan, topic, question_type, config, settings) or _question(topic, question_type, config["difficulty"])
+    ai_question = _question_with_ai(plan, topic, question_type, config, settings)
+    if ai_question:
+        question = ai_question
+    else:
+        require_ai_result("AI mock interview generation failed. Enable local fallback in settings to start an offline mock interview.")
+        question = _question(topic, question_type, config["difficulty"])
     db.add(MockMessage(mock_interview_id=interview.id, role="interviewer", content=question))
     db.commit()
     db.refresh(interview)
@@ -74,6 +80,7 @@ def answer_mock_question(
     if ai_feedback:
         score, feedback, follow_up = ai_feedback
     else:
+        require_ai_result("AI mock interview feedback failed. Enable local fallback in settings to score the answer offline.")
         score, feedback = _score_answer(request.answer_text)
         follow_up = _follow_up(interview.current_topic, score, config)
     db.add(MockMessage(mock_interview_id=interview.id, role="candidate", content=request.answer_text))
@@ -160,6 +167,7 @@ def _question_with_ai(
     settings: Optional[Settings],
 ) -> Optional[str]:
     if not settings or not settings.ai_enabled:
+        require_ai_result("No AI provider is configured for mock interview questions. Enable local fallback in settings to use offline questions.")
         return None
 
     prompt = _question_prompt(plan, topic, question_type, config)
@@ -189,6 +197,7 @@ def _question_with_ai(
             return data["question"]
         except Exception as exc:
             logger.warning("Gemini mock interview question failed: %s", exc)
+    require_ai_result("AI mock interview question generation failed. Enable local fallback in settings to use offline questions.")
     return None
 
 
@@ -232,6 +241,7 @@ def _mock_feedback_with_ai(
     settings: Optional[Settings],
 ) -> Optional[tuple[float, str, str]]:
     if not settings or not settings.ai_enabled:
+        require_ai_result("No AI provider is configured for mock interview feedback. Enable local fallback in settings to score answers offline.")
         return None
 
     previous_question = ""
@@ -277,6 +287,7 @@ def _mock_feedback_with_ai(
             return round(float(data["score"]), 2), data["feedback"], data["follow_up_question"]
         except Exception as exc:
             logger.warning("Gemini mock interview feedback failed: %s", exc)
+    require_ai_result("AI mock interview feedback failed. Enable local fallback in settings to score answers offline.")
     return None
 
 

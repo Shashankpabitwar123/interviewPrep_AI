@@ -1,9 +1,11 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.ai_policy import AIUnavailableError, reset_allow_local_fallback, set_allow_local_fallback
 from app.config import get_settings
 from app.database import create_db_and_tables
 from app.routers import auth, exams, experiences, health, jobs, mock_interviews, prep_plans, study_notes
@@ -25,6 +27,21 @@ app = FastAPI(
 )
 
 settings = get_settings()
+
+
+@app.middleware("http")
+async def ai_fallback_policy(request: Request, call_next):
+    allow_fallback = request.headers.get("x-allow-local-fallback", "false").lower() in {"1", "true", "yes", "on"}
+    token = set_allow_local_fallback(allow_fallback)
+    try:
+        return await call_next(request)
+    finally:
+        reset_allow_local_fallback(token)
+
+
+@app.exception_handler(AIUnavailableError)
+async def ai_unavailable_handler(_: Request, exc: AIUnavailableError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 # Local development can use "*"; production should set FRONTEND_ORIGINS to the
 # deployed frontend domain so only the real website can call the API.

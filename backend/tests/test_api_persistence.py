@@ -320,4 +320,6 @@ def _client_with_memory_db() -> TestClient:
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update({"X-Allow-Local-Fallback": "true"})
+    return client

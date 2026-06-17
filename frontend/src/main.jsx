@@ -132,6 +132,7 @@ function App() {
   const [loadingExamTaskId, setLoadingExamTaskId] = useState([]);
   const [improvingNoteId, setImprovingNoteId] = useState("");
   const [soundVolume, setSoundVolume] = useState(() => loadSoundVolume());
+  const [allowLocalFallback, setAllowLocalFallback] = useState(() => loadAllowLocalFallback());
   const [activeView, setActiveView] = useState("dashboard");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -215,6 +216,7 @@ function App() {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
     };
+    headers["X-Allow-Local-Fallback"] = allowLocalFallback ? "true" : "false";
     const token = options.authTokenOverride ?? authToken;
     if (token) headers.Authorization = `Bearer ${token}`;
     const requestOptions = { ...options, headers };
@@ -1327,7 +1329,7 @@ function App() {
     setLoading(true);
     setStatus("Generating Study Notes");
     try {
-      let content = generateStudyNote(plan, task);
+      let content = null;
       if (plan?.prep_plan_id) {
         const response = await apiFetch(`/study-notes/generate`, {
           method: "POST",
@@ -1340,8 +1342,11 @@ function App() {
             instructions: task.instructions || "",
           }),
         });
-        if (response.ok) content = await response.json();
+        if (!response.ok) throw new Error(await response.text());
+        content = await response.json();
       }
+      if (!content && allowLocalFallback) content = generateStudyNote(plan, task);
+      if (!content) throw new Error("AI study-note generation is unavailable.");
       setGeneratedStudyNotes((current) => {
         const next = {
           ...current,
@@ -1359,6 +1364,10 @@ function App() {
       setStatus(content.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
       addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: content.source || "", target: "prep" });
     } catch (error) {
+      if (!allowLocalFallback) {
+        setStatus("AI Study Notes Unavailable");
+        return;
+      }
       const fallbackContent = generateStudyNote(plan, task);
       setGeneratedStudyNotes((current) => {
         const next = {
@@ -1464,7 +1473,7 @@ function App() {
       const planDetail = await response.json();
       const noteTask = buildDailyStudyTasks(planDetail, 1).find((task) => task.task_type === "study_note");
       if (!noteTask) throw new Error("No study topic found for this plan");
-      let content = generateStudyNote(planDetail, noteTask);
+      let content = null;
       const generatedResponse = await apiFetch(`/study-notes/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1476,7 +1485,10 @@ function App() {
           instructions: noteTask.instructions || "",
         }),
       });
-      if (generatedResponse.ok) content = await generatedResponse.json();
+      if (!generatedResponse.ok) throw new Error(await generatedResponse.text());
+      content = await generatedResponse.json();
+      if (!content && allowLocalFallback) content = generateStudyNote(planDetail, noteTask);
+      if (!content) throw new Error("AI note generation is unavailable.");
       const finalFolder = folder?.trim() || "Generated Notes";
       const generatedNote = {
         id: crypto.randomUUID(),
@@ -1576,6 +1588,10 @@ function App() {
       playGeneratedSound(soundVolume);
       setStatus(improved.source === "openai" ? "Note Improved With AI" : "Note Improved");
     } catch (error) {
+      if (!allowLocalFallback) {
+        setStatus("AI Note Improvement Failed");
+        return;
+      }
       updateNote(noteId, {
         ...sourceNote,
         body: improveNoteLocally(sourceNote),
@@ -1779,6 +1795,8 @@ function App() {
                 setTheme={setTheme}
                 soundVolume={soundVolume}
                 setSoundVolume={setSoundVolume}
+                allowLocalFallback={allowLocalFallback}
+                setAllowLocalFallback={setAllowLocalFallback}
                 deletedJobs={deletedJobs}
                 extensionState={extensionState}
                 restoreDeletedJob={restoreDeletedJob}
@@ -2887,6 +2905,20 @@ function StudyNoteModal({ reader, onDone, onClose }) {
         },
       ]);
     } catch (error) {
+      if (!allowLocalFallback) {
+        setAnswers((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            question: submittedQuestion,
+            answer: "AI is not responding right now, and local fallback is turned off in settings. Turn on local fallback if you want an offline answer when the API is unavailable.",
+            interviewUse: "",
+            nextSteps: [],
+            source: "AI unavailable",
+          },
+        ]);
+        return;
+      }
       const fallback = answerStudyQuestion(reader.content, submittedQuestion);
       setAnswers((current) => [
         ...current,
@@ -4531,6 +4563,8 @@ function SettingsView({
   setTheme,
   soundVolume,
   setSoundVolume,
+  allowLocalFallback,
+  setAllowLocalFallback,
   deletedJobs,
   extensionState,
   restoreDeletedJob,
@@ -4553,6 +4587,11 @@ function SettingsView({
     localStorage.setItem("interviewprep_theme", nextTheme);
   }
 
+  function updateFallbackPreference(nextValue) {
+    setAllowLocalFallback(nextValue);
+    localStorage.setItem("interviewprep_allow_local_fallback", nextValue ? "true" : "false");
+  }
+
   return (
     <div className="settings-popover">
       <header>
@@ -4571,6 +4610,26 @@ function SettingsView({
         <div className="settings-mini-card">
           <strong>Backend</strong>
           <span>{statusText(status)}</span>
+        </div>
+        <div className={`settings-mini-card ai-fallback-card ${allowLocalFallback ? "active" : ""}`}>
+          <div className="sound-setting-head">
+            <strong><BrainCircuit size={16} /> AI generation</strong>
+            <span>{allowLocalFallback ? "Fallback on" : "AI only"}</span>
+          </div>
+          <button
+            type="button"
+            className={`theme-toggle extension-toggle ${allowLocalFallback ? "is-on" : ""}`}
+            onClick={() => updateFallbackPreference(!allowLocalFallback)}
+            aria-pressed={allowLocalFallback}
+          >
+            <span />
+            <strong>Use local fallback if AI is not responding</strong>
+          </button>
+          <small>
+            {allowLocalFallback
+              ? "If the API fails, the app can still create offline backup content."
+              : "Quality-first mode: plans, notes, exams, interviews, and AI answers must come from the API."}
+          </small>
         </div>
         <div className="settings-mini-card theme-settings-card">
           <div className="sound-setting-head">
@@ -5501,6 +5560,10 @@ function loadSoundVolume() {
 
 function loadTheme() {
   return localStorage.getItem("interviewprep_theme") === "dark" ? "dark" : "light";
+}
+
+function loadAllowLocalFallback() {
+  return localStorage.getItem("interviewprep_allow_local_fallback") === "true";
 }
 
 function isStrongPassword(password) {

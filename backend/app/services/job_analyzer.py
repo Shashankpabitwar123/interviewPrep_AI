@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 from app.config import Settings
+from app.ai_policy import require_ai_result
 from app.schemas.job_analysis import (
     InterviewFocus,
     JobAnalysisRequest,
@@ -38,8 +39,10 @@ def analyze_job_description(request: JobAnalysisRequest, settings: Settings) -> 
         except Exception:
             # The app should still work during local development if the API key,
             # network, or model response fails.
+            require_ai_result("OpenAI could not analyze this job. Enable local fallback in settings to use the offline analyzer.")
             return _heuristic_analysis(request, source="heuristic_fallback")
 
+    require_ai_result("OpenAI is not configured for job analysis. Enable local fallback in settings to use the offline analyzer.")
     return _heuristic_analysis(request, source="heuristic")
 
 
@@ -62,8 +65,10 @@ def identify_job(
             company = user_company or ai_company or infer_company_name("Auto-detect company", description, source_url)
             return _clean_role_title(title), _clean_company_candidate(company)
         except Exception:
+            require_ai_result("OpenAI could not detect the job title/company. Enable local fallback in settings to use local detection.")
             pass
 
+    require_ai_result("OpenAI is not configured for job title/company detection. Enable local fallback in settings to use local detection.")
     title = user_title or infer_role_title("Auto-detect role", description, source_url)
     company = user_company or infer_company_name("Auto-detect company", description, source_url)
     return _clean_role_title(title), _clean_company_candidate(company)
@@ -188,7 +193,9 @@ def build_job_description_brief(title: str, description: str, source_url: str | 
         try:
             return _brief_with_openai(title, description, source_url, settings)
         except Exception:
+            require_ai_result("OpenAI could not build the job description brief. Enable local fallback in settings to use an offline brief.")
             return _heuristic_brief(title, description, source_url, source="heuristic_fallback")
+    require_ai_result("OpenAI is not configured for job description briefs. Enable local fallback in settings to use an offline brief.")
     return _heuristic_brief(title, description, source_url, source="heuristic")
 
 
@@ -197,7 +204,9 @@ def answer_job_description_question(title: str, description: str, question: str,
         try:
             return _description_answer_with_openai(title, description, question, settings)
         except Exception:
+            require_ai_result("OpenAI could not answer this job-description question. Enable local fallback in settings to use an offline answer.")
             pass
+    require_ai_result("OpenAI is not configured for job-description questions. Enable local fallback in settings to use an offline answer.")
     return JobDescriptionAskResponse(
         answer=(
             f"For {title}, focus on the exact responsibilities in the description. "

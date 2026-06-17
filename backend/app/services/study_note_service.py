@@ -16,6 +16,7 @@ from app.schemas.study_note import (
     StudyResource,
     WebResearchSource,
 )
+from app.ai_policy import require_ai_result
 from app.services.gemini_service import generate_gemini_json
 from app.services.research_service import ResearchResult, research_for_note
 
@@ -47,6 +48,7 @@ def generate_study_note(db: Session, request: StudyNoteRequest, settings: Option
         except Exception as exc:
             logger.warning("Gemini study note generation failed: %s", exc)
 
+    require_ai_result("AI study-note generation failed. Enable local fallback in settings to create an offline note.")
     return _fallback_note(plan, request, research, source="heuristic")
 
 
@@ -57,6 +59,7 @@ def answer_note_question(request: StudyNoteAskRequest, settings: Optional[Settin
             return _answer_with_openai(request, settings)
         except Exception as exc:
             logger.warning("OpenAI study note question failed: %s", exc)
+    require_ai_result("OpenAI could not answer this note question. Enable local fallback in settings to use an offline answer.")
     return _fallback_note_answer(request)
 
 
@@ -66,6 +69,7 @@ def improve_note(request: StudyNoteImproveRequest, settings: Optional[Settings])
             return _improve_with_openai(request, settings)
         except Exception as exc:
             logger.warning("OpenAI note improvement failed: %s", exc)
+    require_ai_result("OpenAI could not improve this note. Enable local fallback in settings to use offline cleanup.")
     return _fallback_improved_note(request)
 
 

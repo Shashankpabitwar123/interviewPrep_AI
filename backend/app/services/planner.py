@@ -7,6 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.config import Settings
+from app.ai_policy import require_ai_result
 from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepTask, PrepTaskType, SkillSignal
 from app.services.gemini_service import GeminiQuotaError, generate_gemini_json
 
@@ -58,9 +59,11 @@ def generate_prep_plan(request: PrepPlanRequest, settings: Optional[Settings] = 
                     return _generate_with_gemini(request, settings, days_until_interview)
                 except GeminiQuotaError as exc:
                     logger.warning("Gemini prep plan quota exceeded after OpenAI failure: %s", exc)
+                    require_ai_result("AI prep-plan generation hit a quota limit. Enable local fallback in settings to create an offline plan.")
                     return _generate_heuristic_plan(request, days_until_interview, plan_source="quota_fallback")
                 except Exception as exc:
                     logger.warning("Gemini prep plan generation failed after OpenAI failure: %s", exc)
+            require_ai_result("AI prep-plan generation failed. Enable local fallback in settings to create an offline plan.")
             return _generate_heuristic_plan(request, days_until_interview, plan_source="heuristic_fallback")
 
     if settings and settings.gemini_enabled:
@@ -68,11 +71,14 @@ def generate_prep_plan(request: PrepPlanRequest, settings: Optional[Settings] = 
             return _generate_with_gemini(request, settings, days_until_interview)
         except GeminiQuotaError as exc:
             logger.warning("Gemini prep plan quota exceeded: %s", exc)
+            require_ai_result("AI prep-plan generation hit a quota limit. Enable local fallback in settings to create an offline plan.")
             return _generate_heuristic_plan(request, days_until_interview, plan_source="quota_fallback")
         except Exception as exc:
             logger.warning("Gemini prep plan generation failed: %s", exc)
+            require_ai_result("AI prep-plan generation failed. Enable local fallback in settings to create an offline plan.")
             return _generate_heuristic_plan(request, days_until_interview, plan_source="heuristic_fallback")
 
+    require_ai_result("No AI provider is configured for prep-plan generation. Enable local fallback in settings to create an offline plan.")
     return _generate_heuristic_plan(request, days_until_interview, plan_source="heuristic")
 
 
