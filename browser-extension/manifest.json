@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "InterviewPrep AI Capture",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Capture job posts from career sites and send them to InterviewPrep AI.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": [

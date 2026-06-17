@@ -112,7 +112,7 @@ async function setBubbleEnabled(enabled) {
 
 async function saveJob(payload, sender) {
   const normalized = normalizeJobPayload(payload, sender);
-  const title = normalized.job_title || payload.jobTitle || "Captured job";
+  const title = normalized.job_title === "Auto-detect role" ? "Job description" : normalized.job_title || "Captured job";
   await broadcastCaptureEvent({ event: "captureStatus", action: "job", status: "Saving job from bubble", title });
   try {
     const response = await authedFetch("/jobs/analyze", {
@@ -130,13 +130,14 @@ async function saveJob(payload, sender) {
 
 async function generatePlan(payload, sender) {
   const normalized = normalizeJobPayload(payload, sender);
-  const title = normalized.job_title || "Captured job";
+  const title = normalized.job_title === "Auto-detect role" ? "Job description" : normalized.job_title || "Captured job";
   await broadcastCaptureEvent({ event: "captureStatus", action: "plan", status: "Generating prep plan from bubble", title });
   try {
     const response = await authedFetch("/prep-plans", {
       method: "POST",
       body: JSON.stringify({
         job_title: normalized.job_title,
+        company: normalized.company,
         job_description: normalized.job_description,
         source_url: normalized.source_url,
         interview_at: payload.interviewAt || defaultInterviewDate(),
@@ -221,10 +222,12 @@ function sendTabMessage(tabId, message) {
 
 function normalizeJobPayload(payload, sender) {
   const description = String(payload.description || "").trim();
-  const url = payload.sourceUrl || sender?.tab?.url || "";
+  const url = String(payload.sourceUrl || sender?.tab?.url || "").trim();
   if (!description && !url) throw new Error("Paste a job description, auto-copy page text, or save the URL first.");
+  const isUrlOnly = payload.saveMode === "url" && !description;
   return {
-    job_title: payload.jobTitle || sender?.tab?.title || "Auto-detect role",
+    job_title: isUrlOnly ? payload.jobTitle || sender?.tab?.title || "Saved job URL" : "Auto-detect role",
+    company: "Auto-detect company",
     job_description: description || undefined,
     source_url: url || undefined,
     save_mode: payload.saveMode || undefined,

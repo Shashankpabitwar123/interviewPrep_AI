@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_VERSION = "0.2.2";
+  const CONTENT_VERSION = "0.2.3";
   if (window.top !== window) return;
   const existingRoot = document.getElementById("interviewprep-capture-root");
   if (existingRoot?.dataset?.version === CONTENT_VERSION) return;
@@ -55,9 +55,8 @@
         </div>
         <button type="button" data-action="close" aria-label="Close">×</button>
       </header>
-      <textarea placeholder="Auto-copy, manual paste, or URL will appear here. You can edit before saving."></textarea>
+      <textarea placeholder="Paste or auto-copy the job description here. AI will detect the job title and company."></textarea>
       <div class="ipai-capture-meta">
-        <input class="ipai-title" placeholder="Job title (AI can detect)" />
         <input class="ipai-date" type="datetime-local" />
         <input class="ipai-hours" type="number" min="0.5" max="10" step="0.5" value="3" />
       </div>
@@ -75,7 +74,6 @@
   const radial = root.querySelector(".ipai-radial");
   const panel = root.querySelector(".ipai-panel");
   const textarea = root.querySelector("textarea");
-  const titleInput = root.querySelector(".ipai-title");
   const dateInput = root.querySelector(".ipai-date");
   const hoursInput = root.querySelector(".ipai-hours");
   const statusEl = root.querySelector(".ipai-status");
@@ -245,7 +243,6 @@
       setStatus("Copied the current page URL. Save it to your saved jobs.");
     }
     textarea.value = state.description;
-    titleInput.value = titleInput.value || guessTitle();
     updateSubtitle();
     if (state.description) setStatus(`Captured ${state.description.length.toLocaleString()} characters.`);
   }
@@ -270,7 +267,8 @@
     const textValue = textarea.value.trim();
     const isUrlMode = state.mode === "url";
     return {
-      jobTitle: titleInput.value.trim() || guessTitle(),
+      jobTitle: isUrlMode ? (document.title || "Saved job URL") : "Auto-detect role",
+      company: "Auto-detect company",
       description: isUrlMode ? "" : textValue,
       sourceUrl: isUrlMode ? textValue || window.location.href : window.location.href,
       saveMode: isUrlMode ? "url" : undefined,
@@ -291,11 +289,6 @@
       .map((node) => node.innerText || "")
       .sort((a, b) => b.length - a.length)[0] || "";
     return text.replace(/\n{3,}/g, "\n\n").trim().slice(0, 25000);
-  }
-
-  function guessTitle() {
-    const heading = document.querySelector("h1")?.innerText?.trim();
-    return heading || document.title || "Auto-detect role";
   }
 
   function updateSubtitle() {

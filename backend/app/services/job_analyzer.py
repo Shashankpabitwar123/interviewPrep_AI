@@ -234,6 +234,12 @@ def _company_from_job_board_header(description: str) -> str:
         "assistant",
         "architect",
     )
+    for index, line in enumerate(lines[:8]):
+        if line.lower().endswith(" logo") and index + 1 < len(lines):
+            candidate = _clean_company_candidate(lines[index + 1])
+            if candidate:
+                return candidate
+
     clean_lines = [
         line for line in lines[:18]
         if line.lower() not in skipped

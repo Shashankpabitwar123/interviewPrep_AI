@@ -244,7 +244,7 @@
 
 .ipai-capture-meta {
   display: grid;
-  grid-template-columns: 1fr 132px 70px;
+  grid-template-columns: minmax(0, 1fr) 82px;
   gap: 8px;
 }
 
