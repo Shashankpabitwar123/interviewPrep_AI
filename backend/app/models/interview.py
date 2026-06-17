@@ -25,6 +25,20 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255))
 
 
+class EmailVerificationOTP(TimestampMixin, Base):
+    """Short-lived email verification code for account creation."""
+
+    __tablename__ = "email_verification_otps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    purpose: Mapped[str] = mapped_column(String(40), default="register")
+    code_hash: Mapped[str] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class JobPost(TimestampMixin, Base):
     """A job description or posting that the user wants to prepare for."""
 

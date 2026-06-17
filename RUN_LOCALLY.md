@@ -50,6 +50,17 @@ export OPENAI_MODEL="gpt-4o-mini"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+Optional Gmail OTP email delivery:
+
+```bash
+export SMTP_USERNAME="your_gmail_address@gmail.com"
+export SMTP_PASSWORD="your_gmail_app_password"
+export SMTP_FROM_EMAIL="your_gmail_address@gmail.com"
+export EMAIL_OTP_DEV_MODE="false"
+```
+
+For local development without Gmail SMTP, the backend returns a dev verification code in the create-account flow.
+
 Backend URLs:
 
 ```text

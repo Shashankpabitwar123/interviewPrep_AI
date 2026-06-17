@@ -1,6 +1,7 @@
 from app.models.interview import (
     AnswerAttempt,
     Exam,
+    EmailVerificationOTP,
     InterviewExperience,
     JobAnalysis,
     JobPost,
@@ -15,6 +16,7 @@ from app.models.interview import (
 __all__ = [
     "AnswerAttempt",
     "Exam",
+    "EmailVerificationOTP",
     "InterviewExperience",
     "JobAnalysis",
     "JobPost",

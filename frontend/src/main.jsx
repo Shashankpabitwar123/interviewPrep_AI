@@ -143,6 +143,9 @@ function App() {
   const [authMode, setAuthMode] = useState("login");
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
   const [authMessage, setAuthMessage] = useState("");
+  const [authMessageTone, setAuthMessageTone] = useState("error");
+  const [authOtpSent, setAuthOtpSent] = useState(false);
+  const [authOtpCode, setAuthOtpCode] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [extensionState, setExtensionState] = useState({
     installed: false,
@@ -1699,6 +1702,9 @@ function App() {
   function openAuth(modeName) {
     setAuthMode(modeName);
     setAuthMessage("");
+    setAuthMessageTone("error");
+    setAuthOtpSent(false);
+    setAuthOtpCode("");
     setAuthOpen(true);
   }
 
@@ -1706,14 +1712,31 @@ function App() {
     event.preventDefault();
     setAuthLoading(true);
     setAuthMessage("");
+    setAuthMessageTone("error");
 
     try {
       if (authMode === "register" && !isStrongPassword(authForm.password)) {
         throw new Error("Password must be 8+ characters and include at least one letter and one number.");
       }
+
+      if (authMode === "register" && !authOtpSent) {
+        const response = await apiFetch("/auth/register/otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: authForm.email }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || `API returned ${response.status}`);
+
+        setAuthOtpSent(true);
+        setAuthMessageTone("success");
+        setAuthMessage(body.dev_otp ? `${body.message} Dev code: ${body.dev_otp}` : body.message);
+        return;
+      }
+
       const endpoint = authMode === "register" ? "register" : "login";
       const payload = authMode === "register"
-        ? authForm
+        ? { ...authForm, otp_code: authOtpCode }
         : { email: authForm.email, password: authForm.password };
 
       const response = await apiFetch(`/auth/${endpoint}`, {
@@ -1729,11 +1752,14 @@ function App() {
       saveUserSession(body.user, body.access_token);
       setAuthOpen(false);
       setAuthForm({ name: "", email: body.user.email, password: "" });
+      setAuthOtpSent(false);
+      setAuthOtpCode("");
       reloadLocalWorkspaceState();
       setStatus(authMode === "register" ? "Account Created" : "Logged In");
       refreshJobs(jobMarkers, archivedJobIds, body.access_token);
       refreshSavedPlans(archivedJobIds, body.access_token);
     } catch (error) {
+      setAuthMessageTone("error");
       setAuthMessage(error.message);
     } finally {
       setAuthLoading(false);
@@ -2212,6 +2238,7 @@ function App() {
                   value={authForm.name}
                   onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })}
                   placeholder="Your name"
+                  disabled={authOtpSent}
                   required
                 />
               </label>
@@ -2223,6 +2250,7 @@ function App() {
                 value={authForm.email}
                 onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })}
                 placeholder="you@example.com"
+                disabled={authOtpSent}
                 required
               />
             </label>
@@ -2235,24 +2263,55 @@ function App() {
                 placeholder="At least 8 characters"
                 minLength={8}
                 maxLength={128}
+                disabled={authOtpSent}
                 required
               />
             </label>
             {authMode === "register" && (
               <PasswordCriteria password={authForm.password} />
             )}
+            {authMode === "register" && authOtpSent && (
+              <label>
+                Verification code
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  value={authOtpCode}
+                  onChange={(event) => setAuthOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="6-digit code"
+                  required
+                />
+              </label>
+            )}
 
-            {authMessage && <div className="auth-error">{authMessage}</div>}
+            {authMessage && <div className={`auth-message ${authMessageTone}`}>{authMessage}</div>}
 
             <button className="primary auth-submit" disabled={authLoading}>
-              {authLoading ? <Loader2 className="spin" size={16} /> : authMode === "register" ? <UserPlus size={16} /> : <LogIn size={16} />}
-              {authMode === "register" ? "Create Account" : "Login"}
+              {authLoading ? <Loader2 className="spin" size={16} /> : authMode === "register" && !authOtpSent ? <Bell size={16} /> : authMode === "register" ? <UserPlus size={16} /> : <LogIn size={16} />}
+              {authMode === "register" && !authOtpSent ? "Send Verification Code" : authMode === "register" ? "Verify & Create Account" : "Login"}
             </button>
+            {authMode === "register" && authOtpSent && (
+              <button
+                type="button"
+                className="switch-auth"
+                onClick={() => {
+                  setAuthOtpSent(false);
+                  setAuthOtpCode("");
+                  setAuthMessage("");
+                  setAuthMessageTone("error");
+                }}
+              >
+                Use a different email or resend code
+              </button>
+            )}
             <button
               type="button"
               className="switch-auth"
               onClick={() => {
                 setAuthMessage("");
+                setAuthMessageTone("error");
+                setAuthOtpSent(false);
+                setAuthOtpCode("");
                 setAuthMode(authMode === "register" ? "login" : "register");
               }}
             >

@@ -33,14 +33,8 @@ def test_job_analysis_endpoint_saves_and_reads_job() -> None:
 
 def test_logged_in_users_only_see_their_own_jobs() -> None:
     client = _client_with_memory_db()
-    first = client.post(
-        "/auth/register",
-        json={"name": "First User", "email": "first@example.com", "password": "password123"},
-    ).json()["access_token"]
-    second = client.post(
-        "/auth/register",
-        json={"name": "Second User", "email": "second@example.com", "password": "password123"},
-    ).json()["access_token"]
+    first = _register(client, {"name": "First User", "email": "first@example.com", "password": "password123"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "second@example.com", "password": "password123"}).json()["access_token"]
 
     client.post(
         "/jobs/analyze",
@@ -301,6 +295,17 @@ def test_mock_interview_flow() -> None:
     assert answer_response.status_code == 200
     assert answered["average_score"] > 0
     assert any(message["role"] == "feedback" for message in answered["messages"])
+
+
+def _request_otp(client: TestClient, email: str) -> str:
+    response = client.post("/auth/register/otp", json={"email": email})
+    assert response.status_code == 200
+    return response.json()["dev_otp"]
+
+
+def _register(client: TestClient, payload: dict[str, str]):
+    code = _request_otp(client, payload["email"])
+    return client.post("/auth/register", json={**payload, "otp_code": code})
 
 
 def _client_with_memory_db() -> TestClient:

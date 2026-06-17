@@ -4,8 +4,15 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserResponse
-from app.services.auth_service import authenticate_user, create_access_token, create_user, get_current_user
+from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, RegistrationOtpRequest, RegistrationOtpResponse, UserResponse
+from app.services.auth_service import (
+    authenticate_user,
+    create_access_token,
+    create_user,
+    get_current_user,
+    request_registration_otp,
+    verify_registration_otp,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -16,9 +23,24 @@ def register(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
+    verify_registration_otp(db, request.email, request.otp_code, settings)
     user = create_user(db, request)
     token = create_access_token(user, settings)
     return AuthResponse(user=user, access_token=token, message="Account created successfully.")
+
+
+@router.post("/register/otp", response_model=RegistrationOtpResponse)
+def register_otp(
+    request: RegistrationOtpRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> RegistrationOtpResponse:
+    message, dev_otp = request_registration_otp(db, request, settings)
+    return RegistrationOtpResponse(
+        message=message,
+        expires_in_minutes=settings.email_otp_expire_minutes,
+        dev_otp=dev_otp,
+    )
 
 
 @router.post("/login", response_model=AuthResponse)

@@ -12,6 +12,14 @@ class Settings(BaseModel):
     auth_secret_key: str = "change-this-local-development-secret"
     access_token_expire_minutes: int = 60 * 24 * 7
     require_auth: bool = False
+    registration_otp_required: bool = True
+    email_otp_expire_minutes: int = 10
+    email_otp_dev_mode: bool = True
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from_email: Optional[str] = None
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
     gemini_api_key: Optional[str] = None
@@ -42,6 +50,7 @@ def get_settings() -> Settings:
         for origin in os.getenv("FRONTEND_ORIGINS", "*").split(",")
         if origin.strip()
     ]
+    email_otp_dev_default = "true" if os.getenv("APP_ENV", "development") != "production" else "false"
     return Settings(
         app_env=os.getenv("APP_ENV", "development"),
         database_url=os.getenv("DATABASE_URL", "sqlite:///./interviewprep.db"),
@@ -49,6 +58,14 @@ def get_settings() -> Settings:
         auth_secret_key=os.getenv("AUTH_SECRET_KEY", "change-this-local-development-secret"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7))),
         require_auth=os.getenv("REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"},
+        registration_otp_required=os.getenv("REGISTRATION_OTP_REQUIRED", "true").lower() in {"1", "true", "yes"},
+        email_otp_expire_minutes=int(os.getenv("EMAIL_OTP_EXPIRE_MINUTES", "10")),
+        email_otp_dev_mode=os.getenv("EMAIL_OTP_DEV_MODE", email_otp_dev_default).lower() in {"1", "true", "yes"},
+        smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
+        smtp_port=int(os.getenv("SMTP_PORT", "587")),
+        smtp_username=os.getenv("SMTP_USERNAME") or os.getenv("GMAIL_SMTP_USER"),
+        smtp_password=os.getenv("SMTP_PASSWORD") or os.getenv("GMAIL_APP_PASSWORD"),
+        smtp_from_email=os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USERNAME") or os.getenv("GMAIL_SMTP_USER"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),

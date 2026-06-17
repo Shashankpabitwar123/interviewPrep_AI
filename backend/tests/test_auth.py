@@ -12,11 +12,9 @@ from app.models import User
 
 def test_register_creates_user_without_exposing_password() -> None:
     client = _client_with_memory_db()
+    payload = {"name": "Shashank", "email": "Shashank@example.com", "password": "password123"}
 
-    response = client.post(
-        "/auth/register",
-        json={"name": "Shashank", "email": "Shashank@example.com", "password": "password123"},
-    )
+    response = _register(client, payload)
 
     body = response.json()
     assert response.status_code == 200
@@ -31,10 +29,35 @@ def test_register_rejects_duplicate_email() -> None:
     client = _client_with_memory_db()
     payload = {"name": "Shashank", "email": "shashank@example.com", "password": "password123"}
 
-    assert client.post("/auth/register", json=payload).status_code == 200
-    response = client.post("/auth/register", json=payload)
+    assert _register(client, payload).status_code == 200
+    response = client.post("/auth/register/otp", json={"email": payload["email"]})
 
     assert response.status_code == 409
+
+
+def test_register_requires_email_otp() -> None:
+    client = _client_with_memory_db()
+
+    response = client.post(
+        "/auth/register",
+        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 400
+    assert "verification code" in response.json()["detail"].lower()
+
+
+def test_register_rejects_wrong_email_otp() -> None:
+    client = _client_with_memory_db()
+    client.post("/auth/register/otp", json={"email": "shashank@example.com"})
+
+    response = client.post(
+        "/auth/register",
+        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123", "otp_code": "111111"},
+    )
+
+    assert response.status_code == 400
+    assert "incorrect" in response.json()["detail"].lower()
 
 
 def test_register_rejects_password_without_letter_and_number() -> None:
@@ -55,10 +78,7 @@ def test_register_rejects_password_without_letter_and_number() -> None:
 
 def test_login_accepts_correct_password_and_rejects_wrong_password() -> None:
     client = _client_with_memory_db()
-    client.post(
-        "/auth/register",
-        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
-    )
+    _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "password123"})
 
     login = client.post("/auth/login", json={"email": "shashank@example.com", "password": "password123"})
     wrong_password = client.post("/auth/login", json={"email": "shashank@example.com", "password": "wrongpass123"})
@@ -71,10 +91,7 @@ def test_login_accepts_correct_password_and_rejects_wrong_password() -> None:
 
 def test_me_reads_user_from_bearer_token() -> None:
     client = _client_with_memory_db()
-    register = client.post(
-        "/auth/register",
-        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
-    )
+    register = _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "password123"})
     token = register.json()["access_token"]
 
     response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -87,15 +104,26 @@ def test_password_is_hashed_in_database() -> None:
     client = _client_with_memory_db()
     db = next(client.app.dependency_overrides[get_db]())
 
-    client.post(
-        "/auth/register",
-        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
-    )
+    _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "password123"})
 
     user = db.query(User).filter(User.email == "shashank@example.com").first()
     assert user is not None
     assert user.password_hash != "password123"
     assert user.password_hash.startswith("pbkdf2_sha256$")
+
+
+def _request_otp(client: TestClient, email: str) -> str:
+    response = client.post("/auth/register/otp", json={"email": email})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["expires_in_minutes"] > 0
+    assert body["dev_otp"]
+    return body["dev_otp"]
+
+
+def _register(client: TestClient, payload: dict[str, str]):
+    code = _request_otp(client, payload["email"])
+    return client.post("/auth/register", json={**payload, "otp_code": code})
 
 
 def _client_with_memory_db() -> TestClient:

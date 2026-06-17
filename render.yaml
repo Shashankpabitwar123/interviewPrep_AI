@@ -16,6 +16,16 @@ services:
         value: 10080
       - key: OPENAI_MODEL
         value: gpt-4o-mini
+      - key: REGISTRATION_OTP_REQUIRED
+        value: true
+      - key: EMAIL_OTP_DEV_MODE
+        value: false
+      - key: EMAIL_OTP_EXPIRE_MINUTES
+        value: 10
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
       - key: DATABASE_URL
         sync: false
       - key: FRONTEND_ORIGINS
@@ -25,4 +35,10 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: TAVILY_API_KEY
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
         sync: false

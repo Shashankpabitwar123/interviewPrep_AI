@@ -11,11 +11,53 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import User
-from app.schemas.auth import LoginRequest, RegisterRequest
+from app.models import EmailVerificationOTP, User
+from app.schemas.auth import LoginRequest, RegisterRequest, RegistrationOtpRequest
+from app.services.email_service import send_registration_otp, smtp_configured
 
 HASH_NAME = "sha256"
 ITERATIONS = 100_000
+MAX_OTP_ATTEMPTS = 5
+
+
+def request_registration_otp(db: Session, request: RegistrationOtpRequest, settings: Settings) -> tuple[str, Optional[str]]:
+    """Create and send a short-lived registration OTP."""
+
+    email = _normalize_email(request.email)
+    existing_user = db.query(User).filter(User.email == email).first()
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.email_otp_expire_minutes)
+    db.query(EmailVerificationOTP).filter(
+        EmailVerificationOTP.email == email,
+        EmailVerificationOTP.purpose == "register",
+        EmailVerificationOTP.consumed_at.is_(None),
+    ).update({"consumed_at": datetime.now(timezone.utc)})
+    otp = EmailVerificationOTP(
+        email=email,
+        purpose="register",
+        code_hash=_hash_otp(email, code, settings),
+        expires_at=expires_at,
+    )
+    db.add(otp)
+
+    if smtp_configured(settings):
+        try:
+            send_registration_otp(email, code, settings)
+        except Exception as exc:  # pragma: no cover - network/provider failures are environment-specific.
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send verification email. Try again soon.") from exc
+        db.commit()
+        return "Verification code sent to your email.", None
+
+    if settings.email_otp_dev_mode:
+        db.commit()
+        return "Verification code generated. Configure Gmail SMTP for real email delivery.", code
+
+    db.rollback()
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email OTP delivery is not configured.")
 
 
 def create_user(db: Session, request: RegisterRequest) -> User:
@@ -35,6 +77,38 @@ def create_user(db: Session, request: RegisterRequest) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def verify_registration_otp(db: Session, email_value: str, code_value: Optional[str], settings: Settings) -> None:
+    """Validate a registration OTP before creating the account."""
+
+    if not settings.registration_otp_required:
+        return
+
+    email = _normalize_email(email_value)
+    code = (code_value or "").strip()
+    if len(code) != 6 or not code.isdigit():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter the 6-digit verification code sent to your email.")
+
+    now = datetime.now(timezone.utc)
+    otp = db.query(EmailVerificationOTP).filter(
+        EmailVerificationOTP.email == email,
+        EmailVerificationOTP.purpose == "register",
+        EmailVerificationOTP.consumed_at.is_(None),
+    ).order_by(EmailVerificationOTP.created_at.desc()).first()
+    if not otp or _as_aware(otp.expires_at) < now:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code expired. Request a new code.")
+    if otp.attempts >= MAX_OTP_ATTEMPTS:
+        otp.consumed_at = now
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Too many incorrect code attempts. Request a new code.")
+    if not hmac.compare_digest(otp.code_hash, _hash_otp(email, code, settings)):
+        otp.attempts += 1
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code is incorrect.")
+
+    otp.consumed_at = now
+    db.commit()
 
 
 def authenticate_user(db: Session, request: LoginRequest) -> User:
@@ -127,6 +201,16 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _hash_otp(email: str, code: str, settings: Settings) -> str:
+    return hmac.new(settings.auth_secret_key.encode("utf-8"), f"{email}:{code}".encode("utf-8"), HASH_NAME).hexdigest()
+
+
+def _as_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def _urlsafe_b64encode(value: bytes) -> str:
