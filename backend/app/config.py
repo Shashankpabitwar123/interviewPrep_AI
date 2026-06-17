@@ -13,8 +13,11 @@ class Settings(BaseModel):
     access_token_expire_minutes: int = 60 * 24 * 7
     require_auth: bool = False
     registration_otp_required: bool = True
+    email_provider: str = "smtp"
+    email_from: Optional[str] = None
     email_otp_expire_minutes: int = 10
     email_otp_dev_mode: bool = True
+    resend_api_key: Optional[str] = None
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_username: Optional[str] = None
@@ -59,8 +62,11 @@ def get_settings() -> Settings:
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7))),
         require_auth=os.getenv("REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"},
         registration_otp_required=os.getenv("REGISTRATION_OTP_REQUIRED", "true").lower() in {"1", "true", "yes"},
+        email_provider=os.getenv("EMAIL_PROVIDER", "smtp").lower(),
+        email_from=os.getenv("EMAIL_FROM"),
         email_otp_expire_minutes=int(os.getenv("EMAIL_OTP_EXPIRE_MINUTES", "10")),
         email_otp_dev_mode=os.getenv("EMAIL_OTP_DEV_MODE", email_otp_dev_default).lower() in {"1", "true", "yes"},
+        resend_api_key=os.getenv("RESEND_API_KEY"),
         smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
         smtp_port=int(os.getenv("SMTP_PORT", "587")),
         smtp_username=os.getenv("SMTP_USERNAME") or os.getenv("GMAIL_SMTP_USER"),

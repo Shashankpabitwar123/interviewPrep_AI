@@ -13,7 +13,7 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import EmailVerificationOTP, User
 from app.schemas.auth import LoginRequest, RegisterRequest, RegistrationOtpRequest
-from app.services.email_service import send_registration_otp, smtp_configured
+from app.services.email_service import email_configured, send_registration_otp
 
 HASH_NAME = "sha256"
 ITERATIONS = 100_000
@@ -43,7 +43,7 @@ def request_registration_otp(db: Session, request: RegistrationOtpRequest, setti
     )
     db.add(otp)
 
-    if smtp_configured(settings):
+    if email_configured(settings):
         try:
             send_registration_otp(email, code, settings)
         except Exception as exc:  # pragma: no cover - network/provider failures are environment-specific.

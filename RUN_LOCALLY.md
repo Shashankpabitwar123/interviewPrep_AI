@@ -50,16 +50,26 @@ export OPENAI_MODEL="gpt-4o-mini"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Optional Gmail OTP email delivery:
+Optional Resend OTP email delivery:
 
 ```bash
+export EMAIL_PROVIDER="resend"
+export RESEND_API_KEY="your_resend_key_here"
+export EMAIL_FROM="InterviewPrep AI <onboarding@resend.dev>"
+export EMAIL_OTP_DEV_MODE="false"
+```
+
+Optional Gmail SMTP OTP email delivery:
+
+```bash
+export EMAIL_PROVIDER="smtp"
 export SMTP_USERNAME="your_gmail_address@gmail.com"
 export SMTP_PASSWORD="your_gmail_app_password"
 export SMTP_FROM_EMAIL="your_gmail_address@gmail.com"
 export EMAIL_OTP_DEV_MODE="false"
 ```
 
-For local development without Gmail SMTP, the backend returns a dev verification code in the create-account flow.
+For local development without Resend or Gmail SMTP, the backend returns a dev verification code in the create-account flow.
 
 Backend URLs:
 

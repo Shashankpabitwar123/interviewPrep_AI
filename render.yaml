@@ -22,10 +22,10 @@ services:
         value: false
       - key: EMAIL_OTP_EXPIRE_MINUTES
         value: 10
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: 587
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_FROM
+        value: InterviewPrep AI <onboarding@resend.dev>
       - key: DATABASE_URL
         sync: false
       - key: FRONTEND_ORIGINS
@@ -35,6 +35,8 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: TAVILY_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
         sync: false
       - key: SMTP_USERNAME
         sync: false

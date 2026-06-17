@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import User
@@ -58,6 +59,43 @@ def test_register_rejects_wrong_email_otp() -> None:
 
     assert response.status_code == 400
     assert "incorrect" in response.json()["detail"].lower()
+
+
+def test_register_otp_can_send_with_resend(monkeypatch) -> None:
+    client = _client_with_memory_db()
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+
+        class Response:
+            def raise_for_status(self) -> None:
+                return None
+
+        return Response()
+
+    monkeypatch.setenv("EMAIL_PROVIDER", "resend")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("EMAIL_FROM", "InterviewPrep AI <onboarding@resend.dev>")
+    monkeypatch.setenv("EMAIL_OTP_DEV_MODE", "false")
+    monkeypatch.setattr("app.services.email_service.httpx.post", fake_post)
+    get_settings.cache_clear()
+
+    response = client.post("/auth/register/otp", json={"email": "Shashank@example.com"})
+
+    assert response.status_code == 200
+    assert response.json()["dev_otp"] is None
+    assert captured["url"] == "https://api.resend.com/emails"
+    assert captured["headers"]["Authorization"] == "Bearer re_test_key"
+    assert captured["json"]["from"] == "InterviewPrep AI <onboarding@resend.dev>"
+    assert captured["json"]["to"] == ["shashank@example.com"]
+    assert captured["json"]["subject"] == "Your InterviewPrep AI verification code"
+    assert "verification code" in captured["json"]["html"].lower()
+    assert captured["timeout"] == 12
+    get_settings.cache_clear()
 
 
 def test_register_rejects_password_without_letter_and_number() -> None:
