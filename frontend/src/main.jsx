@@ -55,6 +55,7 @@ const EXTENSION_WEB_SOURCE = "interviewprep-ai-web";
 const EXTENSION_RESPONSE_SOURCE = "interviewprep-ai-extension";
 const JOB_BRIEF_CACHE_KEY = "interviewprep_job_briefs";
 const JOB_BRIEF_CACHE_VERSION = 2;
+const JOB_BRIEF_QA_CACHE_KEY = "interviewprep_job_brief_questions";
 
 const EXAM_PRESETS = {
   easy: { difficulty: "easy", questionCount: 10, timeLimit: 5, questionTypes: ["auto"] },
@@ -747,7 +748,7 @@ function App() {
 
   async function openJobDescription(job) {
     setJobBriefLoading(true);
-    setJobBriefAnswers([]);
+    setJobBriefAnswers(loadJobBriefAnswers(job.id));
     setJobBriefQuestion("");
     const cachedBrief = loadLocalMap(JOB_BRIEF_CACHE_KEY)[String(job.id)];
     if (cachedBrief?.brief && cachedBrief.version === JOB_BRIEF_CACHE_VERSION) {
@@ -815,20 +816,28 @@ function App() {
       });
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const answer = await response.json();
-      setJobBriefAnswers((current) => [
-        { id: crypto.randomUUID?.() || `${Date.now()}`, question: questionText, ...answer },
-        ...current,
-      ]);
+      setJobBriefAnswers((current) => {
+        const next = [
+          { id: crypto.randomUUID?.() || `${Date.now()}`, question: questionText, ...answer },
+          ...current,
+        ];
+        saveJobBriefAnswers(jobBrief.job.id, next);
+        return next;
+      });
       setJobBriefQuestion("");
     } catch (error) {
-      setJobBriefAnswers((current) => [{
-        id: crypto.randomUUID?.() || `${Date.now()}`,
-        question: questionText,
-        answer: error.message || "Could not answer this question right now.",
-        interview_use: "Try again after checking the backend connection.",
-        next_steps: [],
-        source: "error",
-      }, ...current]);
+      setJobBriefAnswers((current) => {
+        const next = [{
+          id: crypto.randomUUID?.() || `${Date.now()}`,
+          question: questionText,
+          answer: error.message || "Could not answer this question right now.",
+          interview_use: "Try again after checking the backend connection.",
+          next_steps: [],
+          source: "error",
+        }, ...current];
+        saveJobBriefAnswers(jobBrief.job.id, next);
+        return next;
+      });
     } finally {
       setJobBriefLoading(false);
     }
@@ -1376,7 +1385,19 @@ function App() {
   }
 
   function finishNoteTask(task) {
-    toggleTaskDone(task);
+    const today = dateKey(new Date());
+    const taskKey = `${today}:task:${task.id || task.title}`;
+    if (!completedTasks[taskKey]) {
+      setCompletedTasks((current) => {
+        const next = { ...current, [taskKey]: today };
+        saveCompletedTasks(next);
+        return next;
+      });
+      addActivity({ type: "practice", title: "Task completed", detail: task.title, badge: "done", target: "prep" });
+      setStatus("Study Note Complete");
+    } else {
+      setStatus("Study Note Already Complete");
+    }
     setNoteReader(null);
   }
 
@@ -3197,6 +3218,21 @@ function sanitizeJobBrief(brief = {}, detail = {}, job = {}) {
           "Practice connecting your projects to the company’s real work and role outcomes.",
         ],
   };
+}
+
+function loadJobBriefAnswers(jobId) {
+  if (!jobId) return [];
+  const saved = loadLocalMap(JOB_BRIEF_QA_CACHE_KEY);
+  return Array.isArray(saved[String(jobId)]) ? saved[String(jobId)] : [];
+}
+
+function saveJobBriefAnswers(jobId, answers) {
+  if (!jobId) return;
+  const saved = loadLocalMap(JOB_BRIEF_QA_CACHE_KEY);
+  saveLocalMap(JOB_BRIEF_QA_CACHE_KEY, {
+    ...saved,
+    [String(jobId)]: answers.slice(0, 30),
+  });
 }
 
 function extractResumeKeywords(description = "") {

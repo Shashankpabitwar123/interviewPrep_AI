@@ -1,5 +1,9 @@
 (() => {
-  if (window.top !== window || document.getElementById("interviewprep-capture-root")) return;
+  const CONTENT_VERSION = "0.2.2";
+  if (window.top !== window) return;
+  const existingRoot = document.getElementById("interviewprep-capture-root");
+  if (existingRoot?.dataset?.version === CONTENT_VERSION) return;
+  existingRoot?.remove();
   if (/^(chrome|edge|about|moz-extension|chrome-extension|safari-web-extension):/.test(window.location.protocol)) return;
 
   const extensionApi = globalThis.chrome || globalThis.browser;
@@ -23,6 +27,7 @@
 
   const root = document.createElement("div");
   root.id = "interviewprep-capture-root";
+  root.dataset.version = CONTENT_VERSION;
   root.innerHTML = `
     <button class="ipai-bubble" type="button" aria-label="InterviewPrep AI capture">
       <span aria-hidden="true">

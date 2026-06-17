@@ -391,7 +391,10 @@ def _description_answer_with_openai(title: str, description: str, question: str,
                     "Use only the job description and the user's question. Be specific to the role, "
                     "explain what the candidate should say or prepare, give practical examples when useful, "
                     "and explain exactly how to turn the answer into an interview response. If the description "
-                    "does not contain enough evidence, say what to verify instead of inventing facts."
+                    "does not contain enough evidence, say what to verify instead of inventing facts. "
+                    "Do not be overly brief: answer in 2-4 detailed paragraphs when the user asks to explain, "
+                    "compare, prepare, or understand something, and include role-specific examples. Keep "
+                    "interview_use as a practical script or framework the candidate can reuse."
                 ),
             },
             {
