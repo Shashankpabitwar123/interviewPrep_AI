@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepPlanSummary
 from app.services.auth_service import get_request_user
-from app.services.job_analyzer import infer_role_title
+from app.services.job_analyzer import identify_job
 from app.services.job_source import resolve_job_description
 from app.services.planner import generate_prep_plan
 from app.services.persistence import delete_prep_plan, get_prep_plan_detail, list_prep_plans, save_prep_plan
@@ -22,10 +22,10 @@ def create_prep_plan(
     current_user: User | None = Depends(get_request_user),
 ) -> PrepPlanResponse:
     description = resolve_job_description(request.job_description, request.source_url)
-    inferred_title = infer_role_title(request.job_title, description, request.source_url)
-    plan_request = request.model_copy(update={"job_title": inferred_title, "job_description": description})
+    inferred_title, inferred_company = identify_job(request.job_title, request.company, description, request.source_url, settings)
+    plan_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description})
     plan = generate_prep_plan(plan_request, settings)
-    return save_prep_plan(db, inferred_title, description, plan, source_url=request.source_url, user=current_user)
+    return save_prep_plan(db, inferred_title, description, plan, source_url=request.source_url, company=inferred_company, user=current_user)
 
 
 @router.get("", response_model=list[PrepPlanSummary])

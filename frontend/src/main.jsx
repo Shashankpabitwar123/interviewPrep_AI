@@ -477,7 +477,7 @@ function App() {
       }
       setPlan({ ...savedPlan, job_color: planColor });
       setJobTitle(savedPlan.job_title || "");
-      setCompany(inferCompanyName(company, jobDescription, sourceUrl));
+      setCompany(savedPlan.company || inferCompanyName(company, jobDescription, sourceUrl));
       setSelectedPlanDay(1);
       setExam(null);
       setMockInterview(null);
@@ -512,7 +512,7 @@ function App() {
       });
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const saved = await response.json();
-      setCompany(inferCompanyName(company, jobDescription, sourceUrl));
+      setCompany(saved.company || inferCompanyName(company, jobDescription, sourceUrl));
       const jobColor = colorForJobId(saved.job_post_id, jobMarkers, saved.role_title || jobTitle);
       const nextMarkers = { ...jobMarkers, [saved.job_post_id]: jobColor };
       setJobMarkers(nextMarkers);

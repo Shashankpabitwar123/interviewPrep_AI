@@ -16,6 +16,7 @@ class PrepTaskType(str, Enum):
 
 class PrepPlanRequest(BaseModel):
     job_title: str = Field(default="Auto-detect role", min_length=2, examples=["Backend Software Engineer Intern"])
+    company: Optional[str] = Field(default="Auto-detect company", examples=["Amazon"])
     job_description: Optional[str] = Field(default=None, min_length=20)
     source_url: Optional[str] = Field(default=None, examples=["https://company.com/jobs/backend-intern"])
     interview_at: datetime
@@ -48,6 +49,7 @@ class PrepPlanResponse(BaseModel):
     job_post_id: Optional[int] = None
     prep_plan_id: Optional[int] = None
     job_title: str
+    company: str = ""
     days_until_interview: int
     detected_skills: list[SkillSignal]
     plan_summary: str
@@ -59,6 +61,7 @@ class PrepPlanSummary(BaseModel):
     id: int
     job_post_id: int
     job_title: str
+    company: str = ""
     days_until_interview: int
     task_count: int
     summary: str

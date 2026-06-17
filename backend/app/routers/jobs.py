@@ -17,7 +17,7 @@ from app.services.job_analyzer import (
     analyze_job_description,
     answer_job_description_question,
     build_job_description_brief,
-    infer_role_title,
+    identify_job,
 )
 from app.services.job_source import resolve_job_description
 from app.services.persistence import delete_job, get_job_detail, list_jobs, save_job_analysis
@@ -37,10 +37,10 @@ def analyze_job(
         description = f"Saved URL bookmark. Open the source URL to view the job description. URL: {request.source_url}"
     else:
         description = resolve_job_description(request.job_description, request.source_url)
-    inferred_title = infer_role_title(request.job_title, description, request.source_url)
-    analysis_request = request.model_copy(update={"job_title": inferred_title, "job_description": description})
+    inferred_title, inferred_company = identify_job(request.job_title, request.company, description, request.source_url, settings)
+    analysis_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description})
     analysis = analyze_job_description(analysis_request, settings)
-    return save_job_analysis(db, inferred_title, description, analysis, source_url=request.source_url, user=current_user)
+    return save_job_analysis(db, inferred_title, description, analysis, source_url=request.source_url, company=inferred_company, user=current_user)
 
 
 @router.get("", response_model=list[JobPostSummary])

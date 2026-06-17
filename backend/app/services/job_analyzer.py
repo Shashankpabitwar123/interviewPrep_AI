@@ -25,6 +25,9 @@ Return only JSON matching this shape:
 }
 """
 
+AUTO_TITLE_VALUES = {"auto-detect role", "auto detect role", "saved job url", "captured job", "job description"}
+AUTO_COMPANY_VALUES = {"auto-detect company", "auto detect company", "detected company"}
+
 
 def analyze_job_description(request: JobAnalysisRequest, settings: Settings) -> JobAnalysisResponse:
     """Analyze a job description with OpenAI when available, otherwise locally."""
@@ -38,6 +41,32 @@ def analyze_job_description(request: JobAnalysisRequest, settings: Settings) -> 
             return _heuristic_analysis(request, source="heuristic_fallback")
 
     return _heuristic_analysis(request, source="heuristic")
+
+
+def identify_job(
+    provided_title: str,
+    provided_company: str | None,
+    description: str,
+    source_url: str | None,
+    settings: Settings,
+) -> tuple[str, str]:
+    """Detect the role and company from raw pasted job text, using AI first when available."""
+
+    user_title = _provided_title(provided_title)
+    user_company = _provided_company(provided_company)
+
+    if settings.openai_enabled and description and not description.startswith("Saved URL bookmark."):
+        try:
+            ai_title, ai_company = _identity_with_openai(description, source_url, settings)
+            title = user_title or ai_title or infer_role_title("Auto-detect role", description, source_url)
+            company = user_company or ai_company or infer_company_name("Auto-detect company", description, source_url)
+            return _clean_role_title(title), _clean_company_candidate(company)
+        except Exception:
+            pass
+
+    title = user_title or infer_role_title("Auto-detect role", description, source_url)
+    company = user_company or infer_company_name("Auto-detect company", description, source_url)
+    return _clean_role_title(title), _clean_company_candidate(company)
 
 
 def infer_role_title(provided_title: str, description: str, source_url: str | None = None) -> str:
@@ -105,6 +134,53 @@ def infer_company_name(provided_company: str | None, description: str, source_ur
                 return part.replace("-", " ").title()
 
     return ""
+
+
+def _provided_title(value: str | None) -> str:
+    clean_title = (value or "").strip()
+    if clean_title and clean_title.lower() not in AUTO_TITLE_VALUES:
+        return clean_title
+    return ""
+
+
+def _provided_company(value: str | None) -> str:
+    clean_company = (value or "").strip()
+    if clean_company and clean_company.lower() not in AUTO_COMPANY_VALUES:
+        return clean_company
+    return ""
+
+
+def _identity_with_openai(description: str, source_url: str | None, settings: Settings) -> tuple[str, str]:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    completion = client.chat.completions.create(
+        model=settings.openai_model,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Extract the employer/company name and exact job title from a pasted job posting. "
+                    "Return only JSON with keys role_title and company. Use the job posting text as the source of truth. "
+                    "Ignore browser page titles, navigation text, buttons, usernames, and unrelated surrounding page content. "
+                    "If the text has a job-board header like 'Company logo', then a company line, then an industry line, "
+                    "then a role line, use those lines. Do not invent a company if it is not present; return an empty string. "
+                    "Return a concise title such as 'Software Developer' or 'Landscape Designer / Estimator', not a sentence."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Source URL: {source_url or ''}\n\nPasted job posting:\n{description[:12000]}",
+            },
+        ],
+        temperature=0,
+    )
+    data = json.loads(completion.choices[0].message.content or "{}")
+    raw_role_title = str(data.get("role_title") or "").strip()
+    role_title = _clean_role_title(raw_role_title) if raw_role_title else ""
+    company = _clean_company_candidate(str(data.get("company") or ""))
+    return role_title, company
 
 
 def build_job_description_brief(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
@@ -535,6 +611,7 @@ def _heuristic_analysis(request: JobAnalysisRequest, source: str) -> JobAnalysis
 
     return JobAnalysisResponse(
         role_title=role_title,
+        company=infer_company_name(getattr(request, "company", ""), request.job_description, request.source_url),
         seniority=_detect_seniority(role_text),
         required_skills=skills,
         interview_focus=_build_focus(skills),

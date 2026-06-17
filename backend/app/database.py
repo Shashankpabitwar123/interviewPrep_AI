@@ -36,24 +36,24 @@ def create_db_and_tables() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
-    _apply_lightweight_sqlite_migrations()
+    _apply_lightweight_migrations()
 
 
-def _apply_lightweight_sqlite_migrations() -> None:
+def _apply_lightweight_migrations() -> None:
     """Keep existing local SQLite files usable while the schema changes quickly."""
-
-    if not settings.database_url.startswith("sqlite"):
-        return
 
     inspector = inspect(engine)
     if "job_posts" not in inspector.get_table_names():
         return
 
     columns = {column["name"] for column in inspector.get_columns("job_posts")}
-    if "user_id" not in columns:
+    if "user_id" not in columns and settings.database_url.startswith("sqlite"):
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE job_posts ADD COLUMN user_id INTEGER"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_job_posts_user_id ON job_posts (user_id)"))
+    if "company" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE job_posts ADD COLUMN company VARCHAR(160)"))
 
 
 def get_db() -> Generator[Session, None, None]:

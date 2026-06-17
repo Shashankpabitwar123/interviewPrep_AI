@@ -13,11 +13,12 @@ def save_job_analysis(
     description: str,
     analysis: JobAnalysisResponse,
     source_url: Optional[str] = None,
+    company: str = "",
     user: Optional[User] = None,
 ) -> JobAnalysisResponse:
     """Save one analyzed job and return the same response with database IDs."""
 
-    job_post = JobPost(title=title, description=description, source_url=source_url, user_id=user.id if user else None)
+    job_post = JobPost(title=title, company=company or None, description=description, source_url=source_url, user_id=user.id if user else None)
     db.add(job_post)
     db.flush()
 
@@ -35,7 +36,7 @@ def save_job_analysis(
     db.refresh(job_post)
     db.refresh(db_analysis)
 
-    return analysis.model_copy(update={"job_post_id": job_post.id, "analysis_id": db_analysis.id})
+    return analysis.model_copy(update={"job_post_id": job_post.id, "analysis_id": db_analysis.id, "company": company or analysis.company})
 
 
 def save_prep_plan(
@@ -44,11 +45,12 @@ def save_prep_plan(
     description: str,
     plan: PrepPlanResponse,
     source_url: Optional[str] = None,
+    company: str = "",
     user: Optional[User] = None,
 ) -> PrepPlanResponse:
     """Save a generated prep plan and every scheduled task."""
 
-    job_post = JobPost(title=title, description=description, source_url=source_url, user_id=user.id if user else None)
+    job_post = JobPost(title=title, company=company or None, description=description, source_url=source_url, user_id=user.id if user else None)
     db.add(job_post)
     db.flush()
 
@@ -88,6 +90,7 @@ def save_prep_plan(
         update={
             "job_post_id": job_post.id,
             "prep_plan_id": db_plan.id,
+            "company": company or plan.company,
             "tasks": response_tasks,
         }
     )
@@ -101,6 +104,7 @@ def list_jobs(db: Session, user: Optional[User] = None) -> list[JobPostSummary]:
         JobPostSummary(
             id=job.id,
             title=job.title,
+            company=job.company or "",
             description_preview=_preview(job.description),
             source_url=job.source_url,
             analysis_source=job.analysis.source if job.analysis else None,
@@ -120,6 +124,7 @@ def get_job_detail(db: Session, job_post_id: int, user: Optional[User] = None) -
             job_post_id=job.id,
             analysis_id=job.analysis.id,
             role_title=job.title,
+            company=job.company or "",
             seniority=job.analysis.seniority,
             required_skills=job.analysis.required_skills,
             interview_focus=job.analysis.interview_focus,
@@ -131,6 +136,7 @@ def get_job_detail(db: Session, job_post_id: int, user: Optional[User] = None) -
     return JobPostDetail(
         id=job.id,
         title=job.title,
+        company=job.company or "",
         description=job.description,
         source_url=job.source_url,
         analysis=analysis,
@@ -155,6 +161,7 @@ def list_prep_plans(db: Session, user: Optional[User] = None) -> list[PrepPlanSu
             id=plan.id,
             job_post_id=plan.job_post_id,
             job_title=plan.job_post.title,
+            company=plan.job_post.company or "",
             days_until_interview=plan.days_until_interview,
             task_count=len(plan.tasks),
             summary=plan.summary,
@@ -185,6 +192,7 @@ def get_prep_plan_detail(db: Session, prep_plan_id: int, user: Optional[User] = 
         job_post_id=plan.job_post_id,
         prep_plan_id=plan.id,
         job_title=plan.job_post.title,
+        company=plan.job_post.company or "",
         days_until_interview=plan.days_until_interview,
         detected_skills=[SkillSignal(name=topic, confidence=1.0) for topic in _topics_from_tasks(plan.tasks)],
         plan_summary=plan.summary,

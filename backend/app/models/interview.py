@@ -33,6 +33,7 @@ class JobPost(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200))
+    company: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     description: Mapped[str] = mapped_column(Text)
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     interview_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
