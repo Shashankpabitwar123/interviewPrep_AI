@@ -423,17 +423,13 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
-    completion = client.chat.completions.create(
+    response = client.responses.parse(
         model=settings.openai_model,
-        response_format={"type": "json_object"},
-        messages=[
+        input=[
             {
                 "role": "system",
                 "content": (
                     "You turn job descriptions into structured interview-prep briefs. "
-                    "Return only JSON with keys: company, role_title, overview, requirements, responsibilities, "
-                    "looking_for, interview_signals, must_prepare, resume_keywords, candidate_positioning, "
-                    "possible_interview_questions, red_flags_to_avoid, company_context, prep_advice. "
                     "Think like a senior interview coach: identify what the candidate must understand, "
                     "what the employer is truly testing, how to position their background, likely screening "
                     "and interview questions, and what mistakes would weaken the interview. Use concise but specific bullets. "
@@ -447,10 +443,10 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
                 "content": f"Role title hint: {title}\nSource URL: {source_url or ''}\n\nJob description:\n{description[:9000]}",
             },
         ],
-        temperature=0.2,
+        text_format=JobDescriptionBrief,
     )
-    data = json.loads(completion.choices[0].message.content or "{}")
-    return _brief_from_ai_data(data, title, description, source_url, source="openai")
+    parsed = response.output_parsed
+    return _brief_from_ai_data(parsed.model_dump(), title, description, source_url, source="openai")
 
 
 def _brief_with_gemini(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
@@ -507,15 +503,13 @@ def _description_answer_with_openai(title: str, description: str, question: str,
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
-    completion = client.chat.completions.create(
+    response = client.responses.parse(
         model=settings.openai_model,
-        response_format={"type": "json_object"},
-        messages=[
+        input=[
             {
                 "role": "system",
                 "content": (
                     "Answer questions about a job description for an interview candidate. "
-                    "Return only JSON with keys: answer, interview_use, next_steps. "
                     "Use only the job description and the user's question. Be specific to the role, "
                     "explain what the candidate should say or prepare, give practical examples when useful, "
                     "and explain exactly how to turn the answer into an interview response. If the description "
@@ -530,15 +524,9 @@ def _description_answer_with_openai(title: str, description: str, question: str,
                 "content": f"Role: {title}\nQuestion: {question}\n\nJob description:\n{description[:9000]}",
             },
         ],
-        temperature=0.25,
+        text_format=JobDescriptionAskResponse,
     )
-    data = json.loads(completion.choices[0].message.content or "{}")
-    return JobDescriptionAskResponse(
-        answer=data.get("answer") or "Focus on the role requirements and prepare a concrete example.",
-        interview_use=data.get("interview_use") or "Use this as a concise interview talking point connected to the job description.",
-        next_steps=_json_list(data.get("next_steps"), 5),
-        source="openai",
-    )
+    return response.output_parsed.model_copy(update={"source": "openai"})
 
 
 def _description_answer_with_gemini(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
