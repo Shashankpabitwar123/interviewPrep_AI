@@ -59,7 +59,12 @@ def answer_note_question(request: StudyNoteAskRequest, settings: Optional[Settin
             return _answer_with_openai(request, settings)
         except Exception as exc:
             logger.warning("OpenAI study note question failed: %s", exc)
-    require_ai_result("OpenAI could not answer this note question. Enable local fallback in settings to use an offline answer.")
+    if settings and settings.gemini_enabled:
+        try:
+            return _answer_with_gemini(request, settings)
+        except Exception as exc:
+            logger.warning("Gemini study note question failed: %s", exc)
+    require_ai_result("AI could not answer this note question. Enable local fallback in settings to use an offline answer.")
     return _fallback_note_answer(request)
 
 
@@ -69,7 +74,12 @@ def improve_note(request: StudyNoteImproveRequest, settings: Optional[Settings])
             return _improve_with_openai(request, settings)
         except Exception as exc:
             logger.warning("OpenAI note improvement failed: %s", exc)
-    require_ai_result("OpenAI could not improve this note. Enable local fallback in settings to use offline cleanup.")
+    if settings and settings.gemini_enabled:
+        try:
+            return _improve_with_gemini(request, settings)
+        except Exception as exc:
+            logger.warning("Gemini note improvement failed: %s", exc)
+    require_ai_result("AI could not improve this note. Enable local fallback in settings to use offline cleanup.")
     return _fallback_improved_note(request)
 
 
@@ -125,6 +135,11 @@ def _answer_with_openai(request: StudyNoteAskRequest, settings: Settings) -> Stu
     return response.output_parsed.model_copy(update={"source": "openai"})
 
 
+def _answer_with_gemini(request: StudyNoteAskRequest, settings: Settings) -> StudyNoteAskResponse:
+    data = generate_gemini_json(settings, _ask_prompt(request), _gemini_ask_schema())
+    return StudyNoteAskResponse.model_validate(data).model_copy(update={"source": "gemini"})
+
+
 def _improve_with_openai(request: StudyNoteImproveRequest, settings: Settings) -> StudyNoteImproveResponse:
     from openai import OpenAI
 
@@ -145,6 +160,11 @@ def _improve_with_openai(request: StudyNoteImproveRequest, settings: Settings) -
         text_format=StudyNoteImproveResponse,
     )
     return response.output_parsed.model_copy(update={"source": "openai"})
+
+
+def _improve_with_gemini(request: StudyNoteImproveRequest, settings: Settings) -> StudyNoteImproveResponse:
+    data = generate_gemini_json(settings, _improve_prompt(request), _gemini_improve_schema())
+    return StudyNoteImproveResponse.model_validate(data).model_copy(update={"source": "gemini"})
 
 
 def _improve_prompt(request: StudyNoteImproveRequest) -> str:
@@ -505,4 +525,30 @@ def _gemini_note_schema() -> dict:
             "source": {"type": "string"},
         },
         "required": ["title", "subtitle", "role", "topics", "summary", "sections", "deep_dive", "interview_questions", "related_topics", "resources", "checklist", "source"],
+    }
+
+
+def _gemini_ask_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string"},
+            "interview_use": {"type": "string"},
+            "next_steps": {"type": "array", "items": {"type": "string"}},
+            "source": {"type": "string"},
+        },
+        "required": ["answer", "interview_use", "next_steps"],
+    }
+
+
+def _gemini_improve_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "body": {"type": "string"},
+            "color": {"type": "string"},
+            "source": {"type": "string"},
+        },
+        "required": ["title", "body", "color"],
     }

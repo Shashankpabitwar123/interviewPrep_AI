@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.schemas.job_analysis import (
     JobDescriptionAskResponse,
     JobDescriptionBrief,
 )
+from app.services.gemini_service import generate_gemini_json
 from app.services.planner import SKILL_KEYWORDS
 
 
@@ -28,6 +30,7 @@ Return only JSON matching this shape:
 
 AUTO_TITLE_VALUES = {"auto-detect role", "auto detect role", "saved job url", "captured job", "job description"}
 AUTO_COMPANY_VALUES = {"auto-detect company", "auto detect company", "detected company"}
+logger = logging.getLogger(__name__)
 
 
 def analyze_job_description(request: JobAnalysisRequest, settings: Settings) -> JobAnalysisResponse:
@@ -192,21 +195,35 @@ def build_job_description_brief(title: str, description: str, source_url: str | 
     if settings.openai_enabled:
         try:
             return _brief_with_openai(title, description, source_url, settings)
-        except Exception:
-            require_ai_result("OpenAI could not build the job description brief. Enable local fallback in settings to use an offline brief.")
-            return _heuristic_brief(title, description, source_url, source="heuristic_fallback")
-    require_ai_result("OpenAI is not configured for job description briefs. Enable local fallback in settings to use an offline brief.")
-    return _heuristic_brief(title, description, source_url, source="heuristic")
+        except Exception as exc:
+            logger.warning("OpenAI job brief failed: %s", exc)
+    if settings.gemini_enabled:
+        try:
+            return _brief_with_gemini(title, description, source_url, settings)
+        except Exception as exc:
+            logger.warning("Gemini job brief failed: %s", exc)
+    if settings.ai_enabled:
+        require_ai_result("AI could not build the job description brief. Enable local fallback in settings to use an offline brief.")
+    else:
+        require_ai_result("No AI provider is configured for job description briefs. Enable local fallback in settings to use an offline brief.")
+    return _heuristic_brief(title, description, source_url, source="heuristic_fallback")
 
 
 def answer_job_description_question(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
     if settings.openai_enabled:
         try:
             return _description_answer_with_openai(title, description, question, settings)
-        except Exception:
-            require_ai_result("OpenAI could not answer this job-description question. Enable local fallback in settings to use an offline answer.")
-            pass
-    require_ai_result("OpenAI is not configured for job-description questions. Enable local fallback in settings to use an offline answer.")
+        except Exception as exc:
+            logger.warning("OpenAI job-description question failed: %s", exc)
+    if settings.gemini_enabled:
+        try:
+            return _description_answer_with_gemini(title, description, question, settings)
+        except Exception as exc:
+            logger.warning("Gemini job-description question failed: %s", exc)
+    if settings.ai_enabled:
+        require_ai_result("AI could not answer this job-description question. Enable local fallback in settings to use an offline answer.")
+    else:
+        require_ai_result("No AI provider is configured for job-description questions. Enable local fallback in settings to use an offline answer.")
     return JobDescriptionAskResponse(
         answer=(
             f"For {title}, focus on the exact responsibilities in the description. "
@@ -433,6 +450,26 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
         temperature=0.2,
     )
     data = json.loads(completion.choices[0].message.content or "{}")
+    return _brief_from_ai_data(data, title, description, source_url, source="openai")
+
+
+def _brief_with_gemini(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
+    prompt = (
+        "Create a structured interview-prep brief as JSON only.\n"
+        "Return keys: company, role_title, overview, requirements, responsibilities, looking_for, "
+        "interview_signals, must_prepare, resume_keywords, candidate_positioning, "
+        "possible_interview_questions, red_flags_to_avoid, company_context, prep_advice.\n"
+        "Every list field must be an array of complete phrases or sentences, not a single string "
+        "and not single-letter bullets. Be specific to the job description.\n\n"
+        f"Role title hint: {title}\n"
+        f"Source URL: {source_url or ''}\n\n"
+        f"Job description:\n{description[:9000]}"
+    )
+    data = generate_gemini_json(settings, prompt, _job_brief_schema())
+    return _brief_from_ai_data(data, title, description, source_url, source="gemini")
+
+
+def _brief_from_ai_data(data: dict, title: str, description: str, source_url: str | None, source: str) -> JobDescriptionBrief:
     fallback = _heuristic_brief(title, description, source_url, source="heuristic_fallback")
     requirements = _json_list(data.get("requirements"), 8) or fallback.requirements
     responsibilities = _json_list(data.get("responsibilities"), 8) or fallback.responsibilities
@@ -462,7 +499,7 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
         red_flags_to_avoid=red_flags_to_avoid,
         company_context=company_context,
         prep_advice=prep_advice,
-        source="openai",
+        source=source,
     )
 
 
@@ -502,6 +539,75 @@ def _description_answer_with_openai(title: str, description: str, question: str,
         next_steps=_json_list(data.get("next_steps"), 5),
         source="openai",
     )
+
+
+def _description_answer_with_gemini(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
+    prompt = (
+        "Answer this job-description question as JSON only with keys answer, interview_use, next_steps.\n"
+        "Use only the supplied job description and the user's question. Be specific, practical, "
+        "and interview-focused. If the user asks for explanation, answer in enough detail to be useful.\n\n"
+        f"Role: {title}\n"
+        f"Question: {question}\n\n"
+        f"Job description:\n{description[:9000]}"
+    )
+    data = generate_gemini_json(settings, prompt, _job_description_ask_schema())
+    return JobDescriptionAskResponse(
+        answer=data.get("answer") or "Focus on the role requirements and prepare a concrete example.",
+        interview_use=data.get("interview_use") or "Use this as a concise interview talking point connected to the job description.",
+        next_steps=_json_list(data.get("next_steps"), 5),
+        source="gemini",
+    )
+
+
+def _job_description_ask_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string"},
+            "interview_use": {"type": "string"},
+            "next_steps": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["answer", "interview_use", "next_steps"],
+    }
+
+
+def _job_brief_schema() -> dict[str, Any]:
+    list_field = {"type": "array", "items": {"type": "string"}}
+    return {
+        "type": "object",
+        "properties": {
+            "company": {"type": "string"},
+            "role_title": {"type": "string"},
+            "overview": {"type": "string"},
+            "requirements": list_field,
+            "responsibilities": list_field,
+            "looking_for": list_field,
+            "interview_signals": list_field,
+            "must_prepare": list_field,
+            "resume_keywords": list_field,
+            "candidate_positioning": list_field,
+            "possible_interview_questions": list_field,
+            "red_flags_to_avoid": list_field,
+            "company_context": list_field,
+            "prep_advice": list_field,
+        },
+        "required": [
+            "company",
+            "role_title",
+            "overview",
+            "requirements",
+            "responsibilities",
+            "looking_for",
+            "interview_signals",
+            "must_prepare",
+            "resume_keywords",
+            "candidate_positioning",
+            "possible_interview_questions",
+            "red_flags_to_avoid",
+            "company_context",
+            "prep_advice",
+        ],
+    }
 
 
 def _heuristic_brief(title: str, description: str, source_url: str | None, source: str) -> JobDescriptionBrief:

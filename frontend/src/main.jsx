@@ -224,6 +224,22 @@ function App() {
     return fetch(`${API_URL}${path}`, requestOptions);
   }
 
+  async function readApiError(response, label = "API") {
+    try {
+      const body = await response.clone().json();
+      if (body?.detail) return `${label} returned ${response.status}: ${body.detail}`;
+    } catch {
+      // Some errors return plain text or an empty body.
+    }
+    try {
+      const text = await response.clone().text();
+      if (text) return `${label} returned ${response.status}: ${text}`;
+    } catch {
+      // Fall through to the generic message.
+    }
+    return `${label} returned ${response.status}`;
+  }
+
   function requestExtension(action, payload = {}, timeoutMs = 1500) {
     return new Promise((resolve) => {
       const requestId = `ipai-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -774,8 +790,8 @@ function App() {
         apiFetch(`/jobs/${job.id}`),
         apiFetch(`/jobs/${job.id}/brief`),
       ]);
-      if (!detailResponse.ok) throw new Error(`Job returned ${detailResponse.status}`);
-      if (!briefResponse.ok) throw new Error(`Brief returned ${briefResponse.status}`);
+      if (!detailResponse.ok) throw new Error(await readApiError(detailResponse, "Job"));
+      if (!briefResponse.ok) throw new Error(await readApiError(briefResponse, "Brief"));
       const detail = await detailResponse.json();
       const rawBrief = await briefResponse.json();
       const cleanJob = {
@@ -816,7 +832,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: questionText }),
       });
-      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      if (!response.ok) throw new Error(await readApiError(response, "Job question"));
       const answer = await response.json();
       setJobBriefAnswers((current) => {
         const next = [
@@ -873,7 +889,7 @@ function App() {
     setStatus("Loading Prep Plan");
     try {
       const response = await apiFetch(`/prep-plans/${prepPlanId}`);
-      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      if (!response.ok) throw new Error(await readApiError(response, "Prep plan"));
       const detail = await response.json();
       setPlan({ ...detail, job_color: colorForJobId(detail.job_post_id, jobMarkers, detail.job_title) });
       setSelectedPlanDay(1);
@@ -2348,6 +2364,9 @@ function App() {
       {noteReader && (
         <StudyNoteModal
           reader={noteReader}
+          apiFetch={apiFetch}
+          readApiError={readApiError}
+          allowLocalFallback={allowLocalFallback}
           onDone={() => finishNoteTask(noteReader.task)}
           onClose={() => setNoteReader(null)}
         />
@@ -2865,7 +2884,7 @@ function MockReviewModal({ review, onClose }) {
   );
 }
 
-function StudyNoteModal({ reader, onDone, onClose }) {
+function StudyNoteModal({ reader, apiFetch, readApiError, allowLocalFallback, onDone, onClose }) {
   const [showDeepDive, setShowDeepDive] = useState(false);
   const [question, setQuestion] = useState("");
   const [answers, setAnswers] = useState([]);
@@ -2891,7 +2910,7 @@ function StudyNoteModal({ reader, onDone, onClose }) {
           history: answers.map((item) => ({ question: item.question, answer: item.answer })),
         }),
       });
-      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      if (!response.ok) throw new Error(await readApiError(response, "Note question"));
       const data = await response.json();
       setAnswers((current) => [
         ...current,
