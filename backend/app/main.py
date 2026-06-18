@@ -48,6 +48,7 @@ async def ai_unavailable_handler(_: Request, exc: AIUnavailableError) -> JSONRes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.frontend_origins,
+    allow_origin_regex=r"https://[a-z0-9-]+\.vercel\.app",
     allow_credentials=settings.frontend_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
