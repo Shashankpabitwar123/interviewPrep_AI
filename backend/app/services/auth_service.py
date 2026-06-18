@@ -40,13 +40,16 @@ def request_registration_otp(db: Session, request: RegistrationOtpRequest, setti
     if existing_user:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
 
+    now = datetime.now(timezone.utc)
+    _enforce_otp_send_limits(db, email, settings, now)
+
     code = f"{secrets.randbelow(1_000_000):06d}"
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.email_otp_expire_minutes)
+    expires_at = now + timedelta(minutes=settings.email_otp_expire_minutes)
     db.query(EmailVerificationOTP).filter(
         EmailVerificationOTP.email == email,
         EmailVerificationOTP.purpose == "register",
         EmailVerificationOTP.consumed_at.is_(None),
-    ).update({"consumed_at": datetime.now(timezone.utc)})
+    ).update({"consumed_at": now})
     otp = EmailVerificationOTP(
         email=email,
         purpose="register",
@@ -70,6 +73,35 @@ def request_registration_otp(db: Session, request: RegistrationOtpRequest, setti
 
     db.rollback()
     raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email OTP delivery is not configured.")
+
+
+def _enforce_otp_send_limits(db: Session, email: str, settings: Settings, now: datetime) -> None:
+    """Prevent one address from requesting too many registration emails."""
+
+    latest_otp = db.query(EmailVerificationOTP).filter(
+        EmailVerificationOTP.email == email,
+        EmailVerificationOTP.purpose == "register",
+    ).order_by(EmailVerificationOTP.created_at.desc()).first()
+    if latest_otp is not None:
+        seconds_since_last = (now - _as_aware(latest_otp.created_at)).total_seconds()
+        if seconds_since_last < settings.email_otp_resend_cooldown_seconds:
+            wait_seconds = max(1, int(settings.email_otp_resend_cooldown_seconds - seconds_since_last))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {wait_seconds} seconds before requesting another verification code.",
+            )
+
+    one_hour_ago = now - timedelta(hours=1)
+    recent_count = db.query(EmailVerificationOTP).filter(
+        EmailVerificationOTP.email == email,
+        EmailVerificationOTP.purpose == "register",
+        EmailVerificationOTP.created_at >= one_hour_ago,
+    ).count()
+    if recent_count >= settings.email_otp_hourly_limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification code requests. Please try again in about an hour.",
+        )
 
 
 def create_user(db: Session, request: RegisterRequest) -> User:

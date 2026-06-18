@@ -22,6 +22,10 @@ services:
         value: false
       - key: EMAIL_OTP_EXPIRE_MINUTES
         value: 10
+      - key: EMAIL_OTP_RESEND_COOLDOWN_SECONDS
+        value: 60
+      - key: EMAIL_OTP_HOURLY_LIMIT
+        value: 5
       - key: EMAIL_PROVIDER
         value: resend
       - key: EMAIL_FROM

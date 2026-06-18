@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -8,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
-from app.models import AnswerAttempt, Exam, JobAnalysis, JobPost, MockInterview, MockMessage, PrepPlan, PrepTask, Question, User
+from app.models import AnswerAttempt, EmailVerificationOTP, Exam, JobAnalysis, JobPost, MockInterview, MockMessage, PrepPlan, PrepTask, Question, User
 
 
 def test_register_creates_user_without_exposing_password() -> None:
@@ -96,6 +97,41 @@ def test_register_otp_can_send_with_resend(monkeypatch) -> None:
     assert "verification code" in captured["json"]["html"].lower()
     assert captured["timeout"] == 12
     get_settings.cache_clear()
+
+
+def test_register_otp_rejects_immediate_resend() -> None:
+    client = _client_with_memory_db()
+
+    first = client.post("/auth/register/otp", json={"email": "cooldown@example.com"})
+    second = client.post("/auth/register/otp", json={"email": "cooldown@example.com"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert "wait" in second.json()["detail"].lower()
+
+
+def test_register_otp_rejects_too_many_hourly_requests() -> None:
+    client = _client_with_memory_db()
+    db = next(client.app.dependency_overrides[get_db]())
+    now = datetime.now(timezone.utc)
+    for index in range(5):
+        db.add(
+            EmailVerificationOTP(
+                email="limited@example.com",
+                purpose="register",
+                code_hash=f"fake-hash-{index}",
+                expires_at=now + timedelta(minutes=10),
+                consumed_at=now - timedelta(minutes=1),
+                created_at=now - timedelta(minutes=10 + index),
+                updated_at=now - timedelta(minutes=10 + index),
+            )
+        )
+    db.commit()
+
+    response = client.post("/auth/register/otp", json={"email": "limited@example.com"})
+
+    assert response.status_code == 429
+    assert "too many" in response.json()["detail"].lower()
 
 
 def test_register_rejects_password_without_letter_and_number() -> None:

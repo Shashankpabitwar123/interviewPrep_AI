@@ -16,6 +16,8 @@ class Settings(BaseModel):
     email_provider: str = "smtp"
     email_from: Optional[str] = None
     email_otp_expire_minutes: int = 10
+    email_otp_resend_cooldown_seconds: int = 60
+    email_otp_hourly_limit: int = 5
     email_otp_dev_mode: bool = True
     resend_api_key: Optional[str] = None
     smtp_host: str = "smtp.gmail.com"
@@ -65,6 +67,8 @@ def get_settings() -> Settings:
         email_provider=os.getenv("EMAIL_PROVIDER", "smtp").lower(),
         email_from=os.getenv("EMAIL_FROM"),
         email_otp_expire_minutes=int(os.getenv("EMAIL_OTP_EXPIRE_MINUTES", "10")),
+        email_otp_resend_cooldown_seconds=int(os.getenv("EMAIL_OTP_RESEND_COOLDOWN_SECONDS", "60")),
+        email_otp_hourly_limit=int(os.getenv("EMAIL_OTP_HOURLY_LIMIT", "5")),
         email_otp_dev_mode=os.getenv("EMAIL_OTP_DEV_MODE", email_otp_dev_default).lower() in {"1", "true", "yes"},
         resend_api_key=os.getenv("RESEND_API_KEY"),
         smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
