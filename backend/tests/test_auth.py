@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
-from app.models import User
+from app.models import JobPost, User
 
 
 def test_register_creates_user_without_exposing_password() -> None:
@@ -136,6 +136,46 @@ def test_me_reads_user_from_bearer_token() -> None:
 
     assert response.status_code == 200
     assert response.json()["email"] == "shashank@example.com"
+
+
+def test_delete_account_removes_user_owned_jobs_and_allows_re_registration() -> None:
+    client = _client_with_memory_db()
+    register = _register(client, {"name": "Shashank", "email": "spabitwa@asu.edu", "password": "password123"})
+    token = register.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    db = next(client.app.dependency_overrides[get_db]())
+
+    db.add(
+        JobPost(
+            user_id=register.json()["user"]["id"],
+            title="Backend Intern",
+            company="ExampleTech",
+            description="Build FastAPI services and write tests.",
+        )
+    )
+    db.commit()
+
+    response = client.delete("/auth/me", headers=headers)
+
+    assert response.status_code == 204
+    assert client.get("/auth/me", headers=headers).status_code == 401
+    assert db.query(User).filter(User.email == "spabitwa@asu.edu").first() is None
+    assert db.query(JobPost).filter(JobPost.title == "Backend Intern").first() is None
+
+    code = _request_otp(client, "spabitwa@asu.edu")
+    recreate = client.post(
+        "/auth/register",
+        json={"name": "Shashank", "email": "spabitwa@asu.edu", "password": "newpass123", "otp_code": code},
+    )
+    assert recreate.status_code == 200
+
+
+def test_delete_account_requires_login() -> None:
+    client = _client_with_memory_db()
+
+    response = client.delete("/auth/me")
+
+    assert response.status_code == 401
 
 
 def test_password_is_hashed_in_database() -> None:

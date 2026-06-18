@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import EmailVerificationOTP, User
+from app.models import EmailVerificationOTP, JobPost, User
 from app.schemas.auth import LoginRequest, RegisterRequest, RegistrationOtpRequest
 from app.services.email_service import email_configured, send_registration_otp
 
@@ -119,6 +119,18 @@ def authenticate_user(db: Session, request: LoginRequest) -> User:
     if not user or not verify_password(request.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email or password is incorrect.")
     return user
+
+
+def delete_user_account(db: Session, user: User) -> None:
+    """Delete a user's account and the interview-prep records owned by it."""
+
+    owned_jobs = db.query(JobPost).filter(JobPost.user_id == user.id).all()
+    for job in owned_jobs:
+        db.delete(job)
+
+    db.query(EmailVerificationOTP).filter(EmailVerificationOTP.email == user.email).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
 
 
 def create_access_token(user: User, settings: Settings) -> str:

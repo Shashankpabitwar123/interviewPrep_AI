@@ -2354,6 +2354,27 @@ button {
   border-bottom: 0;
 }
 
+.settings-danger-link {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  margin-top: 6px;
+  padding: 0 10px;
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  border-radius: 999px;
+  color: #b91c1c;
+  background: rgba(254, 242, 242, 0.9);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.settings-danger-link:hover {
+  border-color: rgba(220, 38, 38, 0.42);
+  background: #fee2e2;
+}
+
 .sound-settings-card {
   display: grid;
   gap: 9px;
@@ -5249,6 +5270,17 @@ footer {
 
 .theme-dark .extension-error {
   color: #fca5a5;
+}
+
+.theme-dark .settings-danger-link {
+  border-color: rgba(248, 113, 113, 0.28);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.26);
+}
+
+.theme-dark .settings-danger-link:hover {
+  border-color: rgba(248, 113, 113, 0.46);
+  background: rgba(127, 29, 29, 0.38);
 }
 
 .theme-dark .topbar {

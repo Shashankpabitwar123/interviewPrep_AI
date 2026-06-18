@@ -56,6 +56,21 @@ const EXTENSION_RESPONSE_SOURCE = "interviewprep-ai-extension";
 const JOB_BRIEF_CACHE_KEY = "interviewprep_job_briefs";
 const JOB_BRIEF_CACHE_VERSION = 2;
 const JOB_BRIEF_QA_CACHE_KEY = "interviewprep_job_brief_questions";
+const WORKSPACE_STORAGE_KEYS = [
+  "interviewprep_job_markers",
+  "interviewprep_deleted_jobs",
+  "interviewprep_archived_job_ids",
+  "interviewprep_exam_attempts",
+  "interviewprep_mock_attempts",
+  "interviewprep_notes",
+  "interviewprep_generated_study_notes",
+  "interviewprep_note_folders",
+  "interviewprep_calendar_events",
+  "interviewprep_recent_activity",
+  "interviewprep_completed_tasks",
+  JOB_BRIEF_CACHE_KEY,
+  JOB_BRIEF_QA_CACHE_KEY,
+];
 
 const EXAM_PRESETS = {
   easy: { difficulty: "easy", questionCount: 10, timeLimit: 5, questionTypes: ["auto"] },
@@ -93,6 +108,8 @@ function App() {
   const [confirmDeleteJob, setConfirmDeleteJob] = useState(null);
   const [selectedJobIds, setSelectedJobIds] = useState([]);
   const [confirmBulkDeleteJobs, setConfirmBulkDeleteJobs] = useState(false);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [deletedJobs, setDeletedJobs] = useState(() => loadLocalList("interviewprep_deleted_jobs"));
   const [archivedJobIds, setArchivedJobIds] = useState(() => loadLocalList("interviewprep_archived_job_ids"));
   const [savedPlans, setSavedPlans] = useState([]);
@@ -212,6 +229,13 @@ function App() {
     setNotes([]);
     setNoteFolders([]);
     setGeneratedStudyNotes({});
+  }
+
+  function clearLocalWorkspaceStorage() {
+    WORKSPACE_STORAGE_KEYS.forEach((key) => {
+      const scopedKey = scopedStorageKey(key);
+      if (scopedKey) localStorage.removeItem(scopedKey);
+    });
   }
 
   async function apiFetch(path, options = {}) {
@@ -1778,6 +1802,30 @@ function App() {
     setStatus("Guest Mode");
   }
 
+  async function deleteAccount() {
+    if (!authToken) {
+      setConfirmDeleteAccount(false);
+      setStatus("Login Required");
+      return;
+    }
+
+    setDeletingAccount(true);
+    try {
+      const response = await apiFetch("/auth/me", { method: "DELETE" });
+      if (!response.ok) throw new Error(await readApiError(response, "Delete account"));
+
+      clearLocalWorkspaceStorage();
+      setConfirmDeleteAccount(false);
+      setSettingsOpen(false);
+      logout();
+      setStatus("Account Deleted");
+    } catch (error) {
+      setStatus(error.message || "Could Not Delete Account");
+    } finally {
+      setDeletingAccount(false);
+    }
+  }
+
   const activity = recentActivity.map((item) => ({ ...item, time: relativeTime(item.createdAt), target: item.target || targetForActivity(item.type) }));
 
   function openActivity(item) {
@@ -1847,6 +1895,7 @@ function App() {
                 onToggleExtension={toggleExtensionBubble}
                 onInstallExtension={() => window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer")}
                 onRefreshExtension={refreshExtensionState}
+                onDeleteAccount={() => setConfirmDeleteAccount(true)}
                 onClose={() => setSettingsOpen(false)}
                 onKnowMore={() => {
                   setSettingsOpen(false);
@@ -2399,6 +2448,27 @@ function App() {
             <div className="confirm-actions">
               <button className="outline-action" onClick={() => setConfirmDeleteAttempt(null)}>Cancel</button>
               <button className="danger-action" onClick={() => deleteAttempt(confirmDeleteAttempt.kind, confirmDeleteAttempt.id)}>Delete Attempt</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteAccount && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="auth-modal confirm-modal">
+            <div className="modal-head">
+              <div>
+                <h2>Delete account?</h2>
+                <p>This permanently removes your account and account-owned jobs, prep plans, exams, and mock interview data. This cannot be undone.</p>
+              </div>
+              <button type="button" className="icon-button" disabled={deletingAccount} onClick={() => setConfirmDeleteAccount(false)}><X size={18} /></button>
+            </div>
+            <div className="confirm-actions">
+              <button className="outline-action" disabled={deletingAccount} onClick={() => setConfirmDeleteAccount(false)}>Cancel</button>
+              <button className="danger-action" disabled={deletingAccount} onClick={deleteAccount}>
+                {deletingAccount ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
+                Delete Account
+              </button>
             </div>
           </div>
         </div>
@@ -5419,6 +5489,7 @@ function SettingsView({
   onToggleExtension,
   onInstallExtension,
   onRefreshExtension,
+  onDeleteAccount,
   onClose,
   onKnowMore,
 }) {
@@ -5452,6 +5523,11 @@ function SettingsView({
           <strong>Account</strong>
           <span>{user ? user.name : "Guest"}</span>
           {user?.email && <small>{user.email}</small>}
+          {user && (
+            <button type="button" className="settings-danger-link" onClick={onDeleteAccount}>
+              <Trash2 size={13} /> Delete account
+            </button>
+          )}
         </div>
         <div className="settings-mini-card">
           <strong>Backend</strong>

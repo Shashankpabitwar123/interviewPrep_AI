@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -9,6 +9,7 @@ from app.services.auth_service import (
     authenticate_user,
     create_access_token,
     create_user,
+    delete_user_account,
     get_current_user,
     request_registration_otp,
     verify_registration_otp,
@@ -57,3 +58,12 @@ def login(
 @router.get("/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    delete_user_account(db, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
