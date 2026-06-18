@@ -1811,9 +1811,9 @@ function App() {
 
     setDeletingAccount(true);
     try {
-      let response = await apiFetch("/auth/me", { method: "DELETE" });
-      if (response.status === 405) {
-        response = await apiFetch("/auth/me/delete", { method: "POST" });
+      let response = await apiFetch("/auth/me/delete", { method: "POST" });
+      if (response.status === 404 || response.status === 405) {
+        response = await apiFetch("/auth/me", { method: "DELETE" });
       }
       if (!response.ok) throw new Error(await readApiError(response, "Delete account"));
 

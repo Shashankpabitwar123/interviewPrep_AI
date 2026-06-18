@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
-from app.models import JobPost, User
+from app.models import AnswerAttempt, Exam, JobAnalysis, JobPost, MockInterview, MockMessage, PrepPlan, PrepTask, Question, User
 
 
 def test_register_creates_user_without_exposing_password() -> None:
@@ -154,6 +154,36 @@ def test_delete_account_removes_user_owned_jobs_and_allows_re_registration() -> 
         )
     )
     db.commit()
+    job = db.query(JobPost).filter(JobPost.title == "Backend Intern").one()
+    db.add(
+        JobAnalysis(
+            job_post_id=job.id,
+            seniority="intern",
+            required_skills=["FastAPI"],
+            interview_focus=[],
+            coding_difficulty="medium",
+            behavioral_themes=[],
+            source="test",
+        )
+    )
+    db.add(PrepPlan(job_post_id=job.id, days_until_interview=3, summary="Test plan"))
+    db.commit()
+    plan = db.query(PrepPlan).filter(PrepPlan.job_post_id == job.id).one()
+    db.add(PrepTask(prep_plan_id=plan.id, day=1, title="Read notes", task_type="study_notes", duration_minutes=30, topics=["FastAPI"], instructions="Study"))
+    db.add(Exam(prep_plan_id=plan.id, title="Day 1 Exam", day=1, time_limit_minutes=10))
+    db.add(MockInterview(prep_plan_id=plan.id, current_topic="FastAPI", status="active"))
+    db.commit()
+    exam = db.query(Exam).filter(Exam.prep_plan_id == plan.id).one()
+    mock = db.query(MockInterview).filter(MockInterview.prep_plan_id == plan.id).one()
+    db.add(Question(exam_id=exam.id, question_type="short_answer", prompt="Explain FastAPI.", topics=["FastAPI"]))
+    db.add(MockMessage(mock_interview_id=mock.id, role="interviewer", content="Tell me about FastAPI."))
+    db.commit()
+    question = db.query(Question).filter(Question.exam_id == exam.id).one()
+    db.add(AnswerAttempt(question_id=question.id, answer_text="It is a Python API framework.", score=1.0, feedback="Good"))
+    db.commit()
+    plan_id = plan.id
+    exam_id = exam.id
+    mock_id = mock.id
 
     response = client.delete("/auth/me", headers=headers)
 
@@ -161,6 +191,9 @@ def test_delete_account_removes_user_owned_jobs_and_allows_re_registration() -> 
     assert client.get("/auth/me", headers=headers).status_code == 401
     assert db.query(User).filter(User.email == "spabitwa@asu.edu").first() is None
     assert db.query(JobPost).filter(JobPost.title == "Backend Intern").first() is None
+    assert db.query(PrepPlan).filter(PrepPlan.id == plan_id).first() is None
+    assert db.query(Exam).filter(Exam.id == exam_id).first() is None
+    assert db.query(MockInterview).filter(MockInterview.id == mock_id).first() is None
 
     code = _request_otp(client, "spabitwa@asu.edu")
     recreate = client.post(

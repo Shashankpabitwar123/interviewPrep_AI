@@ -11,7 +11,19 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import EmailVerificationOTP, JobPost, User
+from app.models import (
+    AnswerAttempt,
+    EmailVerificationOTP,
+    Exam,
+    JobAnalysis,
+    JobPost,
+    MockInterview,
+    MockMessage,
+    PrepPlan,
+    PrepTask,
+    Question,
+    User,
+)
 from app.schemas.auth import LoginRequest, RegisterRequest, RegistrationOtpRequest
 from app.services.email_service import email_configured, send_registration_otp
 
@@ -124,9 +136,26 @@ def authenticate_user(db: Session, request: LoginRequest) -> User:
 def delete_user_account(db: Session, user: User) -> None:
     """Delete a user's account and the interview-prep records owned by it."""
 
-    owned_jobs = db.query(JobPost).filter(JobPost.user_id == user.id).all()
-    for job in owned_jobs:
-        db.delete(job)
+    owned_job_ids = [job_id for (job_id,) in db.query(JobPost.id).filter(JobPost.user_id == user.id).all()]
+    if owned_job_ids:
+        owned_plan_ids = [plan_id for (plan_id,) in db.query(PrepPlan.id).filter(PrepPlan.job_post_id.in_(owned_job_ids)).all()]
+        if owned_plan_ids:
+            owned_exam_ids = [exam_id for (exam_id,) in db.query(Exam.id).filter(Exam.prep_plan_id.in_(owned_plan_ids)).all()]
+            owned_mock_ids = [mock_id for (mock_id,) in db.query(MockInterview.id).filter(MockInterview.prep_plan_id.in_(owned_plan_ids)).all()]
+            if owned_exam_ids:
+                owned_question_ids = [question_id for (question_id,) in db.query(Question.id).filter(Question.exam_id.in_(owned_exam_ids)).all()]
+                if owned_question_ids:
+                    db.query(AnswerAttempt).filter(AnswerAttempt.question_id.in_(owned_question_ids)).delete(synchronize_session=False)
+                    db.query(Question).filter(Question.id.in_(owned_question_ids)).delete(synchronize_session=False)
+                db.query(Exam).filter(Exam.id.in_(owned_exam_ids)).delete(synchronize_session=False)
+            if owned_mock_ids:
+                db.query(MockMessage).filter(MockMessage.mock_interview_id.in_(owned_mock_ids)).delete(synchronize_session=False)
+                db.query(MockInterview).filter(MockInterview.id.in_(owned_mock_ids)).delete(synchronize_session=False)
+            db.query(PrepTask).filter(PrepTask.prep_plan_id.in_(owned_plan_ids)).delete(synchronize_session=False)
+            db.query(PrepPlan).filter(PrepPlan.id.in_(owned_plan_ids)).delete(synchronize_session=False)
+
+        db.query(JobAnalysis).filter(JobAnalysis.job_post_id.in_(owned_job_ids)).delete(synchronize_session=False)
+        db.query(JobPost).filter(JobPost.id.in_(owned_job_ids)).delete(synchronize_session=False)
 
     db.query(EmailVerificationOTP).filter(EmailVerificationOTP.email == user.email).delete(synchronize_session=False)
     db.delete(user)
