@@ -1811,7 +1811,10 @@ function App() {
 
     setDeletingAccount(true);
     try {
-      const response = await apiFetch("/auth/me", { method: "DELETE" });
+      let response = await apiFetch("/auth/me", { method: "DELETE" });
+      if (response.status === 405) {
+        response = await apiFetch("/auth/me/delete", { method: "POST" });
+      }
       if (!response.ok) throw new Error(await readApiError(response, "Delete account"));
 
       clearLocalWorkspaceStorage();

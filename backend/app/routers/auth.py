@@ -65,5 +65,17 @@ def delete_me(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
+    return _delete_current_account(db, current_user)
+
+
+@router.post("/me/delete", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me_via_post(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    return _delete_current_account(db, current_user)
+
+
+def _delete_current_account(db: Session, current_user: User) -> Response:
     delete_user_account(db, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

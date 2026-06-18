@@ -178,6 +178,17 @@ def test_delete_account_requires_login() -> None:
     assert response.status_code == 401
 
 
+def test_delete_account_supports_post_fallback() -> None:
+    client = _client_with_memory_db()
+    register = _register(client, {"name": "Shashank", "email": "fallback@example.com", "password": "password123"})
+    token = register.json()["access_token"]
+
+    response = client.post("/auth/me/delete", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 204
+    assert client.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+
 def test_password_is_hashed_in_database() -> None:
     client = _client_with_memory_db()
     db = next(client.app.dependency_overrides[get_db]())
