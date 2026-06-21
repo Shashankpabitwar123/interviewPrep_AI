@@ -163,6 +163,56 @@ def test_login_accepts_correct_password_and_rejects_wrong_password() -> None:
     assert wrong_password.status_code == 401
 
 
+def test_password_reset_updates_password_after_email_otp() -> None:
+    client = _client_with_memory_db()
+    _register(client, {"name": "Shashank", "email": "reset@example.com", "password": "oldpass123"})
+
+    otp_response = client.post("/auth/password-reset/otp", json={"email": "Reset@example.com"})
+    assert otp_response.status_code == 200
+    otp_body = otp_response.json()
+    assert otp_body["dev_otp"]
+    assert "reset" in otp_body["message"].lower()
+
+    reset_response = client.post(
+        "/auth/password-reset",
+        json={"email": "reset@example.com", "otp_code": otp_body["dev_otp"], "new_password": "newpass456"},
+    )
+
+    assert reset_response.status_code == 200
+    assert "password updated" in reset_response.json()["message"].lower()
+    assert client.post("/auth/login", json={"email": "reset@example.com", "password": "oldpass123"}).status_code == 401
+    login = client.post("/auth/login", json={"email": "reset@example.com", "password": "newpass456"})
+    assert login.status_code == 200
+    assert login.json()["user"]["email"] == "reset@example.com"
+
+
+def test_password_reset_otp_does_not_reveal_missing_accounts() -> None:
+    client = _client_with_memory_db()
+
+    response = client.post("/auth/password-reset/otp", json={"email": "missing@example.com"})
+
+    assert response.status_code == 200
+    assert response.json()["dev_otp"] is None
+    assert "if an account exists" in response.json()["message"].lower()
+
+
+def test_password_reset_rejects_weak_new_password() -> None:
+    client = _client_with_memory_db()
+    _register(client, {"name": "Shashank", "email": "weak-reset@example.com", "password": "oldpass123"})
+    otp_response = client.post("/auth/password-reset/otp", json={"email": "weak-reset@example.com"})
+
+    response = client.post(
+        "/auth/password-reset",
+        json={
+            "email": "weak-reset@example.com",
+            "otp_code": otp_response.json()["dev_otp"],
+            "new_password": "passwordonly",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_me_reads_user_from_bearer_token() -> None:
     client = _client_with_memory_db()
     register = _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "password123"})

@@ -5482,6 +5482,43 @@ footer {
   background: #f0fdf4;
 }
 
+.password-input-wrap {
+  position: relative;
+  display: block;
+}
+
+.password-input-wrap input {
+  padding-right: 44px;
+}
+
+.password-eye {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.password-eye:hover {
+  color: var(--text);
+  background: var(--blue-soft);
+}
+
+.subtle-switch {
+  margin-top: -6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  text-align: right;
+}
+
 .dark .auth-message.success {
   border-color: rgba(74, 222, 128, 0.35);
   color: #bbf7d0;

@@ -25,14 +25,16 @@ from app.models import (
     User,
     UserUsageEvent,
 )
-from app.schemas.auth import LoginRequest, RegisterRequest, RegistrationOtpRequest
-from app.services.email_service import email_configured, send_registration_otp
+from app.schemas.auth import LoginRequest, PasswordResetOtpRequest, PasswordResetRequest, RegisterRequest, RegistrationOtpRequest
+from app.services.email_service import email_configured, send_password_reset_otp, send_registration_otp
 from app.services.usage_service import mark_login, record_usage_event
 
 HASH_NAME = "sha256"
 ITERATIONS = 100_000
 MAX_OTP_ATTEMPTS = 5
 BLOCKED_ACCOUNT_DETAIL = "This account is blocked. Contact PrepInterview AI support if you think this is a mistake."
+REGISTER_OTP_PURPOSE = "register"
+PASSWORD_RESET_OTP_PURPOSE = "password_reset"
 
 
 def request_registration_otp(db: Session, request: RegistrationOtpRequest, settings: Settings) -> tuple[str, Optional[str]]:
@@ -44,18 +46,18 @@ def request_registration_otp(db: Session, request: RegistrationOtpRequest, setti
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
 
     now = datetime.now(timezone.utc)
-    _enforce_otp_send_limits(db, email, settings, now)
+    _enforce_otp_send_limits(db, email, settings, now, REGISTER_OTP_PURPOSE)
 
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = now + timedelta(minutes=settings.email_otp_expire_minutes)
     db.query(EmailVerificationOTP).filter(
         EmailVerificationOTP.email == email,
-        EmailVerificationOTP.purpose == "register",
+        EmailVerificationOTP.purpose == REGISTER_OTP_PURPOSE,
         EmailVerificationOTP.consumed_at.is_(None),
     ).update({"consumed_at": now})
     otp = EmailVerificationOTP(
         email=email,
-        purpose="register",
+        purpose=REGISTER_OTP_PURPOSE,
         code_hash=_hash_otp(email, code, settings),
         expires_at=expires_at,
     )
@@ -78,12 +80,80 @@ def request_registration_otp(db: Session, request: RegistrationOtpRequest, setti
     raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email OTP delivery is not configured.")
 
 
-def _enforce_otp_send_limits(db: Session, email: str, settings: Settings, now: datetime) -> None:
-    """Prevent one address from requesting too many registration emails."""
+def request_password_reset_otp(db: Session, request: PasswordResetOtpRequest, settings: Settings) -> tuple[str, Optional[str]]:
+    """Create and send a short-lived password reset OTP when the account exists."""
+
+    email = _normalize_email(request.email)
+    generic_message = "If an account exists for this email, a reset code has been sent."
+    user = db.query(User).filter(User.email == email).first()
+    if not user or user.status == "blocked":
+        return generic_message, None
+
+    now = datetime.now(timezone.utc)
+    _enforce_otp_send_limits(db, email, settings, now, PASSWORD_RESET_OTP_PURPOSE)
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = now + timedelta(minutes=settings.email_otp_expire_minutes)
+    db.query(EmailVerificationOTP).filter(
+        EmailVerificationOTP.email == email,
+        EmailVerificationOTP.purpose == PASSWORD_RESET_OTP_PURPOSE,
+        EmailVerificationOTP.consumed_at.is_(None),
+    ).update({"consumed_at": now})
+    otp = EmailVerificationOTP(
+        email=email,
+        purpose=PASSWORD_RESET_OTP_PURPOSE,
+        code_hash=_hash_otp(email, code, settings),
+        expires_at=expires_at,
+    )
+    db.add(otp)
+
+    if email_configured(settings):
+        try:
+            send_password_reset_otp(email, code, settings)
+        except Exception as exc:  # pragma: no cover - provider failures are environment-specific.
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send reset email. Try again soon.") from exc
+        db.commit()
+        return generic_message, None
+
+    if settings.email_otp_dev_mode:
+        db.commit()
+        return "Password reset code generated. Configure email delivery for real users.", code
+
+    db.rollback()
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email OTP delivery is not configured.")
+
+
+def reset_password_with_otp(db: Session, request: PasswordResetRequest, settings: Settings) -> User:
+    """Verify a password reset OTP and replace the user's password hash."""
+
+    email = _normalize_email(request.email)
+    user = db.query(User).filter(User.email == email).first()
+    if not user or user.status == "blocked":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reset code expired or is incorrect. Request a new code.")
+
+    _verify_otp(
+        db,
+        email,
+        request.otp_code,
+        settings,
+        purpose=PASSWORD_RESET_OTP_PURPOSE,
+        missing_detail="Reset code expired. Request a new code.",
+        malformed_detail="Enter the 6-digit reset code sent to your email.",
+        incorrect_detail="Reset code is incorrect.",
+    )
+    user.password_hash = hash_password(request.new_password)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _enforce_otp_send_limits(db: Session, email: str, settings: Settings, now: datetime, purpose: str) -> None:
+    """Prevent one address from requesting too many OTP emails."""
 
     latest_otp = db.query(EmailVerificationOTP).filter(
         EmailVerificationOTP.email == email,
-        EmailVerificationOTP.purpose == "register",
+        EmailVerificationOTP.purpose == purpose,
     ).order_by(EmailVerificationOTP.created_at.desc()).first()
     if latest_otp is not None:
         seconds_since_last = (now - _as_aware(latest_otp.created_at)).total_seconds()
@@ -97,7 +167,7 @@ def _enforce_otp_send_limits(db: Session, email: str, settings: Settings, now: d
     one_hour_ago = now - timedelta(hours=1)
     recent_count = db.query(EmailVerificationOTP).filter(
         EmailVerificationOTP.email == email,
-        EmailVerificationOTP.purpose == "register",
+        EmailVerificationOTP.purpose == purpose,
         EmailVerificationOTP.created_at >= one_hour_ago,
     ).count()
     if recent_count >= settings.email_otp_hourly_limit:
@@ -133,19 +203,44 @@ def verify_registration_otp(db: Session, email_value: str, code_value: Optional[
     if not settings.registration_otp_required:
         return
 
-    email = _normalize_email(email_value)
+    _verify_otp(
+        db,
+        _normalize_email(email_value),
+        code_value,
+        settings,
+        purpose=REGISTER_OTP_PURPOSE,
+        missing_detail="Verification code expired. Request a new code.",
+        malformed_detail="Enter the 6-digit verification code sent to your email.",
+        incorrect_detail="Verification code is incorrect.",
+    )
+
+
+def _verify_otp(
+    db: Session,
+    email: str,
+    code_value: Optional[str],
+    settings: Settings,
+    *,
+    purpose: str,
+    missing_detail: str,
+    malformed_detail: str,
+    incorrect_detail: str,
+) -> None:
+    """Validate an OTP for a specific auth purpose."""
+
+    email = _normalize_email(email)
     code = (code_value or "").strip()
     if len(code) != 6 or not code.isdigit():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter the 6-digit verification code sent to your email.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=malformed_detail)
 
     now = datetime.now(timezone.utc)
     otp = db.query(EmailVerificationOTP).filter(
         EmailVerificationOTP.email == email,
-        EmailVerificationOTP.purpose == "register",
+        EmailVerificationOTP.purpose == purpose,
         EmailVerificationOTP.consumed_at.is_(None),
     ).order_by(EmailVerificationOTP.created_at.desc()).first()
     if not otp or _as_aware(otp.expires_at) < now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code expired. Request a new code.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=missing_detail)
     if otp.attempts >= MAX_OTP_ATTEMPTS:
         otp.consumed_at = now
         db.commit()
@@ -153,7 +248,7 @@ def verify_registration_otp(db: Session, email_value: str, code_value: Optional[
     if not hmac.compare_digest(otp.code_hash, _hash_otp(email, code, settings)):
         otp.attempts += 1
         db.commit()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code is incorrect.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=incorrect_detail)
 
     otp.consumed_at = now
     db.commit()

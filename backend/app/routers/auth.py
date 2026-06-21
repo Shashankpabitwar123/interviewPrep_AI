@@ -4,7 +4,17 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, RegistrationOtpRequest, RegistrationOtpResponse, UserResponse
+from app.schemas.auth import (
+    AuthResponse,
+    LoginRequest,
+    MessageResponse,
+    PasswordResetOtpRequest,
+    PasswordResetRequest,
+    RegisterRequest,
+    RegistrationOtpRequest,
+    RegistrationOtpResponse,
+    UserResponse,
+)
 from app.services.auth_service import (
     authenticate_user,
     create_access_token,
@@ -12,7 +22,9 @@ from app.services.auth_service import (
     delete_user_account,
     get_current_user,
     prepare_authenticated_user,
+    request_password_reset_otp,
     request_registration_otp,
+    reset_password_with_otp,
     verify_registration_otp,
 )
 from app.services.usage_service import record_usage_event
@@ -65,6 +77,31 @@ def login(
     record_usage_event(db, user, "login", "auth", provider="system", detail={"email": user.email})
     token = create_access_token(user, settings)
     return AuthResponse(user=user, access_token=token, message="Logged in successfully.")
+
+
+@router.post("/password-reset/otp", response_model=RegistrationOtpResponse)
+def password_reset_otp(
+    request: PasswordResetOtpRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> RegistrationOtpResponse:
+    message, dev_otp = request_password_reset_otp(db, request, settings)
+    return RegistrationOtpResponse(
+        message=message,
+        expires_in_minutes=settings.email_otp_expire_minutes,
+        dev_otp=dev_otp,
+    )
+
+
+@router.post("/password-reset", response_model=MessageResponse)
+def password_reset(
+    request: PasswordResetRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> MessageResponse:
+    user = reset_password_with_otp(db, request, settings)
+    record_usage_event(db, user, "password_reset", "auth", provider="system", detail={"email": user.email})
+    return MessageResponse(message="Password updated. You can log in with your new password.")
 
 
 @router.get("/me", response_model=UserResponse)

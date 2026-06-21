@@ -34,6 +34,29 @@ class RegistrationOtpResponse(BaseModel):
     dev_otp: str | None = None
 
 
+class PasswordResetOtpRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+    otp_code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def new_password_has_letter_and_number(cls, value: str) -> str:
+        has_letter = any(character.isalpha() for character in value)
+        has_number = any(character.isdigit() for character in value)
+        if not has_letter or not has_number:
+            raise ValueError("Password must include at least one letter and one number.")
+        return value
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserResponse(BaseModel):
     id: int
     name: str

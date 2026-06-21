@@ -18,6 +18,8 @@ import {
   ClipboardList,
   Clock3,
   Database,
+  Eye,
+  EyeOff,
   ExternalLink,
   FileQuestion,
   FilePlus2,
@@ -168,6 +170,7 @@ function App() {
   const [authOtpSent, setAuthOtpSent] = useState(false);
   const [authOtpCode, setAuthOtpCode] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [authPasswordVisible, setAuthPasswordVisible] = useState(false);
   const [extensionState, setExtensionState] = useState({
     installed: false,
     checking: true,
@@ -1733,6 +1736,7 @@ function App() {
     setAuthMessageTone("error");
     setAuthOtpSent(false);
     setAuthOtpCode("");
+    setAuthPasswordVisible(false);
     setAuthOpen(true);
   }
 
@@ -1743,8 +1747,46 @@ function App() {
     setAuthMessageTone("error");
 
     try {
-      if (authMode === "register" && !isStrongPassword(authForm.password)) {
+      if ((authMode === "register" || (authMode === "reset" && authOtpSent)) && !isStrongPassword(authForm.password)) {
         throw new Error("Password must be 8+ characters and include at least one letter and one number.");
+      }
+
+      if (authMode === "reset") {
+        if (!authOtpSent) {
+          const response = await apiFetch("/auth/password-reset/otp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: authForm.email }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.detail || `API returned ${response.status}`);
+
+          setAuthOtpSent(true);
+          setAuthMessageTone("success");
+          setAuthMessage(body.dev_otp ? `${body.message} Dev code: ${body.dev_otp}` : body.message);
+          return;
+        }
+
+        const response = await apiFetch("/auth/password-reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: authForm.email,
+            otp_code: authOtpCode,
+            new_password: authForm.password,
+          }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || `API returned ${response.status}`);
+
+        setAuthMode("login");
+        setAuthOtpSent(false);
+        setAuthOtpCode("");
+        setAuthPasswordVisible(false);
+        setAuthForm({ name: "", email: authForm.email, password: "" });
+        setAuthMessageTone("success");
+        setAuthMessage(body.message || "Password updated. You can log in with your new password.");
+        return;
       }
 
       if (authMode === "register" && !authOtpSent) {
@@ -2295,8 +2337,14 @@ function App() {
           <form className="auth-modal" onSubmit={submitAuth}>
             <div className="modal-head">
               <div>
-                <h2>{authMode === "register" ? "Create account" : "Login"}</h2>
-                <p>{authMode === "register" ? "Save your interview prep under your own account." : "Continue with your saved account."}</p>
+                <h2>{authMode === "register" ? "Create account" : authMode === "reset" ? "Reset password" : "Login"}</h2>
+                <p>
+                  {authMode === "register"
+                    ? "Save your interview prep under your own account."
+                    : authMode === "reset"
+                      ? "Verify your email, then choose a new password."
+                      : "Continue with your saved account."}
+                </p>
               </div>
               <button type="button" className="icon-button" onClick={() => setAuthOpen(false)}><X size={18} /></button>
             </div>
@@ -2324,23 +2372,36 @@ function App() {
                 required
               />
             </label>
-            <label>
-              Password
-              <input
-                type="password"
-                value={authForm.password}
-                onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
-                placeholder="At least 8 characters"
-                minLength={8}
-                maxLength={128}
-                disabled={authOtpSent}
-                required
-              />
-            </label>
-            {authMode === "register" && (
+            {(authMode !== "reset" || authOtpSent) && (
+              <label>
+                {authMode === "reset" ? "New password" : "Password"}
+                <span className="password-input-wrap">
+                  <input
+                    type={authPasswordVisible ? "text" : "password"}
+                    value={authForm.password}
+                    onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
+                    placeholder="At least 8 characters"
+                    minLength={8}
+                    maxLength={128}
+                    disabled={authMode === "register" && authOtpSent}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-eye"
+                    onClick={() => setAuthPasswordVisible((visible) => !visible)}
+                    aria-label={authPasswordVisible ? "Hide password" : "Show password"}
+                    title={authPasswordVisible ? "Hide password" : "Show password"}
+                  >
+                    {authPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </span>
+              </label>
+            )}
+            {(authMode === "register" || (authMode === "reset" && authOtpSent)) && (
               <PasswordCriteria password={authForm.password} />
             )}
-            {authMode === "register" && authOtpSent && (
+            {(authMode === "register" || authMode === "reset") && authOtpSent && (
               <label>
                 Verification code
                 <input
@@ -2353,14 +2414,49 @@ function App() {
                 />
               </label>
             )}
+            {authMode === "login" && (
+              <button
+                type="button"
+                className="switch-auth subtle-switch"
+                onClick={() => {
+                  setAuthMode("reset");
+                  setAuthMessage("");
+                  setAuthMessageTone("error");
+                  setAuthOtpSent(false);
+                  setAuthOtpCode("");
+                  setAuthForm({ ...authForm, password: "" });
+                  setAuthPasswordVisible(false);
+                }}
+              >
+                Forgot password?
+              </button>
+            )}
 
             {authMessage && <div className={`auth-message ${authMessageTone}`}>{authMessage}</div>}
 
             <button className="primary auth-submit" disabled={authLoading}>
-              {authLoading ? <Loader2 className="spin" size={16} /> : authMode === "register" && !authOtpSent ? <Bell size={16} /> : authMode === "register" ? <UserPlus size={16} /> : <LogIn size={16} />}
-              {authMode === "register" && !authOtpSent ? "Send Verification Code" : authMode === "register" ? "Verify & Create Account" : "Login"}
+              {authLoading
+                ? <Loader2 className="spin" size={16} />
+                : authMode === "register" && !authOtpSent
+                  ? <Bell size={16} />
+                  : authMode === "register"
+                    ? <UserPlus size={16} />
+                    : authMode === "reset" && !authOtpSent
+                      ? <Bell size={16} />
+                      : authMode === "reset"
+                        ? <ShieldCheck size={16} />
+                        : <LogIn size={16} />}
+              {authMode === "register" && !authOtpSent
+                ? "Send Verification Code"
+                : authMode === "register"
+                  ? "Verify & Create Account"
+                  : authMode === "reset" && !authOtpSent
+                    ? "Send Reset Code"
+                    : authMode === "reset"
+                      ? "Set New Password"
+                      : "Login"}
             </button>
-            {authMode === "register" && authOtpSent && (
+            {(authMode === "register" || authMode === "reset") && authOtpSent && (
               <button
                 type="button"
                 className="switch-auth"
@@ -2382,10 +2478,12 @@ function App() {
                 setAuthMessageTone("error");
                 setAuthOtpSent(false);
                 setAuthOtpCode("");
-                setAuthMode(authMode === "register" ? "login" : "register");
+                setAuthPasswordVisible(false);
+                setAuthForm({ ...authForm, password: "" });
+                setAuthMode(authMode === "register" ? "login" : authMode === "reset" ? "login" : "register");
               }}
             >
-              {authMode === "register" ? "Already have an account? Login" : "New here? Create an account"}
+              {authMode === "register" ? "Already have an account? Login" : authMode === "reset" ? "Remembered it? Login" : "New here? Create an account"}
             </button>
           </form>
         </div>
