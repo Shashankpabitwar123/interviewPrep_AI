@@ -1842,7 +1842,7 @@ function App() {
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} theme-${theme}`}>
-      <aside className="sidebar">
+      <aside className={`sidebar ${isAdmin ? "admin-sidebar" : ""}`}>
         <button className="brand" onClick={() => setActiveView("dashboard")}>
           <BrainCircuit size={25} />
           <span>InterviewPrep AI</span>
@@ -4692,11 +4692,19 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
       item.name?.toLowerCase().includes(query)
       || item.email?.toLowerCase().includes(query)
       || item.status?.toLowerCase().includes(query)
+      || adminPresenceLabel(item).toLowerCase().includes(query)
       || item.role?.toLowerCase().includes(query)
     ));
   }, [search, users]);
 
   const selectedUser = selectedDetail?.user || users.find((item) => item.id === selectedUserId);
+
+  async function fetchUserDetail(userId) {
+    if (!userId) return null;
+    const response = await apiFetch(`/admin/users/${userId}`);
+    if (!response.ok) throw new Error(await readDashboardApiError(response, "User detail"));
+    return response.json();
+  }
 
   async function loadAdminData() {
     setLoading(true);
@@ -4704,9 +4712,14 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
       const response = await apiFetch("/admin/overview");
       if (!response.ok) throw new Error(await readDashboardApiError(response, "Developer dashboard"));
       const data = await response.json();
+      const nextUsers = data.users || [];
+      const nextSelectedUserId = nextUsers.some((item) => item.id === selectedUserId)
+        ? selectedUserId
+        : nextUsers[0]?.id || null;
       setOverview(data);
-      setUsers(data.users || []);
-      setSelectedUserId((current) => current || data.users?.[0]?.id || null);
+      setUsers(nextUsers);
+      setSelectedUserId(nextSelectedUserId);
+      setSelectedDetail(nextSelectedUserId ? await fetchUserDetail(nextSelectedUserId) : null);
       onStatus?.("Developer Dashboard Updated");
     } catch (error) {
       onStatus?.(error.message || "Could Not Load Developer Dashboard");
@@ -4721,9 +4734,7 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
       return;
     }
     try {
-      const response = await apiFetch(`/admin/users/${userId}`);
-      if (!response.ok) throw new Error(await readDashboardApiError(response, "User detail"));
-      setSelectedDetail(await response.json());
+      setSelectedDetail(await fetchUserDetail(userId));
     } catch (error) {
       onStatus?.(error.message || "Could Not Load User Detail");
     }
@@ -4824,23 +4835,26 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
           </div>
 
           <div className="developer-user-list">
-            {filteredUsers.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`developer-user-row ${selectedUserId === item.id ? "selected" : ""}`}
-                onClick={() => setSelectedUserId(item.id)}
-              >
-                <span className={`admin-status-dot ${item.status}`} />
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>{item.email}</small>
-                </span>
-                <em className={`admin-status ${item.status}`}>{item.status}</em>
-                <em className={`admin-status ${item.role === "admin" ? "admin" : "user"}`}>{item.role}</em>
-                <span className="developer-token-count">{formatNumber(item.total_tokens)} tokens</span>
-              </button>
-            ))}
+            {filteredUsers.map((item) => {
+              const presenceClass = adminPresenceClass(item);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`developer-user-row ${selectedUserId === item.id ? "selected" : ""}`}
+                  onClick={() => setSelectedUserId(item.id)}
+                >
+                  <span className={`admin-status-dot ${presenceClass}`} />
+                  <span>
+                    <strong>{item.name}</strong>
+                    <small>{item.email}</small>
+                  </span>
+                  <em className={`admin-status ${presenceClass}`}>{adminPresenceLabel(item)}</em>
+                  <em className={`admin-status ${item.role === "admin" ? "admin" : "user"}`}>{item.role}</em>
+                  <span className="developer-token-count">{formatNumber(item.total_tokens)} tokens</span>
+                </button>
+              );
+            })}
             {!filteredUsers.length && <EmptyState text="No users match this search." />}
           </div>
         </article>
@@ -4850,7 +4864,7 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
             <>
               <div className="developer-detail-head">
                 <div>
-                  <span className={`admin-status-dot ${selectedUser.status}`} />
+                  <span className={`admin-status-dot ${adminPresenceClass(selectedUser)}`} />
                   <h2>{selectedUser.name}</h2>
                   <p>{selectedUser.email}</p>
                 </div>
@@ -4942,6 +4956,25 @@ function DeveloperMeta({ label, value }) {
       <strong>{value || "Not yet"}</strong>
     </div>
   );
+}
+
+const ADMIN_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
+
+function isUserRecentlyActive(user) {
+  if (!user || user.status === "blocked" || !user.last_seen_at) return false;
+  const lastSeen = new Date(user.last_seen_at).getTime();
+  if (Number.isNaN(lastSeen)) return false;
+  return Date.now() - lastSeen <= ADMIN_ACTIVE_WINDOW_MS;
+}
+
+function adminPresenceClass(user) {
+  if (user?.status === "blocked") return "blocked";
+  return isUserRecentlyActive(user) ? "active" : "inactive";
+}
+
+function adminPresenceLabel(user) {
+  if (user?.status === "blocked") return "Blocked";
+  return isUserRecentlyActive(user) ? "Active" : "No";
 }
 
 function formatNumber(value) {
