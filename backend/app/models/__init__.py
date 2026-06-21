@@ -11,6 +11,7 @@ from app.models.interview import (
     PrepTask,
     Question,
     User,
+    UserUsageEvent,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "PrepTask",
     "Question",
     "User",
+    "UserUsageEvent",
 ]

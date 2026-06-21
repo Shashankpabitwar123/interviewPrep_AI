@@ -12,6 +12,7 @@ class Settings(BaseModel):
     auth_secret_key: str = "change-this-local-development-secret"
     access_token_expire_minutes: int = 60 * 24 * 7
     require_auth: bool = False
+    admin_emails: list[str] = []
     registration_otp_required: bool = True
     email_provider: str = "smtp"
     email_from: Optional[str] = None
@@ -63,6 +64,11 @@ def get_settings() -> Settings:
         auth_secret_key=os.getenv("AUTH_SECRET_KEY", "change-this-local-development-secret"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7))),
         require_auth=os.getenv("REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"},
+        admin_emails=[
+            email.strip().lower()
+            for email in os.getenv("ADMIN_EMAILS", "").split(",")
+            if email.strip()
+        ],
         registration_otp_required=os.getenv("REGISTRATION_OTP_REQUIRED", "true").lower() in {"1", "true", "yes"},
         email_provider=os.getenv("EMAIL_PROVIDER", "smtp").lower(),
         email_from=os.getenv("EMAIL_FROM"),

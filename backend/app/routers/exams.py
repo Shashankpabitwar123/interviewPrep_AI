@@ -7,6 +7,7 @@ from app.models import User
 from app.schemas.exam import ExamGenerateRequest, ExamResponse, ExamSubmissionRequest, ExamSubmissionResponse
 from app.services.auth_service import get_request_user
 from app.services.exam_service import generate_exam_for_plan, get_exam_detail, submit_exam_answers
+from app.services.usage_service import record_usage_event
 
 router = APIRouter(prefix="/exams", tags=["exams"])
 
@@ -21,6 +22,16 @@ def generate_exam(
     exam = generate_exam_for_plan(db, request, settings, current_user)
     if exam is None:
         raise HTTPException(status_code=404, detail="Prep plan not found")
+    record_usage_event(
+        db,
+        current_user,
+        "exam_generated",
+        "exams",
+        settings=settings,
+        input_value=request.model_dump(),
+        output_value=exam.model_dump(),
+        detail={"exam_id": exam.id, "prep_plan_id": exam.prep_plan_id, "day": exam.day, "questions": len(exam.questions)},
+    )
     return exam
 
 
@@ -47,4 +58,14 @@ def submit_exam(
     result = submit_exam_answers(db, exam_id, request, settings, current_user)
     if result is None:
         raise HTTPException(status_code=404, detail="Exam not found")
+    record_usage_event(
+        db,
+        current_user,
+        "exam_submitted",
+        "exams",
+        settings=settings,
+        input_value=request.model_dump(),
+        output_value=result.model_dump(),
+        detail={"exam_id": exam_id, "score": result.average_score, "answers": len(result.results)},
+    )
     return result

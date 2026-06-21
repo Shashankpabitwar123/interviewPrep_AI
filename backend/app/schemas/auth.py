@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 class RegisterRequest(BaseModel):
@@ -38,7 +38,18 @@ class UserResponse(BaseModel):
     id: int
     name: str
     email: str
+    role: str = "user"
+    status: str = "active"
+    blocked_at: datetime | None = None
+    block_reason: str | None = None
+    last_login_at: datetime | None = None
+    last_seen_at: datetime | None = None
     created_at: datetime
+
+    @computed_field
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
 
     model_config = {"from_attributes": True}
 

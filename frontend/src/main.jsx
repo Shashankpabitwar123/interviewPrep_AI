@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   Activity,
   BarChart3,
+  Ban,
   Bell,
   BookOpen,
   BrainCircuit,
@@ -39,7 +40,10 @@ import {
   Plus,
   RotateCcw,
   Save,
+  Search,
   Settings,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Trash2,
   UserRound,
@@ -1830,6 +1834,7 @@ function App() {
   }
 
   const activity = recentActivity.map((item) => ({ ...item, time: relativeTime(item.createdAt), target: item.target || targetForActivity(item.type) }));
+  const isAdmin = user?.is_admin || user?.role === "admin";
 
   function openActivity(item) {
     setActiveView(item.target || targetForActivity(item.type));
@@ -1856,6 +1861,7 @@ function App() {
           <NavItem icon={Activity} label="Progress" active={activeView === "progress"} onClick={() => setActiveView("progress")} />
           <NavItem icon={CalendarDays} label="Calendar" active={activeView === "calendar"} onClick={() => setActiveView("calendar")} />
           <NavItem icon={NotebookText} label="Notes" active={activeView === "notes"} onClick={() => setActiveView("notes")} />
+          {isAdmin && <NavItem icon={ShieldCheck} label="Developer" active={activeView === "developer"} onClick={() => setActiveView("developer")} />}
         </nav>
 
         <div className="streak-card">
@@ -2265,7 +2271,19 @@ function App() {
           />
         )}
 
-        {!["dashboard", "jobs", "prep", "exams", "calendar", "notes", "progress", "data", "about", "analytics"].includes(activeView) && (
+        {activeView === "developer" && isAdmin && (
+          <DeveloperDashboard
+            apiFetch={apiFetch}
+            currentUser={user}
+            onStatus={setStatus}
+          />
+        )}
+
+        {activeView === "developer" && !isAdmin && (
+          <PlaceholderView title="Developer Dashboard" />
+        )}
+
+        {!["dashboard", "jobs", "prep", "exams", "calendar", "notes", "progress", "data", "about", "analytics", "developer"].includes(activeView) && (
           <PlaceholderView title={viewTitle(activeView)} />
         )}
 
@@ -4642,6 +4660,306 @@ function DataMetric({ label, value, detail }) {
   );
 }
 
+async function readDashboardApiError(response, label = "Request") {
+  try {
+    const body = await response.clone().json();
+    if (body?.detail) return `${label} returned ${response.status}: ${body.detail}`;
+  } catch {
+    // Continue to text fallback.
+  }
+  try {
+    const text = await response.clone().text();
+    if (text) return `${label} returned ${response.status}: ${text}`;
+  } catch {
+    // Continue to generic fallback.
+  }
+  return `${label} returned ${response.status}`;
+}
+
+function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
+  const [overview, setOverview] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [selectedDetail, setSelectedDetail] = useState(null);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState("");
+
+  const filteredUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return users;
+    return users.filter((item) => (
+      item.name?.toLowerCase().includes(query)
+      || item.email?.toLowerCase().includes(query)
+      || item.status?.toLowerCase().includes(query)
+      || item.role?.toLowerCase().includes(query)
+    ));
+  }, [search, users]);
+
+  const selectedUser = selectedDetail?.user || users.find((item) => item.id === selectedUserId);
+
+  async function loadAdminData() {
+    setLoading(true);
+    try {
+      const response = await apiFetch("/admin/overview");
+      if (!response.ok) throw new Error(await readDashboardApiError(response, "Developer dashboard"));
+      const data = await response.json();
+      setOverview(data);
+      setUsers(data.users || []);
+      setSelectedUserId((current) => current || data.users?.[0]?.id || null);
+      onStatus?.("Developer Dashboard Updated");
+    } catch (error) {
+      onStatus?.(error.message || "Could Not Load Developer Dashboard");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadUserDetail(userId) {
+    if (!userId) {
+      setSelectedDetail(null);
+      return;
+    }
+    try {
+      const response = await apiFetch(`/admin/users/${userId}`);
+      if (!response.ok) throw new Error(await readDashboardApiError(response, "User detail"));
+      setSelectedDetail(await response.json());
+    } catch (error) {
+      onStatus?.(error.message || "Could Not Load User Detail");
+    }
+  }
+
+  useEffect(() => {
+    loadAdminData();
+  }, []);
+
+  useEffect(() => {
+    loadUserDetail(selectedUserId);
+  }, [selectedUserId]);
+
+  async function runUserAction(user, action) {
+    if (!user) return;
+    const isSelf = currentUser?.id === user.id;
+    if (isSelf) {
+      onStatus?.("Cannot Manage Your Own Admin Account Here");
+      return;
+    }
+
+    let endpoint = `/admin/users/${user.id}/${action}`;
+    let options = { method: "POST" };
+    let success = "User Updated";
+
+    if (action === "block") {
+      const reason = window.prompt(`Why should ${user.email} be blocked?`, "Blocked by developer review.");
+      if (reason === null) return;
+      options = {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim() || "Blocked by developer review." }),
+      };
+      success = "User Blocked";
+    }
+
+    if (action === "unblock") {
+      if (!window.confirm(`Unblock ${user.email}?`)) return;
+      success = "User Unblocked";
+    }
+
+    if (action === "delete") {
+      if (!window.confirm(`Delete ${user.email} and all account data? This cannot be undone.`)) return;
+      endpoint = `/admin/users/${user.id}`;
+      options = { method: "DELETE" };
+      success = "User Deleted";
+    }
+
+    setActionLoading(`${action}:${user.id}`);
+    try {
+      const response = await apiFetch(endpoint, options);
+      if (!response.ok) throw new Error(await readDashboardApiError(response, success));
+      onStatus?.(success);
+      await loadAdminData();
+      if (action === "delete") {
+        setSelectedUserId(null);
+        setSelectedDetail(null);
+      } else {
+        await loadUserDetail(user.id);
+      }
+    } catch (error) {
+      onStatus?.(error.message || `Could Not ${success}`);
+    } finally {
+      setActionLoading("");
+    }
+  }
+
+  return (
+    <section className="page-stack developer-page">
+      <section className="panel page-panel developer-hero">
+        <PanelTitle
+          icon={ShieldCheck}
+          title="Developer Dashboard"
+          subtitle="Monitor accounts, account status, product activity, and estimated AI/API token usage."
+          badge="Admin only"
+        />
+        <button type="button" className="outline-action compact-action" onClick={loadAdminData} disabled={loading}>
+          {loading ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
+          Refresh
+        </button>
+      </section>
+
+      <section className="developer-kpi-grid">
+        <DataMetric label="Total users" value={overview?.total_users ?? 0} detail={`${overview?.active_users ?? 0} active`} />
+        <DataMetric label="Blocked users" value={overview?.blocked_users ?? 0} detail="Cannot login while blocked" />
+        <DataMetric label="Accounts today" value={overview?.accounts_created_today ?? 0} detail={`${overview?.logins_today ?? 0} logins today`} />
+        <DataMetric label="Usage events" value={overview?.total_events ?? 0} detail="Tracked product actions" />
+        <DataMetric label="Estimated tokens" value={formatNumber(overview?.total_api_tokens ?? 0)} detail="OpenAI/Tavily/local estimates" />
+      </section>
+
+      <section className="developer-grid">
+        <article className="panel page-panel developer-users-panel">
+          <div className="developer-toolbar">
+            <PanelTitle icon={UsersIcon} title="Users" subtitle="Search, inspect, block, unblock, or remove accounts." />
+            <label className="developer-search">
+              <Search size={16} />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name, email, role, or status" />
+            </label>
+          </div>
+
+          <div className="developer-user-list">
+            {filteredUsers.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`developer-user-row ${selectedUserId === item.id ? "selected" : ""}`}
+                onClick={() => setSelectedUserId(item.id)}
+              >
+                <span className={`admin-status-dot ${item.status}`} />
+                <span>
+                  <strong>{item.name}</strong>
+                  <small>{item.email}</small>
+                </span>
+                <em className={`admin-status ${item.status}`}>{item.status}</em>
+                <em className={`admin-status ${item.role === "admin" ? "admin" : "user"}`}>{item.role}</em>
+                <span className="developer-token-count">{formatNumber(item.total_tokens)} tokens</span>
+              </button>
+            ))}
+            {!filteredUsers.length && <EmptyState text="No users match this search." />}
+          </div>
+        </article>
+
+        <article className="panel page-panel developer-detail-panel">
+          {selectedUser ? (
+            <>
+              <div className="developer-detail-head">
+                <div>
+                  <span className={`admin-status-dot ${selectedUser.status}`} />
+                  <h2>{selectedUser.name}</h2>
+                  <p>{selectedUser.email}</p>
+                </div>
+                <div className="developer-actions">
+                  {selectedUser.status === "blocked" ? (
+                    <button
+                      type="button"
+                      className="outline-action compact-action"
+                      disabled={actionLoading === `unblock:${selectedUser.id}` || currentUser?.id === selectedUser.id}
+                      onClick={() => runUserAction(selectedUser, "unblock")}
+                    >
+                      <ShieldCheck size={15} /> Unblock
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="outline-action compact-action"
+                      disabled={actionLoading === `block:${selectedUser.id}` || currentUser?.id === selectedUser.id}
+                      onClick={() => runUserAction(selectedUser, "block")}
+                    >
+                      <Ban size={15} /> Block
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="danger-action compact-danger"
+                    disabled={actionLoading === `delete:${selectedUser.id}` || currentUser?.id === selectedUser.id}
+                    onClick={() => runUserAction(selectedUser, "delete")}
+                  >
+                    <Trash2 size={15} /> Delete
+                  </button>
+                </div>
+              </div>
+
+              {selectedUser.status === "blocked" && (
+                <div className="developer-warning">
+                  <ShieldAlert size={17} />
+                  <span>{selectedUser.block_reason || "This account is blocked."}</span>
+                </div>
+              )}
+
+              <div className="developer-stat-grid">
+                <DataMetric label="Jobs" value={selectedUser.jobs_count ?? 0} detail="Saved job posts" />
+                <DataMetric label="Prep plans" value={selectedUser.prep_plans_count ?? 0} detail="Generated plans" />
+                <DataMetric label="Exams" value={selectedUser.exams_count ?? 0} detail="Generated exams" />
+                <DataMetric label="Mocks" value={selectedUser.mock_interviews_count ?? 0} detail="Mock interviews" />
+                <DataMetric label="Events" value={selectedUser.total_events ?? 0} detail="Tracked actions" />
+                <DataMetric label="Tokens" value={formatNumber(selectedUser.total_tokens ?? 0)} detail="Estimated usage" />
+              </div>
+
+              <div className="developer-meta-grid">
+                <DeveloperMeta label="Created" value={formatDateTime(selectedUser.created_at)} />
+                <DeveloperMeta label="Last login" value={formatDateTime(selectedUser.last_login_at)} />
+                <DeveloperMeta label="Last seen" value={formatDateTime(selectedUser.last_seen_at)} />
+              </div>
+
+              <h3 className="developer-section-title">Recent Usage</h3>
+              <div className="admin-event-list">
+                {(selectedDetail?.recent_events || []).map((event) => (
+                  <article key={event.id} className="admin-event-row">
+                    <span>
+                      <strong>{humanize(event.feature)}</strong>
+                      <small>{humanize(event.event_type)} · {event.provider || "app"}{event.model ? ` · ${event.model}` : ""}</small>
+                    </span>
+                    <em>{formatNumber(event.total_tokens)} tokens</em>
+                    <small>{relativeTime(event.created_at)}</small>
+                  </article>
+                ))}
+                {!selectedDetail?.recent_events?.length && <EmptyState text="No usage events recorded for this account yet." />}
+              </div>
+            </>
+          ) : (
+            <EmptyState text="Select a user to inspect their account and usage." />
+          )}
+        </article>
+      </section>
+    </section>
+  );
+}
+
+function UsersIcon(props) {
+  return <UserRound {...props} />;
+}
+
+function DeveloperMeta({ label, value }) {
+  return (
+    <div className="developer-meta">
+      <span>{label}</span>
+      <strong>{value || "Not yet"}</strong>
+    </div>
+  );
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("en-US").format(Number(value || 0));
+}
+
+function formatDateTime(value) {
+  if (!value) return "Not yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not yet";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function humanize(value) {
+  if (!value) return "Unknown";
+  return String(value).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function useSavedPlanDetails(savedPlans, activePlan, apiFetch) {
   const [details, setDetails] = useState({});
   useEffect(() => {
@@ -6239,6 +6557,7 @@ function viewTitle(view) {
     progress: "Progress",
     calendar: "Calendar",
     notes: "Notes",
+    developer: "Developer Dashboard",
     settings: "Settings",
     about: "About",
   };

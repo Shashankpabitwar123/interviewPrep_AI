@@ -23,6 +23,29 @@ class User(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(40), default="user", server_default="user")
+    status: Mapped[str] = mapped_column(String(40), default="active", server_default="active", index=True)
+    blocked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    block_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserUsageEvent(TimestampMixin, Base):
+    """Auditable product usage and AI-consumption events for the developer dashboard."""
+
+    __tablename__ = "user_usage_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    feature: Mapped[str] = mapped_column(String(80), index=True)
+    provider: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
 class EmailVerificationOTP(TimestampMixin, Base):

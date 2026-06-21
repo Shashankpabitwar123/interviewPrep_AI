@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.ai_policy import AIUnavailableError, reset_allow_local_fallback, set_allow_local_fallback
 from app.config import get_settings
 from app.database import create_db_and_tables
-from app.routers import auth, exams, experiences, health, jobs, mock_interviews, prep_plans, study_notes
+from app.routers import admin, auth, exams, experiences, health, jobs, mock_interviews, prep_plans, study_notes
 
 
 @asynccontextmanager
@@ -56,6 +56,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(jobs.router)
 app.include_router(prep_plans.router)
 app.include_router(exams.router)

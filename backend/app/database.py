@@ -43,7 +43,20 @@ def _apply_lightweight_migrations() -> None:
     """Keep existing local SQLite files usable while the schema changes quickly."""
 
     inspector = inspect(engine)
-    if "job_posts" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "users" in table_names:
+        _add_missing_columns("users", {
+            "role": "VARCHAR(40) DEFAULT 'user'",
+            "status": "VARCHAR(40) DEFAULT 'active'",
+            "blocked_at": "TIMESTAMP",
+            "block_reason": "TEXT",
+            "last_login_at": "TIMESTAMP",
+            "last_seen_at": "TIMESTAMP",
+        })
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_status ON users (status)"))
+
+    if "job_posts" not in table_names:
         return
 
     columns = {column["name"] for column in inspector.get_columns("job_posts")}
@@ -54,6 +67,17 @@ def _apply_lightweight_migrations() -> None:
     if "company" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE job_posts ADD COLUMN company VARCHAR(160)"))
+
+
+def _add_missing_columns(table_name: str, column_sql: dict[str, str]) -> None:
+    inspector = inspect(engine)
+    existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+    missing_columns = [(name, sql) for name, sql in column_sql.items() if name not in existing_columns]
+    if not missing_columns:
+        return
+    with engine.begin() as connection:
+        for column_name, sql_type in missing_columns:
+            connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {sql_type}"))
 
 
 def get_db() -> Generator[Session, None, None]:

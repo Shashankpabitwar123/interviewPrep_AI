@@ -46,6 +46,10 @@ InterviewPrep AI/
 
 Use [RUN_LOCALLY.md](/Users/shashankpabitwar/Downloads/InterviewPrep%20AI/RUN_LOCALLY.md).
 
+## Project Memory
+
+Use [docs/project-memory.md](/Users/shashankpabitwar/Downloads/InterviewPrep%20AI/docs/project-memory.md) as the main handoff for future Codex chats, product context, live service URLs, feature expectations, and deployment notes.
+
 ## Deployment Notes
 
 Use [docs/deployment-and-database-plan.md](/Users/shashankpabitwar/Downloads/InterviewPrep%20AI/docs/deployment-and-database-plan.md) for the live website plan.

@@ -23,13 +23,16 @@ from app.models import (
     PrepTask,
     Question,
     User,
+    UserUsageEvent,
 )
 from app.schemas.auth import LoginRequest, RegisterRequest, RegistrationOtpRequest
 from app.services.email_service import email_configured, send_registration_otp
+from app.services.usage_service import mark_login, record_usage_event
 
 HASH_NAME = "sha256"
 ITERATIONS = 100_000
 MAX_OTP_ATTEMPTS = 5
+BLOCKED_ACCOUNT_DETAIL = "This account is blocked. Contact PrepInterview AI support if you think this is a mistake."
 
 
 def request_registration_otp(db: Session, request: RegistrationOtpRequest, settings: Settings) -> tuple[str, Optional[str]]:
@@ -104,7 +107,7 @@ def _enforce_otp_send_limits(db: Session, email: str, settings: Settings, now: d
         )
 
 
-def create_user(db: Session, request: RegisterRequest) -> User:
+def create_user(db: Session, request: RegisterRequest, settings: Settings | None = None) -> User:
     """Create a new account after checking that the email is unused."""
 
     email = _normalize_email(request.email)
@@ -116,6 +119,7 @@ def create_user(db: Session, request: RegisterRequest) -> User:
         name=request.name.strip(),
         email=email,
         password_hash=hash_password(request.password),
+        role="admin" if settings and email in settings.admin_emails else "user",
     )
     db.add(user)
     db.commit()
@@ -165,6 +169,36 @@ def authenticate_user(db: Session, request: LoginRequest) -> User:
     return user
 
 
+def prepare_authenticated_user(db: Session, user: User, settings: Settings) -> User:
+    """Refresh admin status, reject blocked accounts, and mark successful login."""
+
+    promote_admin_if_configured(db, user, settings)
+    ensure_user_is_active(db, user)
+    mark_login(db, user)
+    return user
+
+
+def promote_admin_if_configured(db: Session, user: User, settings: Settings) -> None:
+    """Allow the owner to bootstrap admin access from environment configuration."""
+
+    if user.email in settings.admin_emails and user.role != "admin":
+        user.role = "admin"
+        db.commit()
+
+
+def ensure_user_is_active(db: Session, user: User) -> None:
+    if user.status == "blocked":
+        record_usage_event(
+            db,
+            user,
+            "blocked_login_attempt",
+            "auth",
+            provider="system",
+            detail={"reason": user.block_reason},
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=BLOCKED_ACCOUNT_DETAIL)
+
+
 def delete_user_account(db: Session, user: User) -> None:
     """Delete a user's account and the interview-prep records owned by it."""
 
@@ -190,6 +224,7 @@ def delete_user_account(db: Session, user: User) -> None:
         db.query(JobPost).filter(JobPost.id.in_(owned_job_ids)).delete(synchronize_session=False)
 
     db.query(EmailVerificationOTP).filter(EmailVerificationOTP.email == user.email).delete(synchronize_session=False)
+    db.query(UserUsageEvent).filter(UserUsageEvent.user_id == user.id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
 
@@ -244,12 +279,25 @@ def get_request_user(
     user = db.get(User, int(payload["sub"]))
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists.")
+    promote_admin_if_configured(db, user, settings)
+    ensure_user_is_active(db, user)
     return user
 
 
 def get_current_user(current_user: Optional[User] = Depends(get_request_user)) -> User:
     if current_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Login required.")
+    return current_user
+
+
+def require_admin_user(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    promote_admin_if_configured(db, current_user, settings)
+    if current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Developer dashboard access required.")
     return current_user
 
 

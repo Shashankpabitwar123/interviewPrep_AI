@@ -11,9 +11,11 @@ from app.services.auth_service import (
     create_user,
     delete_user_account,
     get_current_user,
+    prepare_authenticated_user,
     request_registration_otp,
     verify_registration_otp,
 )
+from app.services.usage_service import record_usage_event
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -25,7 +27,15 @@ def register(
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
     verify_registration_otp(db, request.email, request.otp_code, settings)
-    user = create_user(db, request)
+    user = create_user(db, request, settings)
+    record_usage_event(
+        db,
+        user,
+        "account_created",
+        "auth",
+        provider="system",
+        detail={"email": user.email, "role": user.role},
+    )
     token = create_access_token(user, settings)
     return AuthResponse(user=user, access_token=token, message="Account created successfully.")
 
@@ -51,6 +61,8 @@ def login(
     settings: Settings = Depends(get_settings),
 ) -> AuthResponse:
     user = authenticate_user(db, request)
+    prepare_authenticated_user(db, user, settings)
+    record_usage_event(db, user, "login", "auth", provider="system", detail={"email": user.email})
     token = create_access_token(user, settings)
     return AuthResponse(user=user, access_token=token, message="Logged in successfully.")
 
@@ -77,5 +89,14 @@ def delete_me_via_post(
 
 
 def _delete_current_account(db: Session, current_user: User) -> Response:
+    record_usage_event(
+        db,
+        current_user,
+        "account_deleted",
+        "auth",
+        provider="system",
+        detail={"email": current_user.email},
+        commit=False,
+    )
     delete_user_account(db, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
