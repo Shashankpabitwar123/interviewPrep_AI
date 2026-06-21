@@ -87,23 +87,34 @@ def _generate_with_openai(plan: PrepPlan, request: StudyNoteRequest, settings: S
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
-    response = client.responses.parse(
-        model=settings.openai_model,
-        input=[
-            {
-                "role": "system",
-                "content": (
-                    "You create serious interview preparation notes. "
-                    "Use the job description carefully. Be practical, specific, and honest. "
-                    "Do not claim live web access or recent data unless provided. "
-                    "When discussing industry trends, phrase them as durable signals to verify, not breaking news."
-                ),
-            },
-            {"role": "user", "content": _note_prompt(plan, request, research)},
-        ],
-        text_format=StudyNoteResponse,
-    )
-    return _ensure_research_sources(response.output_parsed, research).model_copy(update={"source": "openai"})
+    last_error: Exception | None = None
+    for max_output_tokens in (10000, 14000):
+        try:
+            response = client.responses.parse(
+                model=settings.openai_model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You create serious interview preparation notes. "
+                            "Use the job description carefully. Be practical, specific, and honest. "
+                            "Do not claim live web access or recent data unless provided. "
+                            "When discussing industry trends, phrase them as durable signals to verify, not breaking news. "
+                            "Return complete structured JSON; keep wording concise enough to avoid truncation."
+                        ),
+                    },
+                    {"role": "user", "content": _note_prompt(plan, request, research)},
+                ],
+                text_format=StudyNoteResponse,
+                max_output_tokens=max_output_tokens,
+            )
+            return _ensure_research_sources(response.output_parsed, research).model_copy(update={"source": "openai"})
+        except Exception as exc:
+            last_error = exc
+            logger.warning("OpenAI study note parse failed with %s output tokens: %s", max_output_tokens, exc)
+    if last_error:
+        raise last_error
+    raise RuntimeError("OpenAI study note generation failed before producing a response.")
 
 
 def _generate_with_gemini(plan: PrepPlan, request: StudyNoteRequest, settings: Settings, research: list[ResearchResult]) -> StudyNoteResponse:
@@ -131,6 +142,7 @@ def _answer_with_openai(request: StudyNoteAskRequest, settings: Settings) -> Stu
             {"role": "user", "content": _ask_prompt(request)},
         ],
         text_format=StudyNoteAskResponse,
+        max_output_tokens=3500,
     )
     return response.output_parsed.model_copy(update={"source": "openai"})
 
@@ -158,6 +170,7 @@ def _improve_with_openai(request: StudyNoteImproveRequest, settings: Settings) -
             {"role": "user", "content": _improve_prompt(request)},
         ],
         text_format=StudyNoteImproveResponse,
+        max_output_tokens=2500,
     )
     return response.output_parsed.model_copy(update={"source": "openai"})
 

@@ -6,8 +6,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings, get_settings
 from app.database import Base, get_db
 from app.main import app
+from app.schemas.study_note import NoteSection, StudyNoteResponse, StudyResource
 
 
 def test_job_analysis_endpoint_saves_and_reads_job() -> None:
@@ -233,6 +235,101 @@ def test_exam_generation_can_focus_on_day_note_topics() -> None:
     assert {topic for question in exam["questions"] for topic in question["topics"]} <= {"REST APIs", "SQL joins"}
 
 
+def test_ai_only_study_note_generation_records_usage_without_route_error(monkeypatch) -> None:
+    client = _client_with_memory_db()
+    client.headers.update({"X-Allow-Local-Fallback": "false"})
+    app.dependency_overrides[get_settings] = lambda: Settings(openai_api_key="test-key")
+
+    def fake_generate_with_openai(plan, request, settings, research):
+        return StudyNoteResponse(
+            title=request.title,
+            subtitle="AI generated",
+            role=plan.job_post.title,
+            topics=request.topics,
+            summary="Study these topics for the interview.",
+            sections=[NoteSection(title="What to know", body="Use concrete examples.", bullets=["Explain tradeoffs"])],
+            deep_dive=[NoteSection(title="Deeper prep", body="Practice scenario answers.", bullets=[])],
+            interview_questions=["How would you apply this topic?"],
+            related_topics=["Testing"],
+            resources=[StudyResource(title="Docs", url="https://example.com", why="Reference")],
+            checklist=["Prepare one example"],
+            source="openai",
+        )
+
+    monkeypatch.setattr("app.services.study_note_service._generate_with_openai", fake_generate_with_openai)
+    plan_response = client.post(
+        "/prep-plans",
+        headers={"X-Allow-Local-Fallback": "true"},
+        json={
+            "job_title": "Backend Software Engineer",
+            "job_description": "Python SQL REST APIs Docker testing and system design.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    )
+    prep_plan_id = plan_response.json()["prep_plan_id"]
+
+    response = client.post(
+        "/study-notes/generate",
+        json={
+            "prep_plan_id": prep_plan_id,
+            "day": 1,
+            "title": "Read notes: REST APIs",
+            "topics": ["REST APIs", "Testing"],
+            "instructions": "Prepare for the daily exam.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "openai"
+
+
+def test_ai_only_exam_generation_batches_until_requested_count(monkeypatch) -> None:
+    client = _client_with_memory_db()
+    client.headers.update({"X-Allow-Local-Fallback": "false"})
+    app.dependency_overrides[get_settings] = lambda: Settings(openai_api_key="test-key")
+    batch_sizes: list[int] = []
+
+    def fake_generate_with_openai(prompt, settings, question_count, max_output_tokens):
+        batch_sizes.append(question_count)
+        return {
+            "questions": [
+                {
+                    "question_type": "short_answer",
+                    "prompt": f"Question {len(batch_sizes)}-{index}: explain REST APIs with a tradeoff.",
+                    "topics": ["REST APIs"],
+                    "expected_answer": "A strong answer connects the topic to the job and names a tradeoff.",
+                    "options": None,
+                }
+                for index in range(question_count)
+            ]
+        }
+
+    monkeypatch.setattr("app.services.exam_service._generate_questions_with_openai", fake_generate_with_openai)
+    plan_response = client.post(
+        "/prep-plans",
+        headers={"X-Allow-Local-Fallback": "true"},
+        json={
+            "job_title": "Backend Software Engineer",
+            "job_description": "Python SQL REST APIs Docker testing and system design.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    )
+    prep_plan_id = plan_response.json()["prep_plan_id"]
+
+    exam_response = client.post(
+        "/exams/generate",
+        json={"prep_plan_id": prep_plan_id, "day": 1, "question_count": 12, "difficulty": "medium"},
+    )
+
+    assert exam_response.status_code == 200
+    assert len(exam_response.json()["questions"]) == 12
+    assert batch_sizes == [10, 2]
+
+
 def test_interview_experience_flow() -> None:
     client = _client_with_memory_db()
 
@@ -309,6 +406,7 @@ def _register(client: TestClient, payload: dict[str, str]):
 
 
 def _client_with_memory_db() -> TestClient:
+    app.dependency_overrides.clear()
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},

@@ -37,7 +37,7 @@ def generate_note(
         settings=settings,
         input_value=request.model_dump(),
         output_value=note.model_dump(),
-        detail={"prep_plan_id": request.prep_plan_id, "day": request.day, "topic": request.topic},
+        detail={"prep_plan_id": request.prep_plan_id, "day": request.day, "topics": request.topics},
     )
     return note
 
@@ -58,7 +58,7 @@ def ask_note_question(
         settings=settings,
         input_value=request.model_dump(),
         output_value=answer.model_dump(),
-        detail={"topic": request.topic},
+        detail={"topics": request.topics},
     )
     return answer
 

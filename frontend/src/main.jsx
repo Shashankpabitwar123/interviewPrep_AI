@@ -515,7 +515,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      if (!response.ok) throw new Error(await readApiError(response, "Prep plan"));
 
       const savedPlan = await response.json();
       const planColor = colorForJobId(savedPlan.job_post_id, jobMarkers, savedPlan.job_title);
@@ -559,7 +559,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      if (!response.ok) throw new Error(await readApiError(response, "Exam generation"));
       const saved = await response.json();
       setCompany(saved.company || inferCompanyName(company, jobDescription, sourceUrl));
       const jobColor = colorForJobId(saved.job_post_id, jobMarkers, saved.role_title || jobTitle);
@@ -1389,7 +1389,7 @@ function App() {
             instructions: task.instructions || "",
           }),
         });
-        if (!response.ok) throw new Error(await response.text());
+        if (!response.ok) throw new Error(await readApiError(response, "Study notes"));
         content = await response.json();
       }
       if (!content && allowLocalFallback) content = generateStudyNote(plan, task);

@@ -207,52 +207,102 @@ def _generate_questions_with_ai(
         require_ai_result("No AI provider is configured for exam generation. Enable local fallback in settings to create an offline exam.")
         return None
 
-    prompt = _exam_prompt(plan, topics, request)
+    questions: list[dict] = []
+    seen_prompts: set[str] = set()
+    attempts_without_progress = 0
+    batch_number = 1
+
+    while len(questions) < request.question_count and attempts_without_progress < 3:
+        batch_size = min(10, request.question_count - len(questions))
+        prompt = _exam_prompt(
+            plan,
+            topics,
+            request,
+            batch_question_count=batch_size,
+            batch_number=batch_number,
+            existing_prompts=[question["prompt"] for question in questions[-12:]],
+        )
+        data = _request_exam_batch(prompt, settings, batch_size)
+        normalized = _normalize_ai_exam_questions(data, topics, request)
+        before = len(questions)
+
+        for item in normalized:
+            key = _question_dedupe_key(item["prompt"])
+            if key in seen_prompts:
+                continue
+            seen_prompts.add(key)
+            questions.append(item)
+            if len(questions) >= request.question_count:
+                break
+
+        if len(questions) == before:
+            attempts_without_progress += 1
+        else:
+            attempts_without_progress = 0
+        batch_number += 1
+
+    if len(questions) < request.question_count:
+        require_ai_result(
+            "AI exam generation did not return enough usable questions. Enable local fallback in settings to fill the exam with offline questions."
+        )
+        return None
+    return questions[: request.question_count]
+
+
+def _request_exam_batch(prompt: str, settings: Settings, question_count: int) -> object:
     data: object | None = None
 
     if settings.openai_enabled:
-        try:
-            data = _generate_questions_with_openai(prompt, settings)
-        except Exception as exc:
-            logger.warning("OpenAI exam generation failed: %s", exc)
+        for output_budget in (max(5000, question_count * 900), max(8000, question_count * 1200)):
+            try:
+                data = _generate_questions_with_openai(prompt, settings, question_count, output_budget)
+                break
+            except Exception as exc:
+                logger.warning("OpenAI exam generation failed with output budget %s: %s", output_budget, exc)
 
     if data is None and settings.gemini_enabled:
         try:
             data = generate_gemini_json(settings, prompt, _gemini_exam_schema())
         except Exception as exc:
             logger.warning("Gemini exam generation failed: %s", exc)
-            require_ai_result("AI exam generation failed. Enable local fallback in settings to create an offline exam.")
-            return None
 
     if data is None:
         require_ai_result("AI exam generation failed. Enable local fallback in settings to create an offline exam.")
-        return None
+    return data
 
+
+def _normalize_ai_exam_questions(data: object, topics: list[str], request: ExamGenerateRequest) -> list[dict]:
     raw_questions = data if isinstance(data, list) else data.get("questions", [])
-    questions = []
+    questions: list[dict] = []
     for index, item in enumerate(raw_questions, start=1):
         if not isinstance(item, dict):
             continue
         question_type = _normalize_question_type(str(item.get("question_type") or item.get("type") or "short_answer"))
+        if request.question_types and not request.auto_question_types:
+            allowed = {_normalize_question_type(kind) for kind in request.question_types}
+            if question_type not in allowed:
+                question_type = next(iter(allowed))
         prompt_text = item.get("prompt") or item.get("question") or item.get("title")
         if not prompt_text:
             continue
+        question_topics = item.get("topics") or topics[:2]
+        if isinstance(question_topics, str):
+            question_topics = [question_topics]
+        if not isinstance(question_topics, list):
+            question_topics = topics[:2]
         questions.append(
             {
                 "question_type": question_type,
                 "prompt": str(prompt_text),
-                "topics": item.get("topics") or topics[:2],
+                "topics": [str(topic) for topic in question_topics if str(topic).strip()] or topics[:2],
                 "expected_answer": item.get("expected_answer") or item.get("answer") or "Evaluate correctness, clarity, tradeoffs, and examples.",
                 "options": _normalize_options(item.get("options"), question_type, index),
             }
         )
-    if not questions:
-        require_ai_result("AI exam generation returned no usable questions. Enable local fallback in settings to create an offline exam.")
-        return None
-    return questions[: request.question_count]
+    return questions
 
 
-def _generate_questions_with_openai(prompt: str, settings: Settings) -> dict:
+def _generate_questions_with_openai(prompt: str, settings: Settings, question_count: int, max_output_tokens: int) -> dict:
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
@@ -270,15 +320,30 @@ def _generate_questions_with_openai(prompt: str, settings: Settings) -> dict:
             {"role": "user", "content": prompt},
         ],
         text_format=AIExamOutput,
+        max_output_tokens=max_output_tokens,
     )
-    return response.output_parsed.model_dump()
+    data = response.output_parsed.model_dump()
+    if len(data.get("questions", [])) < question_count:
+        raise ValueError(f"OpenAI returned {len(data.get('questions', []))}/{question_count} questions")
+    return data
 
 
-def _exam_prompt(plan: PrepPlan, topics: list[str], request: ExamGenerateRequest) -> str:
+def _exam_prompt(
+    plan: PrepPlan,
+    topics: list[str],
+    request: ExamGenerateRequest,
+    batch_question_count: Optional[int] = None,
+    batch_number: int = 1,
+    existing_prompts: Optional[list[str]] = None,
+) -> str:
     scope = "modified focus topics" if request.focus_topics else "selected day topics"
     if request.focus_topics and len(request.focus_topics) >= 5:
         scope = "full prep plan topics"
     allowed_types = ", ".join(request.question_types)
+    question_count = batch_question_count or request.question_count
+    avoid_block = ""
+    if existing_prompts:
+        avoid_block = "\nAvoid questions similar to these already-created prompts:\n" + "\n".join(f"- {prompt[:220]}" for prompt in existing_prompts)
     difficulty_rules = {
         "easy": "Test definitions, recognition, light application, and common mistakes. Keep wording clear but not trivial.",
         "medium": "Test applied reasoning, tradeoffs, edge cases, and realistic interview explanations.",
@@ -297,19 +362,26 @@ def _exam_prompt(plan: PrepPlan, topics: list[str], request: ExamGenerateRequest
         "- If fill_blank is requested, write the prompt with a clear blank marker: ____.\n"
         "- If one_word is requested, the expected answer must be a single term or very short phrase.\n"
         "- If multiple_select is requested, at least two options can be correct when appropriate.\n\n"
+        f"Return exactly {question_count} complete questions for batch {batch_number}. Keep each prompt and expected answer concise enough to fit the structured response.\n"
         f"Role: {plan.job_post.title}\n"
         f"Company/job context: {getattr(plan.job_post, 'description', '')[:2000]}\n"
         f"Prep plan summary: {plan.summary}\n"
         f"Exam scope: {scope}\n"
         f"Day: {request.day}\n"
-        f"Question count: {request.question_count}\n"
+        f"Question count for this batch: {question_count}\n"
+        f"Total exam question target: {request.question_count}\n"
         f"Time limit minutes: {request.time_limit_minutes or max(20, request.question_count * 6)}\n"
         f"Difficulty: {request.difficulty}\n"
         f"Difficulty rules: {difficulty_rules}\n"
         f"Allowed question types: {allowed_types}\n"
         f"Question type policy: {'Choose the strongest mix for this role and topics.' if request.auto_question_types else 'Use the requested types as much as possible.'}\n"
         f"Topics to test: {', '.join(topics)}"
+        f"{avoid_block}"
     )
+
+
+def _question_dedupe_key(prompt: str) -> str:
+    return " ".join(prompt.lower().replace("?", "").replace(".", "").split()[:18])
 
 
 def _normalize_question_type(value: str) -> str:
