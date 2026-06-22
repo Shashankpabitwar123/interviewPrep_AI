@@ -94,6 +94,96 @@ const EXAM_TYPE_OPTIONS = [
   ["coding", "Coding"],
 ];
 
+const ONBOARDING_VERSION = 1;
+
+const DASHBOARD_TOUR_STEPS = [
+  {
+    target: "[data-tour='dashboard-create-plan']",
+    title: "Create a prep plan",
+    body: "Paste a job description or URL here. The app detects the job, company, skills, timeline, and turns it into a day-by-day interview plan.",
+  },
+  {
+    target: "[data-tour='dashboard-saved-jobs']",
+    title: "Save every job",
+    body: "Saved jobs are your source library. Open a description, load a job back into the form, or generate a plan when you are ready.",
+  },
+  {
+    target: "[data-tour='dashboard-prep-plan']",
+    title: "Follow today’s plan",
+    body: "This section shows your current preparation day, study notes, and practice exam tasks. Finished tasks update progress automatically.",
+  },
+  {
+    target: "[data-tour='dashboard-recent-activity']",
+    title: "Track what just happened",
+    body: "Recent activity records generated plans, notes, exams, interviews, saved jobs, and key actions so you can jump back quickly.",
+  },
+  {
+    target: "[data-tour-nav='jobs']",
+    title: "Use the left tabs",
+    body: "Each tab has a focused workspace: jobs, plans, exams, data, analytics, progress, calendar, and notes.",
+  },
+  {
+    target: "[data-tour='settings-button']",
+    title: "Control your workspace",
+    body: "Settings includes theme, sounds, deleted-job recovery, local fallback, account controls, and the browser capture bubble.",
+  },
+];
+
+const TAB_ONBOARDING = {
+  jobs: {
+    target: "[data-tour-page='jobs']",
+    title: "Jobs",
+    body: "Manage saved jobs, open AI job descriptions, delete or restore job records, and load a job into the dashboard when you want to prepare.",
+  },
+  prep: {
+    target: "[data-tour-page='prep']",
+    title: "Prep Plan",
+    body: "Review every saved plan, move through preparation days, open generated notes, and create practice exams from the exact topics assigned for each day.",
+  },
+  exams: {
+    target: "[data-tour-page='exams']",
+    title: "Exams",
+    body: "Generate role-specific exams or mock interviews, choose difficulty, start attempts, submit answers, and review scores and feedback.",
+  },
+  data: {
+    target: "[data-tour-page='data']",
+    title: "Interview Data",
+    body: "Collect useful interview signals from your saved jobs, notes, exams, mock interviews, and calendar so you know what to focus on next.",
+  },
+  analytics: {
+    target: "[data-tour-page='analytics']",
+    title: "Analytics",
+    body: "See readiness trends, topic coverage, activity volume, exam performance, and preparation patterns across your saved plans.",
+  },
+  progress: {
+    target: "[data-tour-page='progress']",
+    title: "Progress",
+    body: "Compare plan completion, notes finished, exams submitted, mock interviews, and overall readiness across all of your interview tracks.",
+  },
+  calendar: {
+    target: "[data-tour-page='calendar']",
+    title: "Calendar",
+    body: "View interview dates, prep tasks, mock interviews, and custom events. Click dates to inspect or act on scheduled items.",
+  },
+  notes: {
+    target: "[data-tour-page='notes']",
+    title: "Notes",
+    body: "Organize AI-generated and personal notes by job, create folders, write your own notes, improve them with AI, and keep interview-ready explanations.",
+  },
+  settings: {
+    target: ".settings-popover",
+    title: "Settings",
+    body: "Adjust dark mode, generation sound, fallback behavior, the capture bubble extension, deleted-job recovery, account options, and onboarding replay.",
+  },
+  developer: {
+    target: "[data-tour-page='developer']",
+    title: "Developer Dashboard",
+    body: "Admin-only controls show users, activity, token usage, account status, blocking, deletion, and production monitoring details.",
+  },
+};
+
+const STANDARD_ONBOARDING_TABS = ["jobs", "prep", "exams", "data", "analytics", "progress", "calendar", "notes", "settings"];
+
 function App() {
   const [mode, setMode] = useState("paste");
   const [jobTitle, setJobTitle] = useState("");
@@ -179,6 +269,11 @@ function App() {
     user: null,
     error: "",
   });
+  const isAdmin = user?.is_admin || user?.role === "admin";
+  const onboardingUserKey = user?.email || "guest";
+  const [onboarding, setOnboarding] = useState(() => loadOnboardingState(onboardingUserKey));
+  const [onboardingMode, setOnboardingMode] = useState("");
+  const [onboardingStep, setOnboardingStep] = useState(0);
 
   useEffect(() => {
     resetCreatePrepForm();
@@ -208,6 +303,41 @@ function App() {
     };
   }, [settingsOpen]);
 
+  useEffect(() => {
+    setOnboarding(loadOnboardingState(onboardingUserKey));
+    setOnboardingMode("");
+    setOnboardingStep(0);
+  }, [onboardingUserKey]);
+
+  useEffect(() => {
+    if (authOpen || settingsOpen || onboardingMode || activeView !== "dashboard" || onboarding.dashboardTourDone || onboarding.skipAll) return;
+    const timer = window.setTimeout(() => {
+      setOnboardingMode("dashboard");
+      setOnboardingStep(0);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [activeView, authOpen, onboarding.dashboardTourDone, onboarding.skipAll, onboardingMode, settingsOpen]);
+
+  useEffect(() => {
+    if (authOpen || settingsOpen || onboardingMode || onboarding.skipAll || activeView === "dashboard" || activeView === "about") return;
+    if (activeView === "developer" && !isAdmin) return;
+    if (!TAB_ONBOARDING[activeView] || onboarding.seenTabs?.[activeView]) return;
+    const timer = window.setTimeout(() => {
+      setOnboardingMode(`tab:${activeView}`);
+      setOnboardingStep(0);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [activeView, authOpen, isAdmin, onboarding.seenTabs, onboarding.skipAll, onboardingMode, settingsOpen]);
+
+  useEffect(() => {
+    if (authOpen || !settingsOpen || onboardingMode || onboarding.skipAll || onboarding.seenTabs?.settings) return;
+    const timer = window.setTimeout(() => {
+      setOnboardingMode("tab:settings");
+      setOnboardingStep(0);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [authOpen, onboarding.seenTabs, onboarding.skipAll, onboardingMode, settingsOpen]);
+
   function reloadLocalWorkspaceState() {
     setJobMarkers(loadLocalMap("interviewprep_job_markers"));
     setDeletedJobs(loadLocalList("interviewprep_deleted_jobs"));
@@ -220,6 +350,47 @@ function App() {
     setCalendarEvents(loadLocalList("interviewprep_calendar_events"));
     setRecentActivity(loadLocalList("interviewprep_recent_activity"));
     setCompletedTasks(loadCompletedTasks());
+  }
+
+  function saveOnboardingUpdate(nextState) {
+    setOnboarding(nextState);
+    saveOnboardingState(onboardingUserKey, nextState);
+  }
+
+  function completeOnboardingStep() {
+    if (onboardingMode === "dashboard") {
+      if (onboardingStep < DASHBOARD_TOUR_STEPS.length - 1) {
+        setOnboardingStep((current) => current + 1);
+        return;
+      }
+      saveOnboardingUpdate({ ...onboarding, dashboardTourDone: true });
+    } else if (onboardingMode.startsWith("tab:")) {
+      const tabKey = onboardingMode.replace("tab:", "");
+      saveOnboardingUpdate({
+        ...onboarding,
+        seenTabs: { ...(onboarding.seenTabs || {}), [tabKey]: true },
+      });
+    }
+    setOnboardingMode("");
+    setOnboardingStep(0);
+  }
+
+  function skipAllOnboarding() {
+    const seenTabs = Object.fromEntries([...STANDARD_ONBOARDING_TABS, ...(isAdmin ? ["developer"] : [])].map((tab) => [tab, true]));
+    saveOnboardingUpdate({ ...onboarding, dashboardTourDone: true, seenTabs, skipAll: true });
+    setOnboardingMode("");
+    setOnboardingStep(0);
+  }
+
+  function replayOnboarding() {
+    const nextState = { version: ONBOARDING_VERSION, dashboardTourDone: false, seenTabs: {}, skipAll: false };
+    saveOnboardingUpdate(nextState);
+    setSettingsOpen(false);
+    setActiveView("dashboard");
+    window.setTimeout(() => {
+      setOnboardingMode("dashboard");
+      setOnboardingStep(0);
+    }, 250);
   }
 
   function clearVisibleWorkspaceState() {
@@ -1876,7 +2047,6 @@ function App() {
   }
 
   const activity = recentActivity.map((item) => ({ ...item, time: relativeTime(item.createdAt), target: item.target || targetForActivity(item.type) }));
-  const isAdmin = user?.is_admin || user?.role === "admin";
 
   function openActivity(item) {
     setActiveView(item.target || targetForActivity(item.type));
@@ -1891,19 +2061,19 @@ function App() {
         </button>
 
         <nav className="nav-main">
-          <NavItem icon={Home} label="Dashboard" active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} />
-          <NavItem icon={BriefcaseBusiness} label="Jobs" active={activeView === "jobs"} onClick={() => setActiveView("jobs")} />
-          <NavItem icon={ClipboardList} label="Prep Plan" active={activeView === "prep"} onClick={() => setActiveView("prep")} />
-          <NavItem icon={Gauge} label="Exams" active={activeView === "exams"} onClick={() => setActiveView("exams")} />
-          <NavItem icon={Database} label="Interview Data" active={activeView === "data"} onClick={() => setActiveView("data")} />
+          <NavItem icon={Home} label="Dashboard" tourKey="dashboard" active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} />
+          <NavItem icon={BriefcaseBusiness} label="Jobs" tourKey="jobs" active={activeView === "jobs"} onClick={() => setActiveView("jobs")} />
+          <NavItem icon={ClipboardList} label="Prep Plan" tourKey="prep" active={activeView === "prep"} onClick={() => setActiveView("prep")} />
+          <NavItem icon={Gauge} label="Exams" tourKey="exams" active={activeView === "exams"} onClick={() => setActiveView("exams")} />
+          <NavItem icon={Database} label="Interview Data" tourKey="data" active={activeView === "data"} onClick={() => setActiveView("data")} />
         </nav>
 
         <nav className="nav-secondary">
-          <NavItem icon={BarChart3} label="Analytics" active={activeView === "analytics"} onClick={() => setActiveView("analytics")} />
-          <NavItem icon={Activity} label="Progress" active={activeView === "progress"} onClick={() => setActiveView("progress")} />
-          <NavItem icon={CalendarDays} label="Calendar" active={activeView === "calendar"} onClick={() => setActiveView("calendar")} />
-          <NavItem icon={NotebookText} label="Notes" active={activeView === "notes"} onClick={() => setActiveView("notes")} />
-          {isAdmin && <NavItem icon={ShieldCheck} label="Developer" active={activeView === "developer"} onClick={() => setActiveView("developer")} />}
+          <NavItem icon={BarChart3} label="Analytics" tourKey="analytics" active={activeView === "analytics"} onClick={() => setActiveView("analytics")} />
+          <NavItem icon={Activity} label="Progress" tourKey="progress" active={activeView === "progress"} onClick={() => setActiveView("progress")} />
+          <NavItem icon={CalendarDays} label="Calendar" tourKey="calendar" active={activeView === "calendar"} onClick={() => setActiveView("calendar")} />
+          <NavItem icon={NotebookText} label="Notes" tourKey="notes" active={activeView === "notes"} onClick={() => setActiveView("notes")} />
+          {isAdmin && <NavItem icon={ShieldCheck} label="Developer" tourKey="developer" active={activeView === "developer"} onClick={() => setActiveView("developer")} />}
         </nav>
 
         <div className="streak-card">
@@ -1924,7 +2094,7 @@ function App() {
         </div>
 
         <div className="sidebar-footer">
-          <NavItem icon={Settings} label="Settings" active={settingsOpen} onClick={() => setSettingsOpen((current) => !current)} settingsToggle />
+          <NavItem icon={Settings} label="Settings" tourKey="settings" active={settingsOpen} onClick={() => setSettingsOpen((current) => !current)} settingsToggle />
           <NavItem icon={LogOut} label="Log out" onClick={logout} />
           {settingsOpen && (
             <>
@@ -1948,6 +2118,7 @@ function App() {
                 onRefreshExtension={refreshExtensionState}
                 onDeleteAccount={() => setConfirmDeleteAccount(true)}
                 onClose={() => setSettingsOpen(false)}
+                onReplayOnboarding={replayOnboarding}
                 onKnowMore={() => {
                   setSettingsOpen(false);
                   setActiveView("about");
@@ -1984,8 +2155,8 @@ function App() {
           </div>
         </header>
 
-        {activeView === "dashboard" && <section className="dashboard-grid">
-          <form className="panel create-panel" onSubmit={generatePlan} autoComplete="off">
+        {activeView === "dashboard" && <section className="dashboard-grid" data-tour-page="dashboard">
+          <form className="panel create-panel" data-tour="dashboard-create-plan" onSubmit={generatePlan} autoComplete="off">
             <PanelTitle icon={Sparkles} title="Create New Prep Plan" subtitle="Analyze the job and get a personalized plan." />
 
             <div className="segmented">
@@ -2052,7 +2223,7 @@ function App() {
             </div>
           </form>
 
-          <section className="panel saved-panel">
+          <section className="panel saved-panel" data-tour="dashboard-saved-jobs">
             <PanelTitle icon={BriefcaseBusiness} title="Saved Jobs" action="View all" onAction={() => setActiveView("jobs")} />
             <div className="saved-list saved-list-scroll">
               {jobs.length ? (
@@ -2078,7 +2249,7 @@ function App() {
             <button className="text-action" onClick={() => setJobModalOpen(true)}><Plus size={16} /> Add Job Manually</button>
           </section>
 
-          <section className="panel plan-panel">
+          <section className="panel plan-panel" data-tour="dashboard-prep-plan">
             <PanelTitle
               icon={CalendarDays}
               title="Your Prep Plan"
@@ -2119,7 +2290,7 @@ function App() {
             </div>
           </section>
 
-          <section className="panel activity-panel">
+          <section className="panel activity-panel" data-tour="dashboard-recent-activity">
             <PanelTitle icon={Activity} title="Recent Activity" action="View all" />
             <div className="activity-list">
               {activity.length ? (
@@ -2139,6 +2310,7 @@ function App() {
         </section>}
 
         {activeView === "jobs" && (
+          <div data-tour-page="jobs">
           <JobsView
             jobs={jobs}
             onSelectJob={useSavedJob}
@@ -2158,9 +2330,11 @@ function App() {
             removePrepPlan={removePrepPlan}
             jobMarkers={jobMarkers}
           />
+          </div>
         )}
 
         {activeView === "prep" && (
+          <div data-tour-page="prep">
           <PrepPlanView
             plan={plan}
             savedPlans={savedPlans}
@@ -2178,9 +2352,11 @@ function App() {
             loadingExamTaskId={loadingExamTaskId}
             jobMarkers={jobMarkers}
           />
+          </div>
         )}
 
         {activeView === "exams" && (
+          <div data-tour-page="exams">
           <ExamsView
             plan={plan}
             savedPlans={savedPlans}
@@ -2207,9 +2383,11 @@ function App() {
             loading={loading}
             jobMarkers={jobMarkers}
           />
+          </div>
         )}
 
         {activeView === "calendar" && (
+          <div data-tour-page="calendar">
           <CalendarView
             plan={plan}
             planColor={colorForPlan(plan, jobMarkers)}
@@ -2226,9 +2404,11 @@ function App() {
             addCalendarEvent={addCalendarEvent}
             removeCalendarEvent={removeCalendarEvent}
           />
+          </div>
         )}
 
         {activeView === "notes" && (
+          <div data-tour-page="notes">
           <NotesView
             savedPlans={savedPlans}
             notes={notes}
@@ -2247,9 +2427,11 @@ function App() {
             generateWorkspaceNote={generateWorkspaceNote}
             loading={loading}
           />
+          </div>
         )}
 
         {activeView === "progress" && (
+          <div data-tour-page="progress">
           <ProgressView
             plan={plan}
             completedTasks={completedTasks}
@@ -2264,9 +2446,11 @@ function App() {
               setActiveView("prep");
             }}
           />
+          </div>
         )}
 
         {activeView === "data" && (
+          <div data-tour-page="data">
           <InterviewDataView
             jobs={jobs}
             savedPlans={savedPlans}
@@ -2286,6 +2470,7 @@ function App() {
             onOpenExams={() => setActiveView("exams")}
             onOpenNotes={() => setActiveView("notes")}
           />
+          </div>
         )}
 
         {activeView === "about" && (
@@ -2293,6 +2478,7 @@ function App() {
         )}
 
         {activeView === "analytics" && (
+          <div data-tour-page="analytics">
           <AnalyticsView
             plan={plan}
             savedPlans={savedPlans}
@@ -2311,14 +2497,17 @@ function App() {
             }}
             onOpenProgress={() => setActiveView("progress")}
           />
+          </div>
         )}
 
         {activeView === "developer" && isAdmin && (
+          <div data-tour-page="developer">
           <DeveloperDashboard
             apiFetch={apiFetch}
             currentUser={user}
             onStatus={setStatus}
           />
+          </div>
         )}
 
         {activeView === "developer" && !isAdmin && (
@@ -2671,13 +2860,110 @@ function App() {
           onClose={() => setJobBrief(null)}
         />
       )}
+
+      {onboardingMode && (
+        <OnboardingCoachmark
+          mode={onboardingMode}
+          step={onboardingStep}
+          isAdmin={isAdmin}
+          onNext={completeOnboardingStep}
+          onSkip={skipAllOnboarding}
+          onClose={completeOnboardingStep}
+        />
+      )}
     </div>
   );
 }
 
-function NavItem({ icon: Icon, label, active, onClick, settingsToggle = false }) {
+function OnboardingCoachmark({ mode, step, isAdmin, onNext, onSkip, onClose }) {
+  const [targetRect, setTargetRect] = useState(null);
+  const isDashboardTour = mode === "dashboard";
+  const tabKey = mode.startsWith("tab:") ? mode.replace("tab:", "") : "";
+  const steps = isDashboardTour ? DASHBOARD_TOUR_STEPS : [TAB_ONBOARDING[tabKey]].filter(Boolean);
+  const currentStep = steps[step] || steps[0];
+  const isLast = isDashboardTour ? step >= steps.length - 1 : true;
+
+  useEffect(() => {
+    if (!currentStep?.target) return undefined;
+    let frame = 0;
+    function updateRect() {
+      const target = document.querySelector(currentStep.target);
+      if (!target) {
+        setTargetRect(null);
+        return;
+      }
+      target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      frame = window.requestAnimationFrame(() => {
+        const rect = target.getBoundingClientRect();
+        setTargetRect({
+          top: Math.max(8, rect.top),
+          left: Math.max(8, rect.left),
+          width: Math.max(44, rect.width),
+          height: Math.max(44, rect.height),
+        });
+      });
+    }
+    updateRect();
+    window.addEventListener("resize", updateRect);
+    window.addEventListener("scroll", updateRect, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateRect);
+      window.removeEventListener("scroll", updateRect, true);
+    };
+  }, [currentStep?.target]);
+
+  if (!currentStep) return null;
+
+  const viewportWidth = window.innerWidth || 1200;
+  const viewportHeight = window.innerHeight || 800;
+  const cardWidth = 330;
+  const preferredLeft = targetRect ? targetRect.left + targetRect.width + 18 : viewportWidth / 2 - cardWidth / 2;
+  const left = Math.min(Math.max(18, preferredLeft), viewportWidth - cardWidth - 18);
+  const preferredTop = targetRect ? targetRect.top + Math.min(24, targetRect.height / 2) : viewportHeight / 2 - 120;
+  const top = Math.min(Math.max(18, preferredTop), viewportHeight - 260);
+  const progressText = isDashboardTour ? `${step + 1} of ${steps.length}` : "First visit";
+
   return (
-    <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick} data-settings-toggle={settingsToggle ? "true" : undefined}>
+    <div className="onboarding-layer" role="dialog" aria-modal="true" aria-label={currentStep.title}>
+      <button type="button" className="onboarding-scrim" aria-label="Close onboarding" onClick={onClose} />
+      {targetRect && (
+        <div
+          className="onboarding-highlight"
+          style={{
+            top: targetRect.top - 8,
+            left: targetRect.left - 8,
+            width: targetRect.width + 16,
+            height: targetRect.height + 16,
+          }}
+        />
+      )}
+      <article className="onboarding-card" style={{ top, left }}>
+        <span className="onboarding-pill">{progressText}</span>
+        <h3>{currentStep.title}</h3>
+        <p>{currentStep.body}</p>
+        {tabKey === "settings" && <small>You can replay this tour any time from Settings.</small>}
+        {tabKey === "developer" && isAdmin && <small>This page only appears for admin accounts.</small>}
+        <div className="onboarding-actions">
+          <button type="button" className="ghost-action" onClick={onSkip}>Skip all</button>
+          <button type="button" className="primary compact-primary" onClick={onNext}>
+            {isLast ? "Got it" : "Next"}
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function NavItem({ icon: Icon, label, active, onClick, settingsToggle = false, tourKey = "" }) {
+  return (
+    <button
+      className={`nav-item ${active ? "active" : ""}`}
+      onClick={onClick}
+      data-settings-toggle={settingsToggle ? "true" : undefined}
+      data-tour={settingsToggle ? "settings-button" : undefined}
+      data-tour-nav={tourKey || undefined}
+    >
       <Icon size={20} />
       {label}
     </button>
@@ -5943,6 +6229,7 @@ function SettingsView({
   onRefreshExtension,
   onDeleteAccount,
   onClose,
+  onReplayOnboarding,
   onKnowMore,
 }) {
   function updateSoundVolume(value) {
@@ -6080,6 +6367,9 @@ function SettingsView({
         <div className="settings-mini-card">
           <strong>Local workspace</strong>
           <span>Plans, attempts, notes, and settings stay on this machine.</span>
+          <button type="button" className="outline-action compact-action" onClick={onReplayOnboarding}>
+            Replay onboarding
+          </button>
         </div>
         <div className="settings-mini-card deleted-bin-card">
           <div className="sound-setting-head">
@@ -6886,6 +7176,32 @@ function saveLocalList(key, value) {
   const storageKey = scopedStorageKey(key);
   if (!storageKey) return;
   localStorage.setItem(storageKey, JSON.stringify(value));
+}
+
+function onboardingStorageKey(userKey = "guest") {
+  const safeKey = String(userKey || "guest").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `interviewprep_onboarding_${ONBOARDING_VERSION}:${safeKey}`;
+}
+
+function loadOnboardingState(userKey = "guest") {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(onboardingStorageKey(userKey)) || "{}");
+    if (parsed?.version === ONBOARDING_VERSION) {
+      return {
+        version: ONBOARDING_VERSION,
+        dashboardTourDone: Boolean(parsed.dashboardTourDone),
+        seenTabs: parsed.seenTabs && typeof parsed.seenTabs === "object" ? parsed.seenTabs : {},
+        skipAll: Boolean(parsed.skipAll),
+      };
+    }
+  } catch {
+    // Malformed onboarding state should never block the app.
+  }
+  return { version: ONBOARDING_VERSION, dashboardTourDone: false, seenTabs: {}, skipAll: false };
+}
+
+function saveOnboardingState(userKey, state) {
+  localStorage.setItem(onboardingStorageKey(userKey), JSON.stringify({ version: ONBOARDING_VERSION, ...state }));
 }
 
 function loadLocalMap(key) {

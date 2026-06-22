@@ -154,7 +154,7 @@ button {
 }
 
 .streak-card {
-  margin-top: auto;
+  margin-top: 0;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -224,6 +224,7 @@ button {
 
 .sidebar-footer {
   position: relative;
+  margin-top: auto;
   display: grid;
   gap: 7px;
 }
@@ -2766,6 +2767,106 @@ button {
 
 .extension-error {
   color: #b42318;
+}
+
+.onboarding-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  pointer-events: none;
+}
+
+.onboarding-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.onboarding-highlight {
+  position: fixed;
+  z-index: 5001;
+  border: 2px solid var(--blue);
+  border-radius: 12px;
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.38), 0 18px 42px rgba(37, 99, 235, 0.22);
+}
+
+.onboarding-card {
+  position: fixed;
+  z-index: 5002;
+  display: grid;
+  gap: 10px;
+  width: min(330px, calc(100vw - 36px));
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+  pointer-events: auto;
+}
+
+.onboarding-card::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 32px;
+  width: 14px;
+  height: 14px;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  transform: rotate(45deg);
+}
+
+.onboarding-pill {
+  justify-self: start;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.onboarding-card h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+}
+
+.onboarding-card p,
+.onboarding-card small {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.48;
+}
+
+.onboarding-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.ghost-action {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.ghost-action:hover {
+  color: var(--text);
+  background: var(--blue-soft);
+}
+
+.compact-primary {
+  min-height: 36px;
+  padding: 0 14px;
 }
 
 .sound-setting-footer small {
