@@ -82,11 +82,12 @@ button {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 22px 14px;
+  gap: 12px;
+  padding: 18px 14px 14px;
   border-right: 1px solid var(--line);
   background: var(--panel);
-  overflow: visible;
+  overflow-y: auto;
+  overflow-x: visible;
   transition: width 0.22s ease, padding 0.22s ease, border-color 0.22s ease;
 }
 
@@ -104,7 +105,7 @@ button {
   gap: 10px;
   padding: 0 10px;
   color: var(--blue);
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 800;
   text-align: left;
 }
@@ -117,11 +118,11 @@ button {
 .nav-main,
 .nav-secondary {
   display: grid;
-  gap: 7px;
+  gap: 4px;
 }
 
 .nav-secondary {
-  padding-top: 18px;
+  padding-top: 12px;
   border-top: 1px solid var(--line-soft);
 }
 
@@ -130,7 +131,7 @@ button {
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 44px;
+  min-height: 38px;
   padding: 0 12px;
   border-radius: 8px;
   color: #344054;
@@ -154,8 +155,8 @@ button {
 }
 
 .streak-card {
-  margin-top: 0;
-  padding: 16px;
+  margin-top: 4px;
+  padding: 11px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -164,8 +165,9 @@ button {
 .streak-head {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   color: #344054;
+  font-size: 13px;
 }
 
 .streak-head svg {
@@ -173,25 +175,26 @@ button {
 }
 
 .streak-card p {
-  margin: 14px 0 4px;
+  margin: 8px 0 2px;
   color: #344054;
 }
 
 .streak-card p span {
   color: var(--text);
-  font-size: 32px;
+  font-size: 22px;
   font-weight: 850;
 }
 
 .streak-card small {
   color: var(--muted);
+  font-size: 11px;
 }
 
 .streak-dots {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 7px;
-  margin-top: 15px;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 .streak-dots div {
@@ -203,8 +206,8 @@ button {
 .streak-dots i {
   display: grid;
   place-items: center;
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   border: 1px solid #c6d1df;
   border-radius: 50%;
   font-style: normal;
@@ -223,16 +226,17 @@ button {
 }
 
 .sidebar-footer {
-  position: relative;
+  position: sticky;
+  bottom: 0;
   margin-top: auto;
   display: grid;
   gap: 7px;
+  padding-top: 6px;
+  background: var(--panel);
+  z-index: 4;
 }
 
 .admin-sidebar {
-  gap: 12px;
-  padding-top: 18px;
-  padding-bottom: 14px;
   overflow-y: auto;
 }
 
