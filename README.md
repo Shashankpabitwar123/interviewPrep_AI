@@ -1,48 +1,80 @@
-# PrepInterview AI
+<h1 align="center">InterviewPrep AI</h1>
 
-[Live Product](https://prepinterviewai.com/) | [Synthetic Product Analytics](https://public.tableau.com/app/profile/shashank.pabitwar/viz/PrepInterview_AI_Product_Analytics_Scroll_Final/PrepInterviewAIScrollExperience)
+<p align="center"><strong>An AI-powered job-to-interview workspace for personalized prep plans, study notes, exams, mock interviews, and readiness tracking.</strong></p>
 
-PrepInterview AI is a deployed, full-stack interview-preparation platform that converts a job description into a structured preparation workspace. Users can organize target roles, generate personalized study plans, create notes and exams, practice mock interviews, schedule preparation work, and track progress from one authenticated application.
+<p align="center">
+  <a href="https://prepinterviewai.com/"><strong>▶ OPEN THE LIVE APP</strong></a>
+  &nbsp;•&nbsp;
+  <a href="#from-job-posting-to-interview-readiness">Product workflow</a>
+  &nbsp;•&nbsp;
+  <a href="#system-architecture">Architecture</a>
+  &nbsp;•&nbsp;
+  <a href="#run-locally">Run locally</a>
+</p>
+
+<p align="center">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white">
+  <img alt="Vite 6" src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-Python-009688?logo=fastapi&logoColor=white">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&logoColor=white">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-AI_Workflows-412991?logo=openai&logoColor=white">
+  <img alt="Vercel and Render" src="https://img.shields.io/badge/Deployed-Vercel_+_Render-111827">
+</p>
+
+<p align="center">
+  <a href="https://prepinterviewai.com/">
+    <img src="docs/screenshots/interviewprep-dashboard.png" alt="InterviewPrep AI dashboard for creating a personalized preparation plan from a job description or URL" width="100%">
+  </a>
+</p>
+
+InterviewPrep AI is a deployed full-stack SaaS-style product that turns a target job into an organized interview-preparation workspace. It combines authenticated user data, AI generation, research enrichment, structured practice, and progress tools in one responsive web application.
+
+## From Job Posting to Interview Readiness
+
+| 1. Capture the role | 2. Build the plan | 3. Learn and practice | 4. Track readiness |
+| --- | --- | --- | --- |
+| Paste a job description, submit a URL, add a role manually, or capture it with the Chrome extension. | AI identifies the role and company, analyzes requirements, and distributes preparation across the days before the interview. | Generate detailed notes, retain Ask AI conversations, take configurable exams, and practice voice-enabled mock interviews. | Use saved jobs, calendar workflows, progress views, analytics, activity history, and study streaks to stay organized. |
 
 ## Product Highlights
 
-- Capture a job description or URL, infer the company and role, and save the opportunity to a personal workspace.
-- Generate day-by-day preparation plans tailored to the job requirements and interview date.
-- Create AI study notes, request deeper explanations, and retain follow-up Q&A for repeated review.
-- Build configurable exams from a study day or complete plan, then review scores, answers, and feedback.
-- Practice voice-enabled mock interviews with generated questions, read-aloud support, scoring, and review.
-- Track preparation activity through dashboards, progress views, saved jobs, and calendar workflows.
-- Register and recover accounts through email OTP flows, manage profile settings, and use guided onboarding.
-- Save roles from other websites through the companion Chrome extension.
-- Monitor application usage and provider health through a protected developer dashboard.
+- **Job-aware preparation:** analyzes a complete posting and creates a role-specific day-by-day plan.
+- **Persistent AI notes:** generates structured study material with examples, interview explanations, deeper learning, and saved follow-up Q&A.
+- **Configurable exams:** supports difficulty presets, question counts, timing, multiple question types, scoring, and detailed review.
+- **Mock interview practice:** generates role-relevant rounds with read-aloud questions, timing, scoring, and later review.
+- **Preparation workspace:** connects saved jobs, plans, notes, exams, calendar events, progress, analytics, and recent activity.
+- **Production authentication:** uses JWT sessions, registration OTP, password-reset OTP, user-scoped records, and account controls.
+- **Browser capture:** includes a Chrome extension for saving job URLs and descriptions from external job sites.
+- **Operational visibility:** includes a protected developer dashboard for usage and provider-health monitoring.
 
-## Architecture
+## System Architecture
 
 ```text
-React 19 + Vite 6 web app (Vercel)
-              |
-              | HTTPS / REST / JWT
-              v
+React 19 + Vite 6 frontend (Vercel)
+                  |
+                  | HTTPS / REST / JWT
+                  v
 FastAPI + SQLAlchemy API (Render)
-       |              |             |
-       v              v             v
-PostgreSQL/Neon   OpenAI + Tavily   Resend email
+       |                |                 |
+       v                v                 v
+PostgreSQL/Neon    OpenAI + Tavily     Resend email
 
 Chrome extension -> job capture -> authenticated API
 ```
 
-The backend owns authentication, user-scoped persistence, job analysis, plan generation, study notes, exams, mock interviews, progress, calendar data, and administrative usage reporting. Alembic manages schema migrations, and the frontend communicates with the API through authenticated REST requests.
+The backend owns authentication, user-scoped persistence, job analysis, plan generation, notes, exams, mock interviews, progress, calendar data, and administrative usage reporting. Alembic manages database migrations, while the frontend communicates with the API through authenticated REST requests.
 
-## Technology
+## Technical Stack
 
-- **Frontend:** React 19, Vite 6, JavaScript, CSS, responsive component-based UI
-- **Backend:** Python, FastAPI, Pydantic, SQLAlchemy, Alembic, REST APIs
-- **Data:** PostgreSQL on Neon with per-user application records
-- **AI and research:** OpenAI APIs and Tavily search
-- **Authentication and email:** JWT, registration/password-reset OTP workflows, Resend
-- **Deployment:** Vercel frontend, Render API, Neon database
-- **Quality:** pytest backend regression/API tests and production frontend builds
-- **Companion client:** Chrome extension for saving job links and descriptions
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Frontend | React 19, Vite 6, JavaScript, CSS | Responsive dashboard, forms, notes, exams, interviews, calendar, analytics, and settings |
+| Backend | Python, FastAPI, Pydantic, SQLAlchemy, Alembic | REST APIs, business logic, validation, persistence, migrations, and AI orchestration |
+| Database | PostgreSQL on Neon | Authenticated, per-user jobs, plans, notes, attempts, progress, and application records |
+| AI and research | OpenAI APIs, Tavily | Job analysis, preparation plans, teaching content, questions, feedback, and research enrichment |
+| Authentication and email | JWT, Resend OTP | Registration verification, password recovery, sessions, and account security |
+| Deployment | Vercel, Render, Neon | Production frontend, API service, and managed PostgreSQL infrastructure |
+| Companion client | Chrome extension | Job URL and description capture from external sites |
+| Quality | pytest, API regression tests, Vite production build | Backend behavior and deployable frontend verification |
 
 ## Repository Structure
 
@@ -65,7 +97,7 @@ Follow [RUN_LOCALLY.md](RUN_LOCALLY.md) for environment variables and complete s
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 # Frontend (new terminal)
@@ -87,9 +119,11 @@ cd frontend
 npm run build
 ```
 
-## Data Disclosure
+## Product Analytics Case Study
 
-The linked Tableau product-analytics experience is a separate portfolio analysis built from explicitly synthetic users and events. It demonstrates event modeling, funnels, cohorts, retention, learning outcomes, and AI-reliability metrics; it does not represent PrepInterview AI production traffic or customer outcomes.
+[View the Tableau product-analytics experience](https://public.tableau.com/app/profile/shashank.pabitwar/viz/PrepInterview_AI_Product_Analytics_Scroll_Final/PrepInterviewAIScrollExperience).
+
+The Tableau portfolio analysis is built from explicitly synthetic users and events. It demonstrates event modeling, funnels, cohorts, retention, learning outcomes, and AI-reliability metrics; it does not represent InterviewPrep AI production traffic or customer outcomes.
 
 ## Documentation
 
