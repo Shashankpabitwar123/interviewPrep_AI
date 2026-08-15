@@ -1160,6 +1160,7 @@
 
 .guided-job-search-row > label {
   min-width: 0;
+  height: 46px;
   min-height: 46px;
   padding: 0 12px;
   display: flex;
@@ -1187,7 +1188,10 @@
 .guided-delete-mode-trigger,
 .guided-delete-mode-actions button {
   width: 46px;
+  height: 46px;
   min-height: 46px;
+  padding: 0;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
   border: 1px solid var(--approved-line);
