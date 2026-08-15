@@ -723,6 +723,19 @@
   font-weight: 500;
 }
 
+.guided-job-form label > .guided-required-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: #c7cfdb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.guided-required-label sup {
+  color: var(--coral);
+}
+
 .guided-job-form input,
 .guided-job-form textarea {
   width: 100%;
