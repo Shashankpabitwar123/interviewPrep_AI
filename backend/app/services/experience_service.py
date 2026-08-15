@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models import InterviewExperience, User
@@ -31,7 +32,11 @@ def create_interview_experience(
 
 def list_interview_experiences(db: Session, user: Optional[User] = None) -> list[InterviewExperienceResponse]:
     query = db.query(InterviewExperience)
-    query = query.filter(InterviewExperience.user_id == user.id) if user else query.filter(InterviewExperience.user_id.is_(None))
+    # Records created before ownership was introduced remain a shared legacy
+    # library. New records are private to the user who created them.
+    query = query.filter(
+        or_(InterviewExperience.user_id == user.id, InterviewExperience.user_id.is_(None))
+    ) if user else query.filter(InterviewExperience.user_id.is_(None))
     experiences = query.order_by(InterviewExperience.created_at.desc()).all()
     return [_experience_to_response(experience) for experience in experiences]
 
@@ -42,7 +47,7 @@ def get_interview_experience(
     user: Optional[User] = None,
 ) -> Optional[InterviewExperienceResponse]:
     experience = db.get(InterviewExperience, experience_id)
-    if experience is None or (user and experience.user_id != user.id) or (user is None and experience.user_id is not None):
+    if experience is None or (user and experience.user_id not in {None, user.id}) or (user is None and experience.user_id is not None):
         return None
     return _experience_to_response(experience)
 

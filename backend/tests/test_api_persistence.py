@@ -489,6 +489,51 @@ def test_interview_experience_flow() -> None:
     assert detail["questions"][0]["topic"] == "REST APIs"
 
 
+def test_legacy_interview_experiences_remain_visible_but_private_records_do_not_leak() -> None:
+    client = _client_with_memory_db()
+    legacy = client.post(
+        "/interview-experiences",
+        json={
+            "company": "Legacy Company",
+            "role_title": "Data Analyst",
+            "round_name": "Technical Round",
+            "topics": ["SQL"],
+            "questions": [{"prompt": "Explain a SQL join.", "topic": "SQL", "question_type": "technical"}],
+            "difficulty": "medium",
+        },
+    ).json()
+    first = _register(client, {"name": "First User", "email": "experience-first@example.com", "password": "password123"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "experience-second@example.com", "password": "password123"}).json()["access_token"]
+    private = client.post(
+        "/interview-experiences",
+        headers={"Authorization": f"Bearer {first}"},
+        json={
+            "company": "Private Company",
+            "role_title": "Backend Engineer",
+            "round_name": "Hiring Manager",
+            "topics": ["Python"],
+            "questions": [{"prompt": "Explain an API tradeoff.", "topic": "Python", "question_type": "technical"}],
+            "difficulty": "hard",
+        },
+    ).json()
+
+    visible_to_second = client.get(
+        "/interview-experiences",
+        headers={"Authorization": f"Bearer {second}"},
+    ).json()
+
+    assert legacy["id"] in {item["id"] for item in visible_to_second}
+    assert private["id"] not in {item["id"] for item in visible_to_second}
+    assert client.get(
+        f"/interview-experiences/{legacy['id']}",
+        headers={"Authorization": f"Bearer {second}"},
+    ).status_code == 200
+    assert client.get(
+        f"/interview-experiences/{private['id']}",
+        headers={"Authorization": f"Bearer {second}"},
+    ).status_code == 404
+
+
 def test_mock_interview_flow() -> None:
     client = _client_with_memory_db()
     plan_response = client.post(
