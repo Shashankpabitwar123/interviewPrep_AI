@@ -1,5 +1,5 @@
 const DEFAULT_API_URL = "https://interviewprep-ai-api.onrender.com";
-const DEFAULT_APP_URL = "https://interview-prep-ai-sable.vercel.app";
+const DEFAULT_APP_URL = "https://prepinterviewai.com";
 const extensionApi = globalThis.chrome || globalThis.browser;
 
 extensionApi.runtime.onInstalled.addListener(async () => {

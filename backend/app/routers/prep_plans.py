@@ -4,12 +4,13 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepPlanSummary
+from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepPlanSummary, PrepTaskStatusUpdate
 from app.services.auth_service import get_request_user
 from app.services.job_analyzer import identify_job
 from app.services.job_source import resolve_job_description
 from app.services.planner import generate_prep_plan
-from app.services.persistence import delete_prep_plan, get_prep_plan_detail, list_prep_plans, save_prep_plan
+from app.services.persistence import delete_prep_plan, get_job_detail, get_prep_plan_detail, list_prep_plans, save_prep_plan
+from app.models import PrepTask
 from app.services.usage_service import record_usage_event
 
 router = APIRouter(prefix="/prep-plans", tags=["prep plans"])
@@ -22,11 +23,28 @@ def create_prep_plan(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_request_user),
 ) -> PrepPlanResponse:
-    description = resolve_job_description(request.job_description, request.source_url)
-    inferred_title, inferred_company = identify_job(request.job_title, request.company, description, request.source_url, settings)
-    plan_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description})
+    existing_job = get_job_detail(db, request.job_post_id, current_user) if request.job_post_id else None
+    if request.job_post_id and existing_job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    description = existing_job.description if existing_job and not request.job_description and not request.source_url else resolve_job_description(request.job_description, request.source_url)
+    source_url = request.source_url or (existing_job.source_url if existing_job else None)
+    requested_title = request.job_title if request.job_title != "Auto-detect role" else (existing_job.title if existing_job else request.job_title)
+    requested_company = request.company if request.company != "Auto-detect company" else (existing_job.company if existing_job else request.company)
+    inferred_title, inferred_company = identify_job(requested_title, requested_company, description, source_url, settings)
+    plan_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description, "source_url": source_url})
     plan = generate_prep_plan(plan_request, settings)
-    saved_plan = save_prep_plan(db, inferred_title, description, plan, source_url=request.source_url, company=inferred_company, user=current_user)
+    saved_plan = save_prep_plan(
+        db,
+        inferred_title,
+        description,
+        plan,
+        source_url=source_url,
+        company=inferred_company,
+        user=current_user,
+        interview_at=request.interview_at,
+        hours_per_day=request.hours_per_day,
+        job_post_id=request.job_post_id,
+    )
     record_usage_event(
         db,
         current_user,
@@ -38,6 +56,21 @@ def create_prep_plan(
         detail={"prep_plan_id": saved_plan.prep_plan_id, "job_post_id": saved_plan.job_post_id, "title": inferred_title},
     )
     return saved_plan
+
+
+@router.patch("/tasks/{task_id}", response_model=dict)
+def update_task_status(
+    task_id: int,
+    request: PrepTaskStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> dict:
+    task = db.get(PrepTask, task_id)
+    if task is None or get_prep_plan_detail(db, task.prep_plan_id, current_user) is None:
+        raise HTTPException(status_code=404, detail="Prep task not found")
+    task.status = request.status
+    db.commit()
+    return {"task_id": task.id, "status": task.status}
 
 
 @router.get("", response_model=list[PrepPlanSummary])

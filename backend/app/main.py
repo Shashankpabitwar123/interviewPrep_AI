@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.ai_policy import AIUnavailableError, reset_allow_local_fallback, set_allow_local_fallback
 from app.config import get_settings
 from app.database import create_db_and_tables
-from app.routers import admin, auth, exams, experiences, health, jobs, mock_interviews, prep_plans, study_notes
+from app.routers import admin, auth, exams, experiences, health, jobs, mock_interviews, prep_plans, study_notes, workspace
 
 
 @asynccontextmanager
@@ -63,3 +63,4 @@ app.include_router(exams.router)
 app.include_router(experiences.router)
 app.include_router(mock_interviews.router)
 app.include_router(study_notes.router)
+app.include_router(workspace.router)

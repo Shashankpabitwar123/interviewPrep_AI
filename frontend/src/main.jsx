@@ -55,6 +55,7 @@ import {
   X,
 } from "lucide-react";
 import "./styles.css";
+import "./guided.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const EXTENSION_GUIDE_URL = "https://github.com/Shashankpabitwar123/interviewPrep_AI/tree/main/browser-extension";
@@ -99,29 +100,29 @@ const ONBOARDING_VERSION = 1;
 
 const DASHBOARD_TOUR_STEPS = [
   {
-    target: "[data-tour='dashboard-create-plan']",
-    title: "Create a prep plan",
-    body: "Paste a job description or URL here. The app detects the job, company, skills, timeline, and turns it into a day-by-day interview plan.",
+    target: "[data-tour='today-next-step']",
+    title: "Start with one clear step",
+    body: "Today shows the most useful task for your current interview, so you always know what to do next.",
   },
   {
-    target: "[data-tour='dashboard-saved-jobs']",
-    title: "Save every job",
-    body: "Saved jobs are your source library. Open a description, load a job back into the form, or generate a plan when you are ready.",
+    target: "[data-tour='today-week']",
+    title: "Follow this week’s work",
+    body: "Your learning and practice tasks stay connected to the selected job and its interview date.",
   },
   {
-    target: "[data-tour='dashboard-prep-plan']",
-    title: "Follow today’s plan",
-    body: "This section shows your current preparation day, study notes, and practice exam tasks. Finished tasks update progress automatically.",
+    target: "[data-tour='today-readiness']",
+    title: "Understand your readiness",
+    body: "The score uses completed plan work, learning, exam results, mock interviews, and recent consistency.",
   },
   {
-    target: "[data-tour='dashboard-recent-activity']",
-    title: "Track what just happened",
-    body: "Recent activity records generated plans, notes, exams, interviews, saved jobs, and key actions so you can jump back quickly.",
+    target: "[data-tour='today-workspace']",
+    title: "Keep the interview in context",
+    body: "See saved jobs, preparation streak, and time remaining without opening several separate pages.",
   },
   {
-    target: "[data-tour-nav='jobs']",
-    title: "Use the left tabs",
-    body: "Each tab has a focused workspace: jobs, plans, exams, data, analytics, progress, calendar, and notes.",
+    target: "[data-tour-nav='prep']",
+    title: "Use four simple workspaces",
+    body: "Today guides you, Jobs stores roles, Learn contains plans and notes, and Practice contains exams, mocks, and interview insights.",
   },
   {
     target: "[data-tour='settings-button']",
@@ -248,6 +249,9 @@ function App() {
   const [soundVolume, setSoundVolume] = useState(() => loadSoundVolume());
   const [allowLocalFallback, setAllowLocalFallback] = useState(() => loadAllowLocalFallback());
   const [activeView, setActiveView] = useState("dashboard");
+  const [selectedJobId, setSelectedJobId] = useState("");
+  const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+  const [readinessReport, setReadinessReport] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedPlanDay, setSelectedPlanDay] = useState(1);
@@ -287,6 +291,15 @@ function App() {
       clearVisibleWorkspaceState();
     }
   }, []);
+
+  useEffect(() => {
+    if (!authToken) {
+      setWorkspaceHydrated(false);
+      setReadinessReport(null);
+      return;
+    }
+    hydrateWorkspace(authToken);
+  }, [authToken]);
 
   useEffect(() => {
     if (!settingsOpen) return undefined;
@@ -446,6 +459,76 @@ function App() {
     return `${label} returned ${response.status}`;
   }
 
+  async function hydrateWorkspace(tokenOverride = authToken) {
+    try {
+      const response = await apiFetch("/workspace", { authTokenOverride: tokenOverride });
+      if (!response.ok) throw new Error(await readApiError(response, "Workspace"));
+      const payload = await response.json();
+      const data = payload.data || {};
+      if (Object.keys(data).length) {
+        applyWorkspaceCollection(data, "completedTasks", setCompletedTasks, saveCompletedTasks);
+        applyWorkspaceCollection(data, "notes", setNotes, (value) => saveLocalList("interviewprep_notes", value));
+        applyWorkspaceCollection(data, "generatedStudyNotes", setGeneratedStudyNotes, (value) => saveLocalMap("interviewprep_generated_study_notes", value));
+        applyWorkspaceCollection(data, "noteFolders", setNoteFolders, (value) => saveLocalList("interviewprep_note_folders", value));
+        applyWorkspaceCollection(data, "calendarEvents", setCalendarEvents, (value) => saveLocalList("interviewprep_calendar_events", value));
+        applyWorkspaceCollection(data, "recentActivity", setRecentActivity, (value) => saveLocalList("interviewprep_recent_activity", value));
+        applyWorkspaceCollection(data, "examAttempts", setExamAttempts, (value) => saveLocalList("interviewprep_exam_attempts", value));
+        applyWorkspaceCollection(data, "mockAttempts", setMockAttempts, (value) => saveLocalList("interviewprep_mock_attempts", value));
+        applyWorkspaceCollection(data, "jobMarkers", setJobMarkers, (value) => saveLocalMap("interviewprep_job_markers", value));
+        applyWorkspaceCollection(data, "deletedJobs", setDeletedJobs, (value) => saveLocalList("interviewprep_deleted_jobs", value));
+        applyWorkspaceCollection(data, "archivedJobIds", setArchivedJobIds, (value) => saveLocalList("interviewprep_archived_job_ids", value));
+      }
+      setWorkspaceHydrated(true);
+      await refreshReadiness(tokenOverride);
+    } catch (error) {
+      setWorkspaceHydrated(true);
+      setStatus(error.message || "Workspace sync unavailable");
+    }
+  }
+
+  async function syncWorkspace() {
+    const data = {
+      completedTasks,
+      notes,
+      generatedStudyNotes,
+      noteFolders,
+      calendarEvents,
+      recentActivity,
+      examAttempts,
+      mockAttempts,
+      jobMarkers,
+      deletedJobs,
+      archivedJobIds,
+    };
+    try {
+      const response = await apiFetch("/workspace", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data }),
+      });
+      if (!response.ok) throw new Error(await readApiError(response, "Workspace sync"));
+      await refreshReadiness();
+    } catch {
+      // Local storage remains an offline cache and the next state change retries.
+    }
+  }
+
+  async function refreshReadiness(tokenOverride = authToken) {
+    if (!tokenOverride) return;
+    const query = plan?.prep_plan_id ? `?prep_plan_id=${plan.prep_plan_id}` : "";
+    try {
+      const response = await apiFetch(`/workspace/readiness${query}`, { authTokenOverride: tokenOverride });
+      if (response.status === 404) {
+        setReadinessReport(null);
+        return;
+      }
+      if (!response.ok) return;
+      setReadinessReport(await response.json());
+    } catch {
+      // Readiness will refresh after the next successful workspace sync.
+    }
+  }
+
   function requestExtension(action, payload = {}, timeoutMs = 1500) {
     return new Promise((resolve) => {
       const requestId = `ipai-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -602,6 +685,12 @@ function App() {
   const streak = useMemo(() => buildStudyStreak(completedTasks), [completedTasks]);
 
   useEffect(() => {
+    if (!authToken || !workspaceHydrated) return undefined;
+    const timer = window.setTimeout(() => syncWorkspace(), 700);
+    return () => window.clearTimeout(timer);
+  }, [authToken, workspaceHydrated, completedTasks, notes, generatedStudyNotes, noteFolders, calendarEvents, recentActivity, examAttempts, mockAttempts, jobMarkers, deletedJobs, archivedJobIds]);
+
+  useEffect(() => {
     if (!examSession || examSession.remainingSeconds <= 0) return undefined;
     const timer = window.setInterval(() => {
       setExamSession((current) => {
@@ -632,13 +721,15 @@ function App() {
       setJobs(saved.filter((job) => !hidden.has(String(job.id))).map((job, index) => ({
         id: job.id,
         title: job.title,
-        company: companyFromUrl(job.source_url) || "Saved Job",
+        company: job.company || companyFromUrl(job.source_url) || "Saved Job",
         source_url: job.source_url,
         description_preview: job.description_preview,
         saved_at: index === 0 ? "Saved now" : `Saved ${index + 1}h ago`,
         logo: logoFor(job.title, job.source_url),
         tone: toneFor(job.source_url),
         color: colorForJobId(job.id, markers, job.title),
+        interview_at: job.interview_at,
+        hours_per_day: job.hours_per_day,
       })));
     } catch {
       setStatus("Backend Offline");
@@ -663,7 +754,14 @@ function App() {
     setCompany("");
     setJobDescription("");
     setSourceUrl("");
+    setInterviewDate(defaultInterviewDate());
     setHoursPerDay(3);
+    setSelectedJobId("");
+  }
+
+  function openAddJobModal() {
+    resetCreatePrepForm();
+    setJobModalOpen(true);
   }
 
   async function generatePlan(event) {
@@ -681,6 +779,7 @@ function App() {
         interview_at: new Date(interviewDate).toISOString(),
         hours_per_day: Number(hoursPerDay),
         comfort_level: "intermediate",
+        job_post_id: selectedJobId || undefined,
       };
       if (mode === "url") payload.source_url = normalizeUrl(sourceUrl);
       else payload.job_description = jobDescription || "Python FastAPI SQL REST APIs Docker testing and system design.";
@@ -700,6 +799,7 @@ function App() {
         saveLocalMap("interviewprep_job_markers", nextMarkers);
       }
       setPlan({ ...savedPlan, job_color: planColor });
+      setSelectedJobId(savedPlan.job_post_id || "");
       setJobTitle(savedPlan.job_title || "");
       setCompany(savedPlan.company || inferCompanyName(company, jobDescription, sourceUrl));
       setSelectedPlanDay(1);
@@ -707,6 +807,7 @@ function App() {
       setMockInterview(null);
       playGeneratedSound(soundVolume);
       setStatus("Prep Plan Saved");
+      setJobModalOpen(false);
       markStudyActivity("plan-generated");
       addActivity({ type: "plan", title: "Prep plan generated", detail: savedPlan.job_title, badge: `${savedPlan.days_until_interview}d`, target: "prep" });
       refreshJobs(nextMarkers);
@@ -723,9 +824,15 @@ function App() {
     setLoading(true);
     setStatus("Saving Job");
     try {
+      if (mode === "url" && !sourceUrl.trim()) throw new Error("Add the job URL before saving.");
+      if (mode === "paste" && !jobDescription.trim()) throw new Error("Paste the job description before saving.");
+      if (!interviewDate || interviewDate < minInterviewDateTime()) throw new Error("Choose today or a future interview date.");
+      if (!Number(hoursPerDay) || Number(hoursPerDay) < 0.5) throw new Error("Choose at least 0.5 preparation hours per day.");
       const payload = {
         job_title: jobTitle.trim() || "Auto-detect role",
         company: company.trim() || "Auto-detect company",
+        interview_at: interviewDate ? new Date(interviewDate).toISOString() : undefined,
+        hours_per_day: Number(hoursPerDay),
       };
       if (mode === "url") payload.source_url = normalizeUrl(sourceUrl);
       else payload.job_description = normalizeSavedJobDescription(jobDescription, jobTitle);
@@ -734,7 +841,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error(await readApiError(response, "Exam generation"));
+      if (!response.ok) throw new Error(await readApiError(response, "Job save"));
       const saved = await response.json();
       setCompany(saved.company || inferCompanyName(company, jobDescription, sourceUrl));
       const jobColor = colorForJobId(saved.job_post_id, jobMarkers, saved.role_title || jobTitle);
@@ -744,6 +851,8 @@ function App() {
       await refreshJobs(nextMarkers);
       addActivity({ type: "job", title: "Job saved", detail: saved.role_title || jobTitle || "Saved job", badge: "", target: "jobs" });
       setStatus("Job Saved");
+      setSelectedJobId(saved.job_post_id || "");
+      setJobModalOpen(false);
     } catch (error) {
       setStatus(`Error: ${error.message}`);
     } finally {
@@ -949,10 +1058,13 @@ function App() {
       const planList = savedPlans.length ? savedPlans : await fetchSavedPlansList();
       const matchingPlan = planList.find((savedPlan) => String(savedPlan.job_post_id) === String(job.id));
       setJobTitle(detail.title);
-      setCompany(inferCompanyName("", detail.description || "", detail.source_url || ""));
+      setCompany(detail.company || inferCompanyName("", detail.description || "", detail.source_url || ""));
       setJobDescription(detail.description || "");
       setSourceUrl(detail.source_url || "");
       setMode(detail.source_url ? "url" : "paste");
+      setSelectedJobId(detail.id);
+      if (detail.interview_at) setInterviewDate(toLocalDateTimeInput(detail.interview_at));
+      if (detail.hours_per_day) setHoursPerDay(detail.hours_per_day);
       if (matchingPlan) {
         const planResponse = await apiFetch(`/prep-plans/${matchingPlan.id}`);
         if (planResponse.ok) {
@@ -1098,8 +1210,10 @@ function App() {
       if (!response.ok) throw new Error(await readApiError(response, "Prep plan"));
       const detail = await response.json();
       setPlan({ ...detail, job_color: colorForJobId(detail.job_post_id, jobMarkers, detail.job_title) });
+      setSelectedJobId(detail.job_post_id || "");
       setSelectedPlanDay(1);
       setStatus("Prep Plan Loaded");
+      await refreshReadiness();
     } catch (error) {
       setStatus(`Error: ${error.message}`);
     } finally {
@@ -1507,15 +1621,27 @@ function App() {
   function toggleTaskDone(task) {
     const today = dateKey(new Date());
     const taskKey = `${today}:task:${task.id || task.title}`;
-    const wasDone = Boolean(completedTasks[taskKey]);
+    const wasDone = isTaskComplete(task, completedTasks);
     setCompletedTasks((current) => {
       const next = { ...current };
-      if (next[taskKey]) delete next[taskKey];
-      else next[taskKey] = today;
+      if (wasDone) {
+        const suffix = `:task:${task.id || task.title}`;
+        Object.keys(next).filter((key) => key.endsWith(suffix)).forEach((key) => delete next[key]);
+      } else next[taskKey] = today;
       saveCompletedTasks(next);
       return next;
     });
     if (!wasDone) addActivity({ type: "practice", title: "Task completed", detail: task.title, badge: "done", target: task.task_type === "practice_exam" ? "exams" : "prep" });
+    if (task.serverTaskId) {
+      apiFetch(`/prep-plans/tasks/${task.serverTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: wasDone ? "not_started" : "complete" }),
+      }).then((response) => {
+        if (!response.ok) throw new Error(`Task update returned ${response.status}`);
+        return refreshReadiness();
+      }).catch(() => setStatus("Task saved locally; server sync will retry"));
+    }
   }
 
   function studyNoteCacheKey(task) {
@@ -2054,7 +2180,7 @@ function App() {
   }
 
   return (
-    <div className={authToken ? `app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} theme-${theme}` : "marketing-host"}>
+    <div className={authToken ? `app-shell guided-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} theme-${theme}` : "marketing-host"}>
       {authToken ? (
         <>
       <aside className={`sidebar ${isAdmin ? "admin-sidebar" : ""}`}>
@@ -2064,40 +2190,21 @@ function App() {
         </button>
 
         <nav className="nav-main">
-          <NavItem icon={Home} label="Dashboard" tourKey="dashboard" active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} />
+          <NavItem icon={Home} label="Today" tourKey="dashboard" active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} />
           <NavItem icon={BriefcaseBusiness} label="Jobs" tourKey="jobs" active={activeView === "jobs"} onClick={() => setActiveView("jobs")} />
-          <NavItem icon={ClipboardList} label="Prep Plan" tourKey="prep" active={activeView === "prep"} onClick={() => setActiveView("prep")} />
-          <NavItem icon={Gauge} label="Exams" tourKey="exams" active={activeView === "exams"} onClick={() => setActiveView("exams")} />
-          <NavItem icon={Database} label="Interview Data" tourKey="data" active={activeView === "data"} onClick={() => setActiveView("data")} />
+          <NavItem icon={BookOpen} label="Learn" tourKey="prep" active={["prep", "notes"].includes(activeView)} onClick={() => setActiveView("prep")} />
+          <NavItem icon={MessageSquareText} label="Practice" tourKey="exams" active={["exams", "data"].includes(activeView)} onClick={() => setActiveView("exams")} />
         </nav>
 
-        <nav className="nav-secondary">
-          <NavItem icon={BarChart3} label="Analytics" tourKey="analytics" active={activeView === "analytics"} onClick={() => setActiveView("analytics")} />
-          <NavItem icon={Activity} label="Progress" tourKey="progress" active={activeView === "progress"} onClick={() => setActiveView("progress")} />
-          <NavItem icon={CalendarDays} label="Calendar" tourKey="calendar" active={activeView === "calendar"} onClick={() => setActiveView("calendar")} />
-          <NavItem icon={NotebookText} label="Notes" tourKey="notes" active={activeView === "notes"} onClick={() => setActiveView("notes")} />
-          {isAdmin && <NavItem icon={ShieldCheck} label="Developer" tourKey="developer" active={activeView === "developer"} onClick={() => setActiveView("developer")} />}
-        </nav>
-
-        <div className="streak-card">
-          <div className="streak-head">
-            <Flame size={20} />
-            <strong>Study Streak</strong>
-          </div>
-          <p><span>{streak.count}</span> days</p>
-          <small>{streak.count ? "Keep it up!" : "Start today to build your streak."}</small>
-          <div className="streak-dots">
-            {streak.week.map((day) => (
-              <div key={day.key}>
-                <i className={day.done ? "done" : ""}>{day.done ? <Check size={11} /> : ""}</i>
-                <em>{day.label}</em>
-              </div>
-            ))}
-          </div>
+        <div className="guided-sidebar-context">
+          <span>Current job</span>
+          <strong>{plan?.job_title || "No job selected"}</strong>
+          <small>{plan ? `${plan.days_until_interview} days until interview` : "Add a job to begin"}</small>
         </div>
 
         <div className="sidebar-footer">
           <NavItem icon={Settings} label="Settings" tourKey="settings" active={settingsOpen} onClick={() => setSettingsOpen((current) => !current)} settingsToggle />
+          {isAdmin && <NavItem icon={ShieldCheck} label="Admin" tourKey="developer" active={activeView === "developer"} onClick={() => setActiveView("developer")} />}
           <NavItem icon={LogOut} label="Log out" onClick={logout} />
           {settingsOpen && (
             <>
@@ -2140,8 +2247,9 @@ function App() {
           </div>
           <div className="top-actions">
             <StatusIndicator status={status} />
-            <button className="icon-button"><BookOpen size={20} /></button>
-            <button className="icon-button notification"><Bell size={20} /><span>3</span></button>
+            <button className={`guided-utility ${["progress", "analytics"].includes(activeView) ? "active" : ""}`} onClick={() => setActiveView("progress")}><Activity size={17} />Readiness</button>
+            <button className={`guided-utility ${activeView === "calendar" ? "active" : ""}`} onClick={() => setActiveView("calendar")}><CalendarDays size={17} />Schedule</button>
+            <button className="primary guided-add-job" onClick={openAddJobModal}><Plus size={17} />Add job</button>
             {user ? (
               <div className="profile account-profile">
                 <span>{initialsFor(user.name)}</span>
@@ -2158,159 +2266,33 @@ function App() {
           </div>
         </header>
 
-        {activeView === "dashboard" && <section className="dashboard-grid" data-tour-page="dashboard">
-          <form className="panel create-panel" data-tour="dashboard-create-plan" onSubmit={generatePlan} autoComplete="off">
-            <PanelTitle icon={Sparkles} title="Create New Prep Plan" subtitle="Analyze the job and get a personalized plan." />
+        {activeView === "dashboard" && (
+          <GuidedTodayView
+            plan={plan}
+            jobs={jobs}
+            visibleTasks={visibleTasks}
+            completedTasks={completedTasks}
+            activity={activity}
+            readiness={readinessReport}
+            streak={streak}
+            loadingStudyTaskId={loadingStudyTaskId}
+            loadingExamTaskId={loadingExamTaskId}
+            isStudyNoteGenerated={isStudyNoteGenerated}
+            onAddJob={openAddJobModal}
+            onOpenJobs={() => setActiveView("jobs")}
+            onOpenLearn={() => setActiveView("prep")}
+            onOpenPractice={() => setActiveView("exams")}
+            onOpenReadiness={() => setActiveView("progress")}
+            onOpenSchedule={() => setActiveView("calendar")}
+            onStartTask={startStudyTask}
+            onToggleTask={toggleTaskDone}
+            onOpenActivity={openActivity}
+          />
+        )}
 
-            <div className="segmented">
-              <button type="button" className={mode === "paste" ? "selected" : ""} onClick={() => setMode("paste")}>
-                <ClipboardList size={16} /> Paste Description
-              </button>
-              <button type="button" className={mode === "url" ? "selected" : ""} onClick={() => setMode("url")}>
-                <Link size={16} /> Job URL
-              </button>
-            </div>
-
-            <div className="form-grid">
-              <label>
-                Job Title <span>(AI can detect)</span>
-                <input autoComplete="off" placeholder="Optional: Backend Intern, Data Analyst..." value={jobTitle} onChange={(event) => setJobTitle(event.target.value)} />
-              </label>
-              <label>
-                Company <span>(AI can detect)</span>
-                <input autoComplete="off" placeholder="Optional: Amazon, Google, ExampleTech..." value={company} onChange={(event) => setCompany(event.target.value)} />
-              </label>
-            </div>
-
-            {mode === "paste" ? (
-              <label>
-                Job Description <sup>*</sup>
-                <textarea
-                  placeholder="Paste the full job description here..."
-                  autoComplete="off"
-                  value={jobDescription}
-                  maxLength={8000}
-                  onChange={(event) => setJobDescription(event.target.value)}
-                />
-                <small className="char-count">{jobDescription.length} / 8000</small>
-              </label>
-            ) : (
-              <label>
-                Job URL <sup>*</sup>
-                <input autoComplete="off" placeholder="https://company.com/jobs/backend-intern" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} />
-              </label>
-            )}
-
-            <div className="form-grid">
-              <label>
-                Interview Date <sup>*</sup>
-                <div className="input-icon"><Calendar size={16} /><input autoComplete="off" type="datetime-local" min={minInterviewDateTime()} value={interviewDate} onChange={(event) => setInterviewDate(normalizeFutureInterviewDate(event.target.value))} /></div>
-              </label>
-              <label>
-                Hours Per Day <sup>*</sup>
-                <div className="input-icon"><Clock3 size={16} /><input autoComplete="off" type="number" min="0.5" max="10" step="0.5" value={hoursPerDay} onChange={(event) => setHoursPerDay(event.target.value)} /></div>
-              </label>
-            </div>
-
-            <div className="form-footer">
-              <div className="info-strip"><Info size={17} /> We will extract key skills, topics and create a custom plan for you.</div>
-              <div className="form-actions">
-                <button type="button" className="outline-action" disabled={loading} onClick={saveJobOnly}>
-                  <Save size={16} /> Save Job
-                </button>
-                <button className="primary" disabled={loading}>
-                  {loading ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
-                  Generate Prep Plan
-                </button>
-              </div>
-            </div>
-          </form>
-
-          <section className="panel saved-panel" data-tour="dashboard-saved-jobs">
-            <PanelTitle icon={BriefcaseBusiness} title="Saved Jobs" action="View all" onAction={() => setActiveView("jobs")} />
-            <div className="saved-list saved-list-scroll">
-              {jobs.length ? (
-                jobs.map((job) => (
-                  <SavedJob
-                    key={job.id}
-                    job={job}
-                    onSelect={useSavedJob}
-                    menuOpen={jobActionMenuId === job.id}
-                    onToggleMenu={setJobActionMenuId}
-                    onRequestDelete={setConfirmDeleteJob}
-                    onOpenDescription={openJobDescription}
-                  />
-                ))
-              ) : (
-                <div className="compact-empty-state">
-                  <BriefcaseBusiness size={20} />
-                  <strong>No saved jobs yet</strong>
-                  <span>Save a job or generate a prep plan to see it here.</span>
-                </div>
-              )}
-            </div>
-            <button className="text-action" onClick={() => setJobModalOpen(true)}><Plus size={16} /> Add Job Manually</button>
-          </section>
-
-          <section className="panel plan-panel" data-tour="dashboard-prep-plan">
-            <PanelTitle
-              icon={CalendarDays}
-              title="Your Prep Plan"
-              badge={plan ? `${plan.days_until_interview} days to interview` : "18 days to interview"}
-              secondaryBadge={plan ? sourceLabel(plan.plan_source) : "sample plan"}
-              action="View Full Plan"
-              onAction={openFullPlan}
-            />
-            <PlanStepper days={planDays} selectedDay={selectedPlanDay} onSelectDay={setSelectedPlanDay} />
-            <PlanDayCarousel
-              days={planDays}
-              selectedDay={selectedPlanDay}
-              completedTasks={completedTasks}
-              plan={plan}
-              onSelectDay={setSelectedPlanDay}
-              showArrows={false}
-            />
-
-            <div className="upcoming-head">Upcoming Tasks (Day {selectedPlanDay})</div>
-            <div className="task-table">
-              {visibleTasks.slice(0, 4).map((task, index) => (
-                <div className={`task-row study-task-row ${task.task_type === "practice_exam" ? "exam-task" : ""}`} key={task.id || task.title}>
-                  <div>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(completedTasks[`${dateKey(new Date())}:task:${task.id || task.title}`])}
-                      onChange={() => toggleTaskDone(task)}
-                    />
-                    <span>{task.title}</span>
-                  </div>
-                  <small>{task.topics?.join(", ") || ["Python", "Data Structures", "SQL"][index % 3]}</small>
-                  <em>{task.task_type === "practice_exam" ? "Practice exam" : "Study notes"}</em>
-                  <button type="button" onClick={() => startStudyTask(task)} disabled={isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId)}>
-                    {isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) ? <><Loader2 className="spin" size={15} /> Generating...</> : isStudyNoteGenerated(task) ? "Open" : "Start"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel activity-panel" data-tour="dashboard-recent-activity">
-            <PanelTitle icon={Activity} title="Recent Activity" action="View all" />
-            <div className="activity-list">
-              {activity.length ? (
-                activity.slice(0, 5).map((item, index) => (
-                  <ActivityRow key={`${item.title}-${index}`} item={item} onClick={() => openActivity(item)} />
-                ))
-              ) : (
-                <div className="compact-empty-state">
-                  <Activity size={20} />
-                  <strong>No recent activity</strong>
-                  <span>Your generated plans, notes, exams, and mock interviews will appear here.</span>
-                </div>
-              )}
-            </div>
-            <button className="text-action">View All Activity</button>
-          </section>
-        </section>}
+        {["prep", "notes"].includes(activeView) && <GuidedSectionTabs title="Learn" description="Follow your preparation plan and keep every explanation in one place." tabs={[{ id: "prep", label: "Plan" }, { id: "notes", label: "Notes" }]} active={activeView} onChange={setActiveView} />}
+        {["exams", "data"].includes(activeView) && <GuidedSectionTabs title="Practice" description="Test your knowledge, rehearse answers aloud, and review interview evidence." tabs={[{ id: "exams", label: "Exams & mocks" }, { id: "data", label: "Interview insights" }]} active={activeView} onChange={setActiveView} />}
+        {["progress", "analytics"].includes(activeView) && <GuidedSectionTabs title="Readiness" description="See what is improving, what needs work, and the next best action." tabs={[{ id: "progress", label: "Overview" }, { id: "analytics", label: "Trends" }]} active={activeView} onChange={setActiveView} />}
 
         {activeView === "jobs" && (
           <div data-tour-page="jobs">
@@ -2689,34 +2671,27 @@ function App() {
       )}
 
       {jobModalOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <form className="auth-modal job-modal" onSubmit={saveManualJob}>
-            <div className="modal-head">
-              <div>
-                <h2>Add job manually</h2>
-                <p>Save a job first, then generate a prep plan whenever you are ready.</p>
-              </div>
-              <button type="button" className="icon-button" onClick={() => setJobModalOpen(false)}><X size={18} /></button>
-            </div>
-            <label>
-              Job Title
-              <input value={jobDraft.title} onChange={(event) => setJobDraft({ ...jobDraft, title: event.target.value })} required />
-            </label>
-            <label>
-              Job URL <span>(optional)</span>
-              <input value={jobDraft.sourceUrl} onChange={(event) => setJobDraft({ ...jobDraft, sourceUrl: event.target.value })} placeholder="company.com/jobs/intern" />
-            </label>
-            <label>
-              Job Description
-              <textarea value={jobDraft.description} onChange={(event) => setJobDraft({ ...jobDraft, description: event.target.value })} placeholder="Paste job description..." />
-            </label>
-            <label>
-              Color Marker
-              <input type="color" value={jobDraft.color} onChange={(event) => setJobDraft({ ...jobDraft, color: event.target.value })} />
-            </label>
-            <button className="primary auth-submit" disabled={loading}><Save size={16} /> Save Job</button>
-          </form>
-        </div>
+        <GuidedAddJobModal
+          mode={mode}
+          setMode={setMode}
+          jobTitle={jobTitle}
+          setJobTitle={setJobTitle}
+          company={company}
+          setCompany={setCompany}
+          jobDescription={jobDescription}
+          setJobDescription={setJobDescription}
+          sourceUrl={sourceUrl}
+          setSourceUrl={setSourceUrl}
+          interviewDate={interviewDate}
+          setInterviewDate={setInterviewDate}
+          hoursPerDay={hoursPerDay}
+          setHoursPerDay={setHoursPerDay}
+          loading={loading}
+          onClose={() => setJobModalOpen(false)}
+          onSave={saveJobOnly}
+          onGenerate={generatePlan}
+          onExtension={() => window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer")}
+        />
       )}
 
       {confirmDeleteJob && (
@@ -2961,6 +2936,150 @@ function OnboardingCoachmark({ mode, step, isAdmin, onNext, onSkip, onClose }) {
           </button>
         </div>
       </article>
+    </div>
+  );
+}
+
+function GuidedTodayView({
+  plan,
+  jobs,
+  visibleTasks,
+  completedTasks,
+  activity,
+  readiness,
+  streak,
+  loadingStudyTaskId,
+  loadingExamTaskId,
+  isStudyNoteGenerated,
+  onAddJob,
+  onOpenJobs,
+  onOpenLearn,
+  onOpenPractice,
+  onOpenReadiness,
+  onOpenSchedule,
+  onStartTask,
+  onToggleTask,
+  onOpenActivity,
+}) {
+  const nextTask = visibleTasks.find((task) => !isTaskComplete(task, completedTasks)) || visibleTasks[0];
+  if (!plan) {
+    return (
+      <section className="guided-today guided-empty-today" data-tour-page="dashboard">
+        <div className="guided-welcome" data-tour="today-next-step">
+          <span className="guided-step-number">1</span>
+          <div>
+            <h2>Add the job you want</h2>
+            <p>Paste the description or URL. PrepInterview AI will identify the role, organize what matters, and build your preparation plan.</p>
+          </div>
+          <button className="primary" onClick={onAddJob}><Plus size={18} />Add your first job</button>
+        </div>
+        <div className="guided-flow-preview" aria-label="How preparation works">
+          <article><BriefcaseBusiness size={20} /><strong>Add a job</strong><span>Description, URL, or browser capture</span></article>
+          <ChevronRight size={18} />
+          <article><BookOpen size={20} /><strong>Follow the plan</strong><span>Learn the topics that matter</span></article>
+          <ChevronRight size={18} />
+          <article><MessageSquareText size={20} /><strong>Practice</strong><span>Exams and mock interviews</span></article>
+          <ChevronRight size={18} />
+          <article><Activity size={20} /><strong>Improve readiness</strong><span>Use real scores and completed work</span></article>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="guided-today" data-tour-page="dashboard">
+      <header className="guided-page-intro">
+        <div><h2>Prepare for {plan.job_title}</h2><p>Continue with the most useful task for this interview.</p></div>
+        <div className="guided-interview-countdown"><strong>{plan.days_until_interview}</strong><span>days left</span></div>
+      </header>
+
+      <div className="guided-today-grid">
+        <section className="guided-focus-panel" data-tour="today-next-step">
+          <div className="guided-panel-label"><Sparkles size={17} />Next best step</div>
+          {nextTask ? (
+            <>
+              <h3>{nextTask.title}</h3>
+              <p>{nextTask.instructions || `Focus on ${(nextTask.topics || []).join(", ") || "the next role-specific topic"}.`}</p>
+              <div className="guided-topic-row">{(nextTask.topics || []).slice(0, 4).map((topic) => <span key={topic}>{topic}</span>)}</div>
+              <div className="guided-focus-actions">
+                <button className="primary" onClick={() => onStartTask(nextTask)} disabled={isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId)}>
+                  {isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId) ? <Loader2 className="spin" size={17} /> : nextTask.task_type === "practice_exam" ? <FileQuestion size={17} /> : <BookOpen size={17} />}
+                  {isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId) ? "Preparing..." : isStudyNoteGenerated(nextTask) ? "Open task" : "Start now"}
+                </button>
+                <button className="outline-action" onClick={onOpenLearn}>View full plan</button>
+              </div>
+            </>
+          ) : <EmptyState text="Your current day has no remaining tasks. Open Learn to choose another day." />}
+        </section>
+
+        <aside className="guided-readiness-card" data-tour="today-readiness">
+          <div className="guided-panel-label"><Activity size={17} />Readiness</div>
+          <div className="guided-score"><strong>{readiness?.score ?? 0}%</strong><span>{readiness?.label || "Start preparing to create a score"}</span></div>
+          <div className="guided-component-list">
+            {(readiness?.components || []).slice(0, 4).map((component) => <div key={component.key}><span>{component.label}</span><progress max="100" value={component.score} /><strong>{component.score}%</strong></div>)}
+          </div>
+          <button className="text-action" onClick={onOpenReadiness}>See readiness details <ChevronRight size={15} /></button>
+        </aside>
+
+        <section className="guided-week-panel" data-tour="today-week">
+          <header><div><h3>This week</h3><p>Complete the work already connected to this job.</p></div><button className="text-action" onClick={onOpenSchedule}>Open schedule</button></header>
+          <div className="guided-task-list">
+            {visibleTasks.slice(0, 4).map((task) => {
+              const done = isTaskComplete(task, completedTasks);
+              return <article key={task.id || task.title} className={done ? "done" : ""}><button className="guided-check" onClick={() => onToggleTask(task)} aria-label={done ? "Mark incomplete" : "Mark complete"}>{done && <Check size={14} />}</button><span><strong>{task.title}</strong><small>{task.task_type === "practice_exam" ? "Practice" : "Learn"} · {task.duration_minutes || 30} min</small></span><button className="text-action" onClick={() => onStartTask(task)}>{done ? "Review" : "Open"}</button></article>;
+            })}
+          </div>
+          <div className="guided-week-actions"><button className="outline-action" onClick={onOpenLearn}><BookOpen size={16} />Learn</button><button className="outline-action" onClick={onOpenPractice}><MessageSquareText size={16} />Practice</button></div>
+        </section>
+
+        <aside className="guided-context-panel" data-tour="today-workspace">
+          <header><h3>Your workspace</h3><button className="text-action" onClick={onOpenJobs}>All jobs</button></header>
+          <div className="guided-context-stat"><BriefcaseBusiness size={18} /><span><strong>{jobs.length}</strong><small>saved jobs</small></span></div>
+          <div className="guided-context-stat"><Flame size={18} /><span><strong>{streak.count}</strong><small>day study streak</small></span></div>
+          <div className="guided-context-stat"><CalendarDays size={18} /><span><strong>{plan.days_until_interview}</strong><small>days to prepare</small></span></div>
+        </aside>
+
+        <section className="guided-activity-panel">
+          <header><h3>Recent activity</h3></header>
+          {activity.length ? activity.slice(0, 4).map((item, index) => <ActivityRow key={`${item.id || item.title}-${index}`} item={item} onClick={() => onOpenActivity(item)} />) : <EmptyState text="Completed learning, exams, and mock interviews will appear here." />}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function GuidedSectionTabs({ title, description, tabs, active, onChange }) {
+  return (
+    <section className="guided-section-head">
+      <div><h2>{title}</h2><p>{description}</p></div>
+      <div className="guided-section-tabs">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => onChange(tab.id)}>{tab.label}</button>)}</div>
+    </section>
+  );
+}
+
+function GuidedAddJobModal({ mode, setMode, jobTitle, setJobTitle, company, setCompany, jobDescription, setJobDescription, sourceUrl, setSourceUrl, interviewDate, setInterviewDate, hoursPerDay, setHoursPerDay, loading, onClose, onSave, onGenerate, onExtension }) {
+  return (
+    <div className="modal-backdrop guided-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="guided-add-job-title" onMouseDown={onClose}>
+      <form className="guided-job-modal" onSubmit={onGenerate} onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><h2 id="guided-add-job-title">Add a job</h2><p>Start with the role you want. Every preparation step will stay connected to it.</p></div><button type="button" className="icon-button" onClick={onClose}><X size={20} /></button></header>
+        <div className="guided-method-tabs">
+          <button type="button" className={mode === "url" ? "active" : ""} onClick={() => setMode("url")}><Link size={20} /><span><strong>Job URL</strong><small>Paste a listing link</small></span></button>
+          <button type="button" className={mode === "paste" ? "active" : ""} onClick={() => setMode("paste")}><ClipboardList size={20} /><span><strong>Description</strong><small>Paste the full posting</small></span></button>
+          <button type="button" className={mode === "extension" ? "active" : ""} onClick={() => setMode("extension")}><Sparkles size={20} /><span><strong>Browser capture</strong><small>Use the Chrome bubble</small></span></button>
+        </div>
+
+        {mode === "extension" ? (
+          <section className="guided-extension-help"><Sparkles size={32} /><h3>Capture a job while you browse</h3><p>Use the PrepInterview AI bubble on LinkedIn, Handshake, or a company careers page. The captured job will appear in this account.</p><button type="button" className="outline-action" onClick={onExtension}>Install or connect extension <ExternalLink size={15} /></button></section>
+        ) : (
+          <div className="guided-job-form">
+            {mode === "url" ? <label>Job URL <sup>*</sup><input autoFocus value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://company.com/jobs/..." required /></label> : <label>Job description <sup>*</sup><textarea autoFocus value={jobDescription} onChange={(event) => setJobDescription(event.target.value)} maxLength={8000} placeholder="Paste the full job description here..." required /><small>{jobDescription.length} / 8000</small></label>}
+            <div className="guided-form-two"><label>Job title <span>Optional · AI can detect</span><input value={jobTitle} onChange={(event) => setJobTitle(event.target.value)} placeholder="e.g. Data Analyst" /></label><label>Company <span>Optional · AI can detect</span><input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="e.g. JPMorgan Chase" /></label></div>
+            <div className="guided-form-two"><label>Interview date <sup>*</sup><input type="datetime-local" min={minInterviewDateTime()} value={interviewDate} onChange={(event) => setInterviewDate(normalizeFutureInterviewDate(event.target.value))} required /></label><label>Hours per day <sup>*</sup><input type="number" min="0.5" max="10" step="0.5" value={hoursPerDay} onChange={(event) => setHoursPerDay(event.target.value)} required /></label></div>
+          </div>
+        )}
+
+        {mode !== "extension" && <footer><button type="button" className="outline-action" disabled={loading} onClick={onSave}><Save size={16} />Save job only</button><button className="primary" disabled={loading}>{loading ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}Generate prep plan</button></footer>}
+      </form>
     </div>
   );
 }
@@ -6185,8 +6304,9 @@ function buildPlanProgressSummary(plan, completedTasks, examAttempts, mockAttemp
 }
 
 function isTaskComplete(task, completedTasks) {
-  const today = dateKey(new Date());
-  return Boolean(completedTasks[`${today}:task:${task.id || task.title}`]);
+  if (task?.status === "complete") return true;
+  const suffix = `:task:${task.id || task.title}`;
+  return Object.entries(completedTasks || {}).some(([key, value]) => key.endsWith(suffix) && Boolean(value));
 }
 
 function isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) {
@@ -6198,6 +6318,18 @@ function minInterviewDateTime() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function toLocalDateTimeInput(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function applyWorkspaceCollection(data, key, setter, persist) {
+  if (!Object.prototype.hasOwnProperty.call(data, key)) return;
+  setter(data[key]);
+  persist(data[key]);
 }
 
 function normalizeFutureInterviewDate(value) {
@@ -6694,11 +6826,13 @@ function buildDailyStudyTasks(plan, day) {
     const topics = source.topics?.length ? source.topics : [source.title];
     return {
       id: `day-${day}-note-${index}-${topics.join("-")}`,
+      serverTaskId: source.id,
       day,
       title: `Read notes: ${source.title}`,
       topics,
       task_type: "study_note",
       instructions: source.instructions,
+      status: source.status,
       order: index + 1,
     };
   });
@@ -6979,20 +7113,20 @@ function sourceLabel(source) {
 
 function viewTitle(view) {
   const titles = {
-    dashboard: "Dashboard",
+    dashboard: "Today",
     jobs: "Jobs",
-    prep: "Prep Plan",
-    exams: "Exams",
-    data: "Interview Data",
-    analytics: "Analytics",
-    progress: "Progress",
-    calendar: "Calendar",
-    notes: "Notes",
+    prep: "Learn",
+    exams: "Practice",
+    data: "Practice",
+    analytics: "Readiness",
+    progress: "Readiness",
+    calendar: "Schedule",
+    notes: "Learn",
     developer: "Developer Dashboard",
     settings: "Settings",
     about: "About",
   };
-  return titles[view] || "Dashboard";
+  return titles[view] || "Today";
 }
 
 function normalizeUrl(url) {

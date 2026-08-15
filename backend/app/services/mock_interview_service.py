@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import MockInterview, MockMessage, PrepPlan
+from app.models import MockInterview, MockMessage, PrepPlan, User
 from app.ai_policy import require_ai_result
 from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest
 from app.services.gemini_service import generate_gemini_json
@@ -31,11 +31,12 @@ def start_mock_interview(
     db: Session,
     request: MockInterviewStartRequest,
     settings: Optional[Settings] = None,
+    user: Optional[User] = None,
 ) -> Optional[MockInterviewResponse]:
     """Start a mock interview session for a saved prep plan."""
 
     plan = db.get(PrepPlan, request.prep_plan_id)
-    if plan is None:
+    if plan is None or not _owns_plan(plan, user):
         return None
 
     topic = request.topic or _first_topic(plan)
@@ -57,9 +58,9 @@ def start_mock_interview(
     return _to_response(interview)
 
 
-def get_mock_interview(db: Session, mock_interview_id: int) -> Optional[MockInterviewResponse]:
+def get_mock_interview(db: Session, mock_interview_id: int, user: Optional[User] = None) -> Optional[MockInterviewResponse]:
     interview = db.get(MockInterview, mock_interview_id)
-    if interview is None:
+    if interview is None or not _owns_plan(interview.prep_plan, user):
         return None
     return _to_response(interview)
 
@@ -69,9 +70,10 @@ def answer_mock_question(
     mock_interview_id: int,
     request: MockAnswerRequest,
     settings: Optional[Settings] = None,
+    user: Optional[User] = None,
 ) -> Optional[MockInterviewResponse]:
     interview = db.get(MockInterview, mock_interview_id)
-    if interview is None:
+    if interview is None or not _owns_plan(interview.prep_plan, user):
         return None
 
     config = _config_for_interview(interview)
@@ -98,6 +100,12 @@ def answer_mock_question(
     db.commit()
     db.refresh(interview)
     return _to_response(interview)
+
+
+def _owns_plan(plan: PrepPlan, user: Optional[User]) -> bool:
+    if user:
+        return plan.job_post.user_id == user.id
+    return plan.job_post.user_id is None
 
 
 def _first_topic(plan: PrepPlan) -> str:

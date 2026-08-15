@@ -62,6 +62,28 @@ def test_logged_in_users_only_see_their_own_jobs() -> None:
     assert [job["title"] for job in second_jobs] == ["Sales Intern"]
 
 
+def test_health_provider_status_never_returns_credentials() -> None:
+    client = _client_with_memory_db()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        app_env="test",
+        openai_api_key="secret-openai-value",
+        tavily_api_key="secret-tavily-value",
+        email_provider="resend",
+        resend_api_key="secret-resend-value",
+        email_from="PrepInterview AI <hello@example.com>",
+    )
+
+    response = client.get("/health/providers")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["providers"]["openai"]["configured"] is True
+    assert body["providers"]["tavily"]["configured"] is True
+    assert body["providers"]["resend"] == {"credential_configured": True, "sender_configured": True}
+    assert body["providers"]["email"] == {"configured": True, "provider": "resend"}
+    assert "secret" not in response.text
+
+
 def test_job_analysis_endpoint_can_use_source_url(monkeypatch) -> None:
     client = _client_with_memory_db()
 
@@ -127,6 +149,81 @@ def test_prep_plan_endpoint_saves_and_reads_plan() -> None:
     detail = client.get(f"/prep-plans/{body['prep_plan_id']}").json()
     assert detail["job_title"] == "Backend Software Engineer"
     assert len(detail["tasks"]) == len(body["tasks"])
+    assert detail["hours_per_day"] == 2
+    assert detail["interview_at"] is not None
+
+
+def test_saved_job_metadata_and_existing_job_plan_stay_connected() -> None:
+    client = _client_with_memory_db()
+    interview_at = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+    saved = client.post(
+        "/jobs/analyze",
+        json={
+            "job_title": "Data Analyst",
+            "company": "Example Bank",
+            "job_description": "Analyze business data with SQL, Python, Tableau, dashboards, and stakeholder communication.",
+            "interview_at": interview_at,
+            "hours_per_day": 2.5,
+        },
+    ).json()
+
+    job_id = saved["job_post_id"]
+    detail = client.get(f"/jobs/{job_id}").json()
+    assert detail["hours_per_day"] == 2.5
+    assert detail["interview_at"] is not None
+
+    plan_response = client.post(
+        "/prep-plans",
+        json={
+            "job_post_id": job_id,
+            "job_title": "Data Analyst",
+            "company": "Example Bank",
+            "interview_at": interview_at,
+            "hours_per_day": 2.5,
+        },
+    )
+    assert plan_response.status_code == 200
+    assert plan_response.json()["job_post_id"] == job_id
+    assert len(client.get("/jobs").json()) == 1
+
+
+def test_workspace_sync_and_readiness_use_real_plan_state() -> None:
+    client = _client_with_memory_db()
+    plan = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Backend Software Engineer",
+            "job_description": "Python SQL REST APIs Docker testing and system design.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    task_id = plan["tasks"][0]["id"]
+
+    updated = client.patch(f"/prep-plans/tasks/{task_id}", json={"status": "complete"})
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "complete"
+
+    sync = client.put(
+        "/workspace",
+        json={
+            "data": {
+                "completedTasks": {f"2026-08-15:task:{task_id}": "2026-08-15"},
+                "recentActivity": [{"createdAt": datetime.now(timezone.utc).isoformat(), "type": "study"}],
+                "notes": [{"id": "note-1", "planId": plan["prep_plan_id"], "title": "Python"}],
+            }
+        },
+    )
+    assert sync.status_code == 200
+    assert sync.json()["data"]["notes"][0]["title"] == "Python"
+
+    readiness = client.get(f"/workspace/readiness?prep_plan_id={plan['prep_plan_id']}")
+    assert readiness.status_code == 200
+    report = readiness.json()
+    assert report["formula"] == "30% plan + 20% learning + 25% exams + 20% mock interviews + 5% consistency"
+    assert report["score"] > 0
+    assert {component["key"] for component in report["components"]} == {"plan", "learning", "exams", "mocks", "consistency"}
 
 
 def test_exam_generation_and_submission_flow() -> None:
@@ -283,6 +380,37 @@ def test_ai_only_study_note_generation_records_usage_without_route_error(monkeyp
 
     assert response.status_code == 200
     assert response.json()["source"] == "openai"
+
+
+def test_study_note_generation_rejects_another_users_plan() -> None:
+    client = _client_with_memory_db()
+    first = _register(client, {"name": "First User", "email": "note-first@example.com", "password": "password123"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "note-second@example.com", "password": "password123"}).json()["access_token"]
+    plan = client.post(
+        "/prep-plans",
+        headers={"Authorization": f"Bearer {first}"},
+        json={
+            "job_title": "Backend Software Engineer",
+            "job_description": "Python SQL REST APIs Docker testing and system design.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+
+    response = client.post(
+        "/study-notes/generate",
+        headers={"Authorization": f"Bearer {second}"},
+        json={
+            "prep_plan_id": plan["prep_plan_id"],
+            "day": 1,
+            "title": "Read notes: REST APIs",
+            "topics": ["REST APIs"],
+            "instructions": "Prepare for the daily exam.",
+        },
+    )
+
+    assert response.status_code == 404
 
 
 def test_ai_only_exam_generation_batches_until_requested_count(monkeypatch) -> None:

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -9,6 +10,8 @@ class JobAnalysisRequest(BaseModel):
     job_description: Optional[str] = Field(default=None, min_length=20)
     source_url: Optional[str] = Field(default=None, examples=["https://company.com/jobs/backend-intern"])
     save_mode: Optional[str] = Field(default=None, examples=["url"])
+    interview_at: Optional[datetime] = None
+    hours_per_day: Optional[float] = Field(default=None, ge=0.5, le=10)
 
     @model_validator(mode="after")
     def require_description_or_url(self) -> "JobAnalysisRequest":
@@ -42,6 +45,8 @@ class JobPostSummary(BaseModel):
     description_preview: str
     source_url: Optional[str] = None
     analysis_source: Optional[str] = None
+    interview_at: Optional[datetime] = None
+    hours_per_day: Optional[float] = None
 
 
 class JobPostDetail(BaseModel):
@@ -51,6 +56,8 @@ class JobPostDetail(BaseModel):
     description: str
     source_url: Optional[str] = None
     analysis: Optional[JobAnalysisResponse] = None
+    interview_at: Optional[datetime] = None
+    hours_per_day: Optional[float] = None
 
 
 class JobDescriptionBrief(BaseModel):

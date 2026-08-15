@@ -12,6 +12,7 @@ from app.models.interview import (
     Question,
     User,
     UserUsageEvent,
+    WorkspaceState,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "Question",
     "User",
     "UserUsageEvent",
+    "WorkspaceState",
 ]

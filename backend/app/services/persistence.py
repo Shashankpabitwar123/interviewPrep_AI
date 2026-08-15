@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -15,10 +16,20 @@ def save_job_analysis(
     source_url: Optional[str] = None,
     company: str = "",
     user: Optional[User] = None,
+    interview_at: Optional[datetime] = None,
+    hours_per_day: Optional[float] = None,
 ) -> JobAnalysisResponse:
     """Save one analyzed job and return the same response with database IDs."""
 
-    job_post = JobPost(title=title, company=company or None, description=description, source_url=source_url, user_id=user.id if user else None)
+    job_post = JobPost(
+        title=title,
+        company=company or None,
+        description=description,
+        source_url=source_url,
+        user_id=user.id if user else None,
+        interview_at=interview_at,
+        hours_per_day=hours_per_day,
+    )
     db.add(job_post)
     db.flush()
 
@@ -47,12 +58,34 @@ def save_prep_plan(
     source_url: Optional[str] = None,
     company: str = "",
     user: Optional[User] = None,
+    interview_at: Optional[datetime] = None,
+    hours_per_day: float = 2.0,
+    job_post_id: Optional[int] = None,
 ) -> PrepPlanResponse:
     """Save a generated prep plan and every scheduled task."""
 
-    job_post = JobPost(title=title, company=company or None, description=description, source_url=source_url, user_id=user.id if user else None)
-    db.add(job_post)
-    db.flush()
+    job_post = db.get(JobPost, job_post_id) if job_post_id else None
+    if job_post is not None and not _owns_job(job_post, user):
+        job_post = None
+    if job_post is None:
+        job_post = JobPost(
+            title=title,
+            company=company or None,
+            description=description,
+            source_url=source_url,
+            user_id=user.id if user else None,
+            interview_at=interview_at,
+            hours_per_day=hours_per_day,
+        )
+        db.add(job_post)
+        db.flush()
+    else:
+        job_post.title = title
+        job_post.company = company or job_post.company
+        job_post.description = description
+        job_post.source_url = source_url or job_post.source_url
+        job_post.interview_at = interview_at or job_post.interview_at
+        job_post.hours_per_day = hours_per_day
 
     db_plan = PrepPlan(
         job_post_id=job_post.id,
@@ -92,6 +125,8 @@ def save_prep_plan(
             "prep_plan_id": db_plan.id,
             "company": company or plan.company,
             "tasks": response_tasks,
+            "interview_at": job_post.interview_at,
+            "hours_per_day": job_post.hours_per_day or hours_per_day,
         }
     )
 
@@ -108,6 +143,8 @@ def list_jobs(db: Session, user: Optional[User] = None) -> list[JobPostSummary]:
             description_preview=_preview(job.description),
             source_url=job.source_url,
             analysis_source=job.analysis.source if job.analysis else None,
+            interview_at=job.interview_at,
+            hours_per_day=job.hours_per_day,
         )
         for job in jobs
     ]
@@ -140,6 +177,8 @@ def get_job_detail(db: Session, job_post_id: int, user: Optional[User] = None) -
         description=job.description,
         source_url=job.source_url,
         analysis=analysis,
+        interview_at=job.interview_at,
+        hours_per_day=job.hours_per_day,
     )
 
 
@@ -165,6 +204,8 @@ def list_prep_plans(db: Session, user: Optional[User] = None) -> list[PrepPlanSu
             days_until_interview=plan.days_until_interview,
             task_count=len(plan.tasks),
             summary=plan.summary,
+            interview_at=plan.job_post.interview_at,
+            hours_per_day=plan.job_post.hours_per_day or 2.0,
         )
         for plan in plans
     ]
@@ -184,6 +225,7 @@ def get_prep_plan_detail(db: Session, prep_plan_id: int, user: Optional[User] = 
             "duration_minutes": task.duration_minutes,
             "topics": task.topics,
             "instructions": task.instructions,
+            "status": task.status,
         }
         for task in sorted(plan.tasks, key=lambda task: (task.day, task.id))
     ]
@@ -198,6 +240,8 @@ def get_prep_plan_detail(db: Session, prep_plan_id: int, user: Optional[User] = 
         plan_summary=plan.summary,
         plan_source="saved",
         tasks=tasks,
+        interview_at=plan.job_post.interview_at,
+        hours_per_day=plan.job_post.hours_per_day or 2.0,
     )
 
 

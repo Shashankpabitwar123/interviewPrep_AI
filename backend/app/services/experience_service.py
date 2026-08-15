@@ -2,17 +2,19 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import InterviewExperience
+from app.models import InterviewExperience, User
 from app.schemas.experience import InterviewExperienceCreate, InterviewExperienceResponse
 
 
 def create_interview_experience(
     db: Session,
     request: InterviewExperienceCreate,
+    user: Optional[User] = None,
 ) -> InterviewExperienceResponse:
     """Save a real interview report for future question generation."""
 
     experience = InterviewExperience(
+        user_id=user.id if user else None,
         company=request.company,
         role_title=request.role_title,
         round_name=request.round_name,
@@ -27,17 +29,20 @@ def create_interview_experience(
     return _experience_to_response(experience)
 
 
-def list_interview_experiences(db: Session) -> list[InterviewExperienceResponse]:
-    experiences = db.query(InterviewExperience).order_by(InterviewExperience.created_at.desc()).all()
+def list_interview_experiences(db: Session, user: Optional[User] = None) -> list[InterviewExperienceResponse]:
+    query = db.query(InterviewExperience)
+    query = query.filter(InterviewExperience.user_id == user.id) if user else query.filter(InterviewExperience.user_id.is_(None))
+    experiences = query.order_by(InterviewExperience.created_at.desc()).all()
     return [_experience_to_response(experience) for experience in experiences]
 
 
 def get_interview_experience(
     db: Session,
     experience_id: int,
+    user: Optional[User] = None,
 ) -> Optional[InterviewExperienceResponse]:
     experience = db.get(InterviewExperience, experience_id)
-    if experience is None:
+    if experience is None or (user and experience.user_id != user.id) or (user is None and experience.user_id is not None):
         return None
     return _experience_to_response(experience)
 

@@ -39,7 +39,7 @@ The extension points to the live services by default:
 
 ```text
 Backend API: https://interviewprep-ai-api.onrender.com
-Website URL: https://interview-prep-ai-sable.vercel.app
+Website URL: https://prepinterviewai.com
 ```
 
 You can edit those in the extension popup if testing local services.

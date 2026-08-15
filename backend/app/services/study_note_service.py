@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import PrepPlan
+from app.models import PrepPlan, User
 from app.schemas.study_note import (
     NoteSection,
     StudyNoteAskRequest,
@@ -24,9 +24,14 @@ from app.services.research_service import ResearchResult, research_for_note
 logger = logging.getLogger(__name__)
 
 
-def generate_study_note(db: Session, request: StudyNoteRequest, settings: Optional[Settings]) -> Optional[StudyNoteResponse]:
+def generate_study_note(
+    db: Session,
+    request: StudyNoteRequest,
+    settings: Optional[Settings],
+    user: Optional[User] = None,
+) -> Optional[StudyNoteResponse]:
     plan = db.get(PrepPlan, request.prep_plan_id)
-    if plan is None:
+    if plan is None or plan.job_post.user_id != (user.id if user else None):
         return None
     research = research_for_note(
         settings,

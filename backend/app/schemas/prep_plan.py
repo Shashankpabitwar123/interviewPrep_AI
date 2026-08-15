@@ -15,6 +15,7 @@ class PrepTaskType(str, Enum):
 
 
 class PrepPlanRequest(BaseModel):
+    job_post_id: Optional[int] = None
     job_title: str = Field(default="Auto-detect role", min_length=2, examples=["Backend Software Engineer Intern"])
     company: Optional[str] = Field(default="Auto-detect company", examples=["Amazon"])
     job_description: Optional[str] = Field(default=None, min_length=20)
@@ -25,8 +26,8 @@ class PrepPlanRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_description_or_url(self) -> "PrepPlanRequest":
-        if not self.job_description and not self.source_url:
-            raise ValueError("Provide either job_description or source_url.")
+        if not self.job_post_id and not self.job_description and not self.source_url:
+            raise ValueError("Provide job_post_id, job_description, or source_url.")
         return self
 
 
@@ -43,6 +44,11 @@ class PrepTask(BaseModel):
     duration_minutes: int
     topics: list[str]
     instructions: str
+    status: str = "not_started"
+
+
+class PrepTaskStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(not_started|in_progress|complete)$")
 
 
 class PrepPlanResponse(BaseModel):
@@ -55,6 +61,8 @@ class PrepPlanResponse(BaseModel):
     plan_summary: str
     plan_source: str = "heuristic"
     tasks: list[PrepTask]
+    interview_at: Optional[datetime] = None
+    hours_per_day: float = 2.0
 
 
 class PrepPlanSummary(BaseModel):
@@ -65,3 +73,5 @@ class PrepPlanSummary(BaseModel):
     days_until_interview: int
     task_count: int
     summary: str
+    interview_at: Optional[datetime] = None
+    hours_per_day: float = 2.0

@@ -19,7 +19,7 @@ def start_interview(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_request_user),
 ) -> MockInterviewResponse:
-    interview = start_mock_interview(db, request, settings)
+    interview = start_mock_interview(db, request, settings, current_user)
     if interview is None:
         raise HTTPException(status_code=404, detail="Prep plan not found")
     record_usage_event(
@@ -41,7 +41,7 @@ def get_interview(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_request_user),
 ) -> MockInterviewResponse:
-    interview = get_mock_interview(db, mock_interview_id)
+    interview = get_mock_interview(db, mock_interview_id, current_user)
     if interview is None:
         raise HTTPException(status_code=404, detail="Mock interview not found")
     return interview
@@ -55,7 +55,7 @@ def answer_interview_question(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_request_user),
 ) -> MockInterviewResponse:
-    interview = answer_mock_question(db, mock_interview_id, request, settings)
+    interview = answer_mock_question(db, mock_interview_id, request, settings, current_user)
     if interview is None:
         raise HTTPException(status_code=404, detail="Mock interview not found")
     record_usage_event(

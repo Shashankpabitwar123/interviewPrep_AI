@@ -67,6 +67,14 @@ def _apply_lightweight_migrations() -> None:
     if "company" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE job_posts ADD COLUMN company VARCHAR(160)"))
+    if "hours_per_day" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE job_posts ADD COLUMN hours_per_day FLOAT"))
+
+    if "interview_experiences" in table_names:
+        _add_missing_columns("interview_experiences", {"user_id": "INTEGER"})
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_interview_experiences_user_id ON interview_experiences (user_id)"))
 
 
 def _add_missing_columns(table_name: str, column_sql: dict[str, str]) -> None:

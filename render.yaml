@@ -29,7 +29,7 @@ services:
       - key: EMAIL_PROVIDER
         value: resend
       - key: EMAIL_FROM
-        value: InterviewPrep AI <onboarding@resend.dev>
+        value: PrepInterview AI <onboarding@prepinterviewai.com>
       - key: DATABASE_URL
         sync: false
       - key: FRONTEND_ORIGINS

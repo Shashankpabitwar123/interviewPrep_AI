@@ -41,7 +41,17 @@ def analyze_job(
     inferred_title, inferred_company = identify_job(request.job_title, request.company, description, request.source_url, settings)
     analysis_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description})
     analysis = analyze_job_description(analysis_request, settings)
-    saved_job = save_job_analysis(db, inferred_title, description, analysis, source_url=request.source_url, company=inferred_company, user=current_user)
+    saved_job = save_job_analysis(
+        db,
+        inferred_title,
+        description,
+        analysis,
+        source_url=request.source_url,
+        company=inferred_company,
+        user=current_user,
+        interview_at=request.interview_at,
+        hours_per_day=request.hours_per_day,
+    )
     record_usage_event(
         db,
         current_user,

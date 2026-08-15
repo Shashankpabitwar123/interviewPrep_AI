@@ -26,7 +26,7 @@ def generate_note(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_request_user),
 ) -> StudyNoteResponse:
-    note = generate_study_note(db, request, settings)
+    note = generate_study_note(db, request, settings, current_user)
     if note is None:
         raise HTTPException(status_code=404, detail="Prep plan not found")
     record_usage_event(

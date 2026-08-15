@@ -30,6 +30,8 @@ class User(TimestampMixin, Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    workspace_state: Mapped[Optional["WorkspaceState"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
 
 class UserUsageEvent(TimestampMixin, Base):
     """Auditable product usage and AI-consumption events for the developer dashboard."""
@@ -74,6 +76,7 @@ class JobPost(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text)
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     interview_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    hours_per_day: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     analysis: Mapped[Optional["JobAnalysis"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
     prep_plans: Mapped[list["PrepPlan"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
@@ -182,6 +185,7 @@ class InterviewExperience(TimestampMixin, Base):
     __tablename__ = "interview_experiences"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     company: Mapped[str] = mapped_column(String(160))
     role_title: Mapped[str] = mapped_column(String(200))
     round_name: Mapped[str] = mapped_column(String(120))
@@ -218,3 +222,15 @@ class MockMessage(TimestampMixin, Base):
     score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     mock_interview: Mapped["MockInterview"] = relationship(back_populates="messages")
+
+
+class WorkspaceState(TimestampMixin, Base):
+    """Per-user UI workspace data that is not a generated domain record."""
+
+    __tablename__ = "workspace_states"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, unique=True, index=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    user: Mapped[Optional["User"]] = relationship(back_populates="workspace_state")
