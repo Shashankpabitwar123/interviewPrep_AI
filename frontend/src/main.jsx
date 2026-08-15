@@ -22,6 +22,7 @@ import {
   ChevronRight,
   ClipboardList,
   Clock3,
+  Copy,
   Database,
   Eye,
   EyeOff,
@@ -1148,6 +1149,19 @@ function App() {
     }
   }
 
+  async function loadSavedJobDetail(job) {
+    const response = await apiFetch(`/jobs/${job.id}`);
+    if (!response.ok) throw new Error(await readApiError(response, "Job"));
+    const detail = await response.json();
+    return {
+      ...job,
+      ...detail,
+      title: detail.title || job.title,
+      company: detail.company || job.company || inferCompanyName("", detail.description || "", detail.source_url || job.source_url || ""),
+      source_url: detail.source_url || job.source_url || "",
+    };
+  }
+
   async function askJobBriefQuestion() {
     if (!jobBrief?.job?.id || !jobBriefQuestion.trim()) return;
     const questionText = jobBriefQuestion.trim();
@@ -2264,7 +2278,10 @@ function App() {
           <JobsView
             jobs={jobs}
             onSelectJob={useSavedJob}
+            onLoadJobDetail={loadSavedJobDetail}
             onOpenDescription={openJobDescription}
+            onAddJob={openAddJobModal}
+            onManageDeleted={() => setSettingsOpen(true)}
             menuId={jobActionMenuId}
             onToggleMenu={setJobActionMenuId}
             onRequestDelete={setConfirmDeleteJob}
@@ -2277,6 +2294,11 @@ function App() {
               setActiveView("prep");
             }}
             savedPlans={savedPlans}
+            plan={plan}
+            readiness={readinessReport}
+            completedTasks={completedTasks}
+            examAttempts={examAttempts}
+            mockAttempts={mockAttempts}
             removePrepPlan={removePrepPlan}
             jobMarkers={jobMarkers}
           />
@@ -4245,77 +4267,240 @@ function fallbackInterviewSignals(roleTitle) {
   ];
 }
 
-function JobsView({ jobs, onSelectJob, onOpenDescription, menuId, onToggleMenu, onRequestDelete, selectedJobIds, setSelectedJobIds, onRequestBulkDelete, loading, savedPlans, onOpenPlan, removePrepPlan, jobMarkers }) {
-  const [bulkMode, setBulkMode] = useState(false);
-  const allSelected = jobs.length > 0 && selectedJobIds.length === jobs.length;
+function JobsView({
+  jobs,
+  onSelectJob,
+  onLoadJobDetail,
+  onOpenDescription,
+  onAddJob,
+  onManageDeleted,
+  menuId,
+  onToggleMenu,
+  onRequestDelete,
+  selectedJobIds,
+  setSelectedJobIds,
+  onRequestBulkDelete,
+  loading,
+  savedPlans,
+  onOpenPlan,
+  plan,
+  readiness,
+  completedTasks,
+  examAttempts,
+  mockAttempts,
+}) {
+  const [searchText, setSearchText] = useState("");
+  const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || null);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [deleteRequested, setDeleteRequested] = useState(false);
+  const [jobDetails, setJobDetails] = useState({});
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [rawDescriptionOpen, setRawDescriptionOpen] = useState(false);
+  const [copiedValue, setCopiedValue] = useState("");
+
+  const filteredJobs = jobs.filter((job) => `${job.title} ${job.company || ""} ${job.description_preview || ""}`.toLowerCase().includes(searchText.trim().toLowerCase()));
+  const selectedJob = jobs.find((job) => String(job.id) === String(selectedJobId)) || jobs[0] || null;
+  const selectedDetail = selectedJob ? jobDetails[String(selectedJob.id)] || selectedJob : null;
+  const matchingPlan = selectedJob ? savedPlans.find((savedPlan) => String(savedPlan.job_post_id) === String(selectedJob.id)) : null;
+  const selectedPlanIsLoaded = matchingPlan && String(plan?.job_post_id) === String(selectedJob?.id);
+  const selectedPlanTasks = selectedPlanIsLoaded
+    ? [...new Set((plan.tasks || []).map((task) => task.day))].flatMap((day) => buildDailyStudyTasks(plan, day))
+    : [];
+  const completedPlanTasks = selectedPlanTasks.filter((task) => isTaskComplete(task, completedTasks)).length;
+  const nextTask = selectedPlanTasks.find((task) => !isTaskComplete(task, completedTasks));
+  const matchingPlanId = matchingPlan?.id;
+  const practiceAttempts = [...examAttempts, ...mockAttempts].filter((attempt) => String(attempt.prepPlanId || attempt.prep_plan_id) === String(matchingPlanId));
+  const readinessScore = selectedPlanIsLoaded
+    ? readiness?.score ?? 0
+    : matchingPlan?.task_count
+      ? Math.round((completedPlanTasks / Math.max(selectedPlanTasks.length, matchingPlan.task_count)) * 100)
+      : 0;
+  const descriptionText = selectedDetail?.description || selectedJob?.description_preview || "";
+  const isDescriptionSource = Boolean(selectedJob && !selectedJob.source_url);
+  const requiredSkills = selectedDetail?.analysis?.required_skills || extractResumeKeywords(descriptionText).slice(0, 6);
+  const interviewFocus = (selectedDetail?.analysis?.interview_focus || []).flatMap((group) => group.topics || []).slice(0, 6);
+  const lookingFor = summarizeJobForWorkspace(descriptionText, selectedJob);
+
+  useEffect(() => {
+    if (!jobs.length) {
+      setSelectedJobId(null);
+      return;
+    }
+    if (!jobs.some((job) => String(job.id) === String(selectedJobId))) setSelectedJobId(jobs[0].id);
+  }, [jobs, selectedJobId]);
+
+  useEffect(() => {
+    if (!selectedJob || jobDetails[String(selectedJob.id)]) return undefined;
+    let cancelled = false;
+    setDetailLoading(true);
+    onLoadJobDetail(selectedJob)
+      .then((detail) => {
+        if (!cancelled) setJobDetails((current) => ({ ...current, [String(selectedJob.id)]: detail }));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedJob?.id]);
+
+  useEffect(() => {
+    if (deleteMode && deleteRequested && selectedJobIds.length === 0) {
+      setDeleteMode(false);
+      setDeleteRequested(false);
+    }
+  }, [deleteMode, deleteRequested, selectedJobIds.length]);
+
   function toggleJobSelection(jobId) {
-    setSelectedJobIds((current) => current.includes(jobId) ? current.filter((id) => id !== jobId) : [...current, jobId]);
+    setSelectedJobIds((current) => current.some((id) => String(id) === String(jobId))
+      ? current.filter((id) => String(id) !== String(jobId))
+      : [...current, jobId]);
   }
-  function closeBulkMode() {
-    setBulkMode(false);
+
+  function chooseJob(job) {
+    if (deleteMode) {
+      toggleJobSelection(job.id);
+      return;
+    }
+    setSelectedJobId(job.id);
+    setActiveTab("overview");
+    onToggleMenu(null);
+  }
+
+  function cancelDeleteMode() {
+    setDeleteMode(false);
+    setDeleteRequested(false);
     setSelectedJobIds([]);
   }
 
+  function requestSelectedDelete() {
+    if (!selectedJobIds.length) return;
+    setDeleteRequested(true);
+    onRequestBulkDelete();
+  }
+
+  async function copyText(value, key) {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopiedValue(key);
+    window.setTimeout(() => setCopiedValue(""), 1800);
+  }
+
   return (
-    <section className="page-stack">
-      <section className="panel page-panel">
-        <PanelTitle icon={BriefcaseBusiness} title="Jobs" subtitle="Saved job links and generated prep plans stay connected here." />
-        {bulkMode ? (
-          <div className="bulk-toolbar">
-            <label>
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={(event) => setSelectedJobIds(event.target.checked ? jobs.map((job) => job.id) : [])}
-              />
-              Select all
-            </label>
-            <span>{selectedJobIds.length} selected</span>
-            <button type="button" className="outline-action compact-action" onClick={closeBulkMode}>Cancel</button>
-            <button type="button" className="danger-action compact-danger" disabled={!selectedJobIds.length || loading} onClick={onRequestBulkDelete}>
-              <Trash2 size={16} /> Delete Selected
-            </button>
-          </div>
-        ) : (
-          <div className="jobs-feature-toolbar">
-            <button type="button" className="icon-button danger-icon" title="Select jobs to delete" onClick={() => setBulkMode(true)}>
-              <Trash2 size={17} />
-            </button>
-          </div>
-        )}
-        <div className="saved-list full-list">
-          {jobs.map((job) => (
-            <SavedJob
-              key={job.id}
-              job={job}
-              onSelect={onSelectJob}
-              menuOpen={menuId === job.id}
-              onToggleMenu={onToggleMenu}
-              onRequestDelete={onRequestDelete}
-              onOpenDescription={onOpenDescription}
-              selectable={bulkMode}
-              selected={selectedJobIds.includes(job.id)}
-              onToggleSelect={toggleJobSelection}
-            />
-          ))}
-        </div>
-      </section>
-      <section className="panel page-panel">
-        <PanelTitle icon={ClipboardList} title="Saved Prep Plans" subtitle="Open any plan to continue preparation." />
-        <div className="plan-list">
-          {savedPlans.length ? savedPlans.map((savedPlan) => (
-            <div className="plan-list-row" key={savedPlan.id} role="button" tabIndex={0} onClick={() => onOpenPlan(savedPlan.id)}>
-              <div>
-                <strong><span className="inline-color-dot" style={{ background: colorForJobId(savedPlan.job_post_id, jobMarkers, savedPlan.job_title) }} />{savedPlan.job_title}</strong>
-                <span>{savedPlan.days_until_interview} days left • {savedPlan.task_count} tasks</span>
+    <section className="guided-jobs-page">
+      <header className="guided-jobs-heading">
+        <div><small>Your opportunities</small><h1>Jobs</h1><p>Every role keeps its job analysis, plan, learning, practice, and readiness together.</p></div>
+        <button className="guided-primary-button" onClick={onAddJob}><Plus size={19} />Add a job</button>
+      </header>
+
+      <div className="guided-jobs-layout">
+        <aside className="guided-job-list-panel">
+          <div className="guided-job-search-row">
+            <label><Search size={18} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search jobs" /></label>
+            {deleteMode ? (
+              <div className="guided-delete-mode-actions">
+                <button className="cancel" title="Exit delete mode" onClick={cancelDeleteMode}><X size={18} /></button>
+                <button className="confirm" title="Delete selected jobs" disabled={!selectedJobIds.length || loading} onClick={requestSelectedDelete}><Check size={18} /></button>
               </div>
-              <button className="remove-button" onClick={(event) => { event.stopPropagation(); removePrepPlan(savedPlan.id); }}>Remove</button>
-            </div>
-          )) : <EmptyState text="Generate a prep plan from the dashboard and it will appear here." />}
+            ) : (
+              <button className="guided-delete-mode-trigger" title="Select jobs to delete" onClick={() => setDeleteMode(true)}><Trash2 size={17} /></button>
+            )}
+          </div>
+          {deleteMode && <div className="guided-delete-mode-label">Select the jobs to delete <strong>{selectedJobIds.length} selected</strong></div>}
+          <div className="guided-job-list">
+            {filteredJobs.map((job) => {
+              const jobPlan = savedPlans.find((savedPlan) => String(savedPlan.job_post_id) === String(job.id));
+              const selected = selectedJobIds.some((id) => String(id) === String(job.id));
+              const isCurrent = String(job.id) === String(selectedJob?.id);
+              const jobProgress = String(plan?.job_post_id) === String(job.id) ? readiness?.score ?? 0 : 0;
+              return (
+                <div className={`guided-job-list-row ${isCurrent && !deleteMode ? "selected" : ""} ${selected ? "checked" : ""}`} key={job.id}>
+                  {deleteMode && <input type="checkbox" checked={selected} onChange={() => toggleJobSelection(job.id)} aria-label={`Select ${job.title}`} />}
+                  <button onClick={() => chooseJob(job)}>
+                    <i style={{ backgroundColor: job.color || "#fc5b40" }} />
+                    <span><strong>{job.title}</strong><small>{job.company || companyFromUrl(job.source_url) || "Saved job"}</small><em>{jobPlan ? "Plan active" : "Job saved"}</em></span>
+                    <b>{jobProgress}%</b>
+                  </button>
+                </div>
+              );
+            })}
+            {!filteredJobs.length && <div className="guided-job-list-empty">No jobs match your search.</div>}
+          </div>
+          <button className="guided-manage-deleted" onClick={onManageDeleted}><Trash2 size={16} />Manage deleted jobs</button>
+        </aside>
+
+        <section className="guided-job-detail-panel">
+          {selectedJob ? (
+            <>
+              <header className="guided-job-detail-header">
+                <div><i style={{ backgroundColor: selectedJob.color || "#fc5b40" }} /><span><h2>{selectedJob.title}</h2><p>{selectedJob.company || companyFromUrl(selectedJob.source_url) || "Saved job"}{selectedJob.interview_at ? ` · ${new Date(selectedJob.interview_at).toLocaleDateString(undefined, { month: "long", day: "numeric" })}` : ""}</p></span></div>
+                <div className="job-menu-wrap">
+                  <button className="icon-button" aria-label="More job options" onClick={() => onToggleMenu(menuId === selectedJob.id ? null : selectedJob.id)}><MoreVertical size={21} /></button>
+                  {menuId === selectedJob.id && <div className="job-action-menu"><button onClick={() => onRequestDelete(selectedJob)}>Delete saved job</button></div>}
+                </div>
+              </header>
+              <div className="guided-job-tabs"><button className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Overview</button><button className={activeTab === "analysis" ? "active" : ""} onClick={() => setActiveTab("analysis")}>Job analysis</button></div>
+
+              {activeTab === "overview" ? (
+                <div className="guided-job-overview">
+                  <article className={`guided-job-plan-status ${matchingPlan ? "active" : "saved"}`}>
+                    {matchingPlan ? <CheckCircle2 size={22} /> : <BriefcaseBusiness size={22} />}
+                    <span><strong>{matchingPlan ? "Your preparation plan is active" : "This job is saved"}</strong><small>{matchingPlan ? `${matchingPlan.days_until_interview} days · ${matchingPlan.task_count} tasks${selectedPlanIsLoaded ? ` · ${completedPlanTasks} completed` : ""}` : "Generate a plan when you are ready to begin preparing."}</small></span>
+                    <button className="guided-secondary-button" onClick={() => matchingPlan ? onOpenPlan(matchingPlan.id) : onSelectJob(selectedJob)}>{matchingPlan ? "Open plan" : "Create plan"}</button>
+                  </article>
+                  <div className="guided-job-metrics">
+                    <GuidedJobMetric label="Readiness" value={`${readinessScore}%`} detail={readinessScore >= 70 ? "On track" : matchingPlan ? "Keep preparing" : "Plan not started"} />
+                    <GuidedJobMetric label="Next task" value={nextTask?.title?.replace(/^Read notes:\s*/i, "") || (matchingPlan ? "Open plan" : "Create plan")} detail={nextTask ? `${guidedTaskDuration(nextTask)} minutes` : matchingPlan ? `${matchingPlan.task_count} planned tasks` : "No tasks yet"} />
+                    <GuidedJobMetric label="Practice" value={`${practiceAttempts.length} ${practiceAttempts.length === 1 ? "attempt" : "attempts"}`} detail={practiceAttempts.length ? "Exams and mock interviews" : "No attempts yet"} />
+                  </div>
+                  <article className="guided-job-source-panel">
+                    <header><h3>Job source</h3>{isDescriptionSource ? <button onClick={() => setRawDescriptionOpen(true)}>View full job description</button> : <button onClick={() => copyText(selectedJob.source_url, "url")}>{copiedValue === "url" ? "Copied" : "Copy URL"}</button>}</header>
+                    {isDescriptionSource ? <p className="description-preview">{descriptionText || "Loading the saved job description..."}</p> : <p>{displayUrl(selectedJob.source_url)}</p>}
+                    {requiredSkills.length > 0 && <div className="guided-job-tags">{requiredSkills.slice(0, 6).map((skill) => <span key={skill}>{skill}</span>)}</div>}
+                  </article>
+                </div>
+              ) : (
+                <div className="guided-job-analysis-view">
+                  {detailLoading ? <div className="guided-job-analysis-loading"><Loader2 className="spin" size={20} />Loading job analysis...</div> : (
+                    <>
+                      <section><h3>What they are really looking for</h3><p>{lookingFor}</p></section>
+                      <div className="guided-job-analysis-grid">
+                        <section><h3>Must prepare</h3>{requiredSkills.length ? <ul>{requiredSkills.slice(0, 8).map((skill) => <li key={skill}>{skill}</li>)}</ul> : <p>No explicit skill requirements were detected.</p>}</section>
+                        <section><h3>Likely interview focus</h3>{interviewFocus.length ? <ul>{interviewFocus.map((focus) => <li key={focus}>{focus}</li>)}</ul> : <p>Open the AI analysis to identify detailed interview signals.</p>}</section>
+                      </div>
+                    </>
+                  )}
+                  <button className="guided-ask-job-ai" onClick={() => onOpenDescription(selectedJob)}><BrainCircuit size={21} /><span><strong>Ask AI about this job</strong><small>Your questions and answers stay with this role.</small></span><ChevronRight size={18} /></button>
+                </div>
+              )}
+            </>
+          ) : <EmptyState text="Add a job to start building your interview workspace." />}
+        </section>
+      </div>
+
+      {rawDescriptionOpen && selectedJob && (
+        <div className="modal-backdrop guided-raw-description-backdrop" role="dialog" aria-modal="true" aria-labelledby="raw-description-title" onMouseDown={() => setRawDescriptionOpen(false)}>
+          <section className="guided-raw-description-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header><div><small>Original pasted text</small><h2 id="raw-description-title">{selectedJob.title}</h2></div><button className="icon-button" onClick={() => setRawDescriptionOpen(false)}><X size={20} /></button></header>
+            <div className="guided-raw-description-text">{descriptionText || "The full saved description is still loading."}</div>
+            <footer><button className="guided-secondary-button" onClick={() => setRawDescriptionOpen(false)}>Close</button><button className="guided-primary-button" onClick={() => copyText(descriptionText, "description")}><Copy size={17} />{copiedValue === "description" ? "Copied" : "Copy description"}</button></footer>
+          </section>
         </div>
-      </section>
+      )}
     </section>
   );
+}
+
+function GuidedJobMetric({ label, value, detail }) {
+  return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
+}
+
+function summarizeJobForWorkspace(description, job) {
+  const clean = String(description || "").replace(/\s+/g, " ").trim();
+  if (!clean) return `Review the requirements and responsibilities for ${job?.title || "this role"} before preparing.`;
+  const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
+  return sentences.slice(0, 2).join(" ").trim();
 }
 
 function PrepPlanView({ plan, savedPlans, selectedPlanDay, setSelectedPlanDay, completedTasks, toggleTaskDone, loadPrepPlan, removePrepPlan, generateExam, startStudyTask, isStudyNoteGenerated, loading, loadingStudyTaskId, loadingExamTaskId, jobMarkers }) {
