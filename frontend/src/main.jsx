@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import MarketingLanding from "./MarketingLanding.jsx";
 import {
   Activity,
   BarChart3,
@@ -2053,11 +2054,13 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} theme-${theme}`}>
+    <div className={authToken ? `app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} theme-${theme}` : "marketing-host"}>
+      {authToken ? (
+        <>
       <aside className={`sidebar ${isAdmin ? "admin-sidebar" : ""}`}>
         <button className="brand" onClick={() => setActiveView("dashboard")}>
-          <BrainCircuit size={25} />
-          <span>InterviewPrep AI</span>
+          <img className="app-brand-logo" src="/prepinterview-logo.png" alt="" aria-hidden="true" />
+          <span>PrepInterview AI</span>
         </button>
 
         <nav className="nav-main">
@@ -2518,15 +2521,22 @@ function App() {
           <PlaceholderView title={viewTitle(activeView)} />
         )}
 
-        <footer>© 2026 InterviewPrep AI. All rights reserved. <span>Version 0.1.0</span></footer>
+        <footer>© 2026 PrepInterview AI. All rights reserved. <span>Version 0.1.0</span></footer>
       </main>
+        </>
+      ) : (
+        <MarketingLanding
+          onStart={() => openAuth("register")}
+          onSignIn={() => openAuth("login")}
+        />
+      )}
 
       {authOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
           <form className="auth-modal" onSubmit={submitAuth}>
             <div className="modal-head">
               <div>
-                <h2>{authMode === "register" ? "Create account" : authMode === "reset" ? "Reset password" : "Login"}</h2>
+                <h2 id="auth-modal-title">{authMode === "register" ? "Create account" : authMode === "reset" ? "Reset password" : "Login"}</h2>
                 <p>
                   {authMode === "register"
                     ? "Save your interview prep under your own account."
@@ -2535,7 +2545,7 @@ function App() {
                       : "Continue with your saved account."}
                 </p>
               </div>
-              <button type="button" className="icon-button" onClick={() => setAuthOpen(false)}><X size={18} /></button>
+              <button type="button" className="icon-button" aria-label="Close account dialog" onClick={() => setAuthOpen(false)}><X size={18} /></button>
             </div>
 
             {authMode === "register" && (
@@ -2861,7 +2871,7 @@ function App() {
         />
       )}
 
-      {onboardingMode && (
+      {authToken && onboardingMode && (
         <OnboardingCoachmark
           mode={onboardingMode}
           step={onboardingStep}
@@ -4661,7 +4671,7 @@ function InterviewDataView({
   async function copyPacket() {
     if (!selected) return;
     const packet = [
-      `InterviewPrep AI data packet`,
+      `PrepInterview AI data packet`,
       `Role: ${selected.title}`,
       `Company: ${selected.company || "Unknown"}`,
       `Plans: ${selected.plans.length}`,
@@ -6482,7 +6492,7 @@ function AboutView({ onBack }) {
     },
     {
       title: "Browser capture bubble",
-      body: "The extension lets users capture job descriptions while browsing job boards, save URLs, paste manually, or send selected job content into InterviewPrep AI without breaking their application workflow.",
+      body: "The extension lets users capture job descriptions while browsing job boards, save URLs, paste manually, or send selected job content into PrepInterview AI without breaking their application workflow.",
       detail: "The bubble connects to the logged-in account, saves jobs directly, and can trigger prep plan generation from the page where the opportunity was found.",
       visual: ["Capture", "Save", "Prepare"],
       metric: "07",
@@ -6494,7 +6504,7 @@ function AboutView({ onBack }) {
       <section className="about-hero">
         <button className="outline-action compact-action" onClick={onBack}>Back to Settings</button>
         <div className="about-hero-copy">
-          <h2>InterviewPrep AI</h2>
+          <h2>PrepInterview AI</h2>
           <p>A preparation operating system for interviews: one job post becomes a role-aware plan, focused study notes, realistic exams, voice mock interviews, and a progress loop that keeps every action connected to the target role.</p>
           <div className="about-hero-actions">
             <button className="primary" onClick={onBack}>Return to settings</button>
@@ -6530,7 +6540,7 @@ function AboutView({ onBack }) {
       <section className="about-story-section">
         <div>
           <h3>What happens inside the product</h3>
-          <p>InterviewPrep AI is built around one idea: preparation should be connected and measurable. The notes feed the exam. The exam feeds review. The mock interview matches the role. Progress shows what improved and what still needs work.</p>
+          <p>PrepInterview AI is built around one idea: preparation should be connected and measurable. The notes feed the exam. The exam feeds review. The mock interview matches the role. Progress shows what improved and what still needs work.</p>
         </div>
         <div className="story-metrics">
           <div><strong>1</strong><span>job post</span></div>
@@ -6612,7 +6622,7 @@ function AboutView({ onBack }) {
 
       <section className="about-mission">
         <h3>Our aim</h3>
-        <p>Make interview prep feel less random. Instead of scattered notes, generic questions, and last-minute anxiety, InterviewPrep AI builds a clean loop: learn the right topics, test them realistically, speak them out loud, review what happened, and improve before interview day.</p>
+        <p>Make interview prep feel less random. Instead of scattered notes, generic questions, and last-minute anxiety, PrepInterview AI builds a clean loop: learn the right topics, test them realistically, speak them out loud, review what happened, and improve before interview day.</p>
         <div className="mission-principles">
           <span>Role-specific</span>
           <span>Day-by-day</span>
@@ -7279,7 +7289,7 @@ function extensionLabel(extensionState = {}) {
 function extensionDescription(extensionState = {}, user) {
   if (extensionState.checking) return "Checking whether the browser extension is available in this browser.";
   if (!extensionState.installed) return "Install it once, then this toggle can control the capture bubble from the website.";
-  if (!user) return "Login to InterviewPrep AI so saved jobs and prep plans go to your account.";
+  if (!user) return "Login to PrepInterview AI so saved jobs and prep plans go to your account.";
   if (extensionState.bubbleEnabled) return "The capture bubble will appear on job pages where the extension has permission.";
   return "Turn it on when you want the draggable capture bubble on job pages.";
 }

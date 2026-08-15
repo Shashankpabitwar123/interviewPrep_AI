@@ -115,6 +115,13 @@ button {
   border-radius: 8px;
 }
 
+.app-brand-logo {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
 .nav-main,
 .nav-secondary {
   display: grid;
