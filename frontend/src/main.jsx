@@ -129,8 +129,8 @@ const DASHBOARD_TOUR_STEPS = [
   },
   {
     target: "[data-tour-nav='prep']",
-    title: "Use four simple workspaces",
-    body: "Today guides you, Jobs stores roles, Learn contains plans and notes, and Practice contains exams, mocks, and interview insights.",
+    title: "Use five simple workspaces",
+    body: "Today guides you, Jobs stores roles, Plan organizes your schedule, Notes keeps study material, and Practice contains exams, mocks, and interview insights.",
   },
   {
     target: "[data-tour='settings-button']",
@@ -2269,7 +2269,8 @@ function App() {
           />
         )}
 
-        {["prep", "notes"].includes(activeView) && <GuidedSectionTabs title="Learn" description="Follow your preparation plan and keep every explanation in one place." tabs={[{ id: "prep", label: "Plan" }, { id: "notes", label: "Notes" }]} active={activeView} onChange={setActiveView} />}
+        {activeView === "prep" && <GuidedSectionTabs title="Plan" description="Follow your day-by-day preparation plan for the selected job." tabs={[]} active={activeView} onChange={setActiveView} />}
+        {activeView === "notes" && <GuidedSectionTabs title="Notes" description="Create, organize, and review your interview study notes." tabs={[]} active={activeView} onChange={setActiveView} />}
         {["exams", "data"].includes(activeView) && <GuidedSectionTabs title="Practice" description="Test your knowledge, rehearse answers aloud, and review interview evidence." tabs={[{ id: "exams", label: "Exams & mocks" }, { id: "data", label: "Interview insights" }]} active={activeView} onChange={setActiveView} />}
         {["progress", "analytics"].includes(activeView) && <GuidedSectionTabs title="Readiness" description="See what is improving, what needs work, and the next best action." tabs={[{ id: "progress", label: "Overview" }, { id: "analytics", label: "Trends" }]} active={activeView} onChange={setActiveView} />}
 
@@ -2964,7 +2965,8 @@ function GuidedTopNavigation({ activeView, onNavigate, user, status, isAdmin, pr
   const navItems = [
     ["dashboard", "Today", Home, ["dashboard"]],
     ["jobs", "Jobs", BriefcaseBusiness, ["jobs"]],
-    ["prep", "Learn", BookOpen, ["prep", "notes"]],
+    ["prep", "Plan", ClipboardList, ["prep"]],
+    ["notes", "Notes", NotebookText, ["notes"]],
     ["exams", "Practice", MessageSquareText, ["exams", "data"]],
   ];
 
@@ -3145,7 +3147,7 @@ function GuidedTodayView({
                 <button className="guided-secondary-button" onClick={onOpenLearn}><ClipboardList size={18} />View full plan</button>
               </div>
             </>
-          ) : <EmptyState text="Your current day has no remaining tasks. Open Learn to choose another day." />}
+          ) : <EmptyState text="Your current day has no remaining tasks. Open Plan to choose another day." />}
           </article>
 
           <section className="guided-daily-plan-card" aria-label={`${selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} preparation tasks`}>
@@ -3273,7 +3275,7 @@ function GuidedSectionTabs({ title, description, tabs, active, onChange }) {
   return (
     <section className="guided-section-head">
       <div><h2>{title}</h2><p>{description}</p></div>
-      <div className="guided-section-tabs">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => onChange(tab.id)}>{tab.label}</button>)}</div>
+      {tabs.length > 0 && <div className="guided-section-tabs">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => onChange(tab.id)}>{tab.label}</button>)}</div>}
     </section>
   );
 }
@@ -7483,13 +7485,13 @@ function viewTitle(view) {
   const titles = {
     dashboard: "Today",
     jobs: "Jobs",
-    prep: "Learn",
+    prep: "Plan",
     exams: "Practice",
     data: "Practice",
     analytics: "Readiness",
     progress: "Readiness",
     calendar: "Schedule",
-    notes: "Learn",
+    notes: "Notes",
     developer: "Developer Dashboard",
     settings: "Settings",
     about: "About",

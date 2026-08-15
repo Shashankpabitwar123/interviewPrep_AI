@@ -1761,7 +1761,7 @@
     height: 68px;
     padding: 7px 8px;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 3px;
     border-top: 1px solid var(--approved-line-soft);
     background: color-mix(in srgb, var(--approved-canvas) 97%, transparent);
