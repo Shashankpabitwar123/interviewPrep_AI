@@ -44,6 +44,7 @@ import {
   NotebookText,
   Palette,
   Plus,
+  Play,
   RotateCcw,
   Save,
   Search,
@@ -52,6 +53,7 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  TrendingUp,
   Trash2,
   UserRound,
   UserPlus,
@@ -2226,6 +2228,9 @@ function App() {
         {activeView === "dashboard" && (
           <GuidedTodayView
             plan={plan}
+            planDays={planDays}
+            selectedPlanDay={selectedPlanDay}
+            setSelectedPlanDay={setSelectedPlanDay}
             jobs={jobs}
             selectedJob={selectedContextJob}
             visibleTasks={visibleTasks}
@@ -2986,8 +2991,16 @@ function GuidedTopNavigation({ activeView, onNavigate, user, status, isAdmin, pr
 function GuidedJobContextBar({ selectedJob, selectedPlan, jobs, jobMarkers, open, setOpen, onSelect, onAddJob }) {
   const role = selectedPlan?.job_title || selectedJob?.title || "Choose a job";
   const company = selectedJob?.company || companyFromUrl(selectedJob?.source_url) || "";
-  const interviewLabel = selectedJob?.interview_at
-    ? new Date(selectedJob.interview_at).toLocaleDateString(undefined, { month: "long", day: "numeric" })
+  const savedInterviewDate = selectedJob?.interview_at ? new Date(selectedJob.interview_at) : null;
+  const interviewDay = savedInterviewDate && !Number.isNaN(savedInterviewDate.getTime()) ? new Date(savedInterviewDate) : null;
+  const today = new Date();
+  interviewDay?.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  const daysAway = savedInterviewDate && !Number.isNaN(savedInterviewDate.getTime())
+    ? Math.max(0, Math.round((interviewDay.getTime() - today.getTime()) / 86400000))
+    : null;
+  const interviewLabel = savedInterviewDate && !Number.isNaN(savedInterviewDate.getTime())
+    ? `${savedInterviewDate.toLocaleDateString(undefined, { month: "long", day: "numeric" })} · ${daysAway === 0 ? "today" : `${daysAway} days away`}`
     : selectedPlan?.days_until_interview
       ? `${selectedPlan.days_until_interview} days away`
       : "date not set";
@@ -3023,11 +3036,12 @@ function GuidedJobContextBar({ selectedJob, selectedPlan, jobs, jobMarkers, open
 
 function GuidedTodayView({
   plan,
-  jobs,
+  planDays,
+  selectedPlanDay,
+  setSelectedPlanDay,
   selectedJob,
   visibleTasks,
   completedTasks,
-  activity,
   readiness,
   streak,
   examAttempts,
@@ -3036,28 +3050,31 @@ function GuidedTodayView({
   loadingExamTaskId,
   isStudyNoteGenerated,
   onAddJob,
-  onOpenJobs,
   onOpenLearn,
-  onOpenPractice,
   onOpenReadiness,
-  onOpenSchedule,
   onStartTask,
   onToggleTask,
-  onOpenActivity,
 }) {
   const [whyOpen, setWhyOpen] = useState(false);
-  const nextTask = visibleTasks.find((task) => !isTaskComplete(task, completedTasks)) || visibleTasks[0];
-  const completedToday = visibleTasks.filter((task) => isTaskComplete(task, completedTasks)).length;
-  const completeExams = examAttempts.filter((attempt) => ["complete", "completed", "submitted"].includes(attempt.status) || attempt.result || attempt.score !== undefined).length;
-  const completeMocks = mockAttempts.filter((attempt) => ["complete", "completed", "submitted"].includes(attempt.status) || attempt.result || attempt.score !== undefined).length;
-  const planScore = readiness?.components?.find((component) => component.key === "plan")?.score || 0;
+  const initializedPlanRef = useRef(null);
+  const preparationDays = buildGuidedPreparationDays(planDays, selectedJob, plan);
+  const selectedDay = preparationDays.find((day) => day.day === selectedPlanDay) || preparationDays[0];
+  const completedForSelectedDay = visibleTasks.filter((task) => isTaskComplete(task, completedTasks)).length;
+  const nextTaskIndex = visibleTasks.findIndex((task) => !isTaskComplete(task, completedTasks));
+  const currentTaskIndex = nextTaskIndex >= 0 ? nextTaskIndex : Math.max(visibleTasks.length - 1, 0);
+  const currentTask = visibleTasks[currentTaskIndex];
+  const selectedDayComplete = visibleTasks.length > 0 && completedForSelectedDay === visibleTasks.length;
   const company = selectedJob?.company || companyFromUrl(selectedJob?.source_url) || "your target company";
-  const journeySteps = [
-    { title: "Job understood", detail: "Role requirements and interview signals", state: "complete", Icon: ClipboardList, action: onOpenJobs },
-    { title: "Core skills", detail: "Learn the concepts that matter most", state: planScore >= 95 ? "complete" : "active", Icon: BarChart3, action: onOpenLearn },
-    { title: "Practice questions", detail: "Build accuracy and speed", state: completeExams ? "complete" : "next", Icon: FileQuestion, action: onOpenPractice },
-    { title: "Mock interview", detail: "Rehearse answers and get feedback", state: completeMocks ? "complete" : "later", Icon: MessageSquareText, action: onOpenPractice },
-  ];
+  const interviewDate = guidedInterviewDate(selectedJob, plan, preparationDays.length);
+  const selectedTopic = guidedTopicSummary(visibleTasks, selectedDay?.day || 1);
+  const planIdentity = plan?.prep_plan_id || plan?.id || plan?.job_post_id || null;
+
+  useEffect(() => {
+    if (!planIdentity || initializedPlanRef.current === planIdentity) return;
+    initializedPlanRef.current = planIdentity;
+    const todayPlanDay = preparationDays.find((day) => day.isToday);
+    if (todayPlanDay) setSelectedPlanDay(todayPlanDay.day);
+  }, [planIdentity, preparationDays, setSelectedPlanDay]);
 
   if (!plan) {
     return (
@@ -3088,16 +3105,20 @@ function GuidedTodayView({
       <div className="guided-today-layout">
         <section className="guided-today-main">
           <article className="guided-next-step-card" data-tour="today-next-step">
-            <div className="guided-next-step-eyebrow"><span>Your next best step</span><button onClick={() => setWhyOpen((current) => !current)}><Info size={18} />Why this task?</button></div>
-          {nextTask ? (
+            <div className="guided-next-step-eyebrow">
+              <span>{selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} · Task {Math.min(currentTaskIndex + 1, visibleTasks.length)} of {visibleTasks.length}</span>
+              <button onClick={() => setWhyOpen((current) => !current)}><Info size={18} />Why this task?</button>
+            </div>
+          {currentTask ? (
             <>
-              <h3>{nextTask.title}</h3>
-              <p>{nextTask.instructions || `Focus on ${(nextTask.topics || []).join(", ") || "the next role-specific topic"} before moving to practice.`}</p>
-              {whyOpen && <div className="guided-why-task"><BrainCircuit size={19} /><span><strong>Why this comes next:</strong> This task is next in your {plan.days_until_interview}-day plan for {company} and feeds directly into your readiness score.</span></div>}
+              <div className="guided-task-type-line"><span>{guidedTaskTypeLabel(currentTask)}</span><i />{guidedTaskDuration(currentTask)} min</div>
+              <h3>{selectedDayComplete ? `${selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} is complete` : currentTask.title}</h3>
+              <p>{selectedDayComplete ? "You finished every scheduled task for this preparation day. Select another day in Interview progress to preview what is coming." : currentTask.instructions || `Focus on ${(currentTask.topics || []).join(", ") || "the next role-specific topic"} before moving to practice.`}</p>
+              {whyOpen && <div className="guided-why-task"><BrainCircuit size={19} /><span><strong>Why this comes next:</strong> Your plan orders each activity so it builds on the work immediately before it and improves your readiness for {company}.</span></div>}
               <div className="guided-hero-actions">
-                <button className="guided-primary-button" onClick={() => onStartTask(nextTask)} disabled={isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId)}>
-                  {isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId) ? <Loader2 className="spin" size={17} /> : nextTask.task_type === "practice_exam" ? <FileQuestion size={17} /> : <BookOpen size={17} />}
-                  {isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId) ? "Preparing..." : isStudyNoteGenerated(nextTask) ? "Open next task" : "Start next task"}
+                <button className="guided-primary-button" onClick={() => onStartTask(currentTask)} disabled={selectedDayComplete || isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId)}>
+                  {isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId) ? <Loader2 className="spin" size={17} /> : <Play size={18} fill="currentColor" />}
+                  {selectedDayComplete ? "Day complete" : isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId) ? "Preparing..." : isStudyNoteGenerated(currentTask) ? "Open task" : "Start task"}
                 </button>
                 <button className="guided-secondary-button" onClick={onOpenLearn}><ClipboardList size={18} />View full plan</button>
               </div>
@@ -3105,30 +3126,55 @@ function GuidedTodayView({
           ) : <EmptyState text="Your current day has no remaining tasks. Open Learn to choose another day." />}
           </article>
 
-          <section className="guided-journey" aria-label="Interview preparation journey">
-            {journeySteps.map((step, index) => (
-              <button className={`guided-journey-step ${step.state}`} key={step.title} onClick={step.action}>
-                <span className="guided-journey-marker">{step.state === "complete" ? <Check size={17} /> : index + 1}</span>
-                <span className="guided-journey-icon"><step.Icon size={25} /></span>
-                <span className="guided-journey-copy"><strong>{step.title}</strong><small>{step.detail}</small></span>
-                <em>{step.state === "complete" ? "Complete" : step.state === "active" ? "In progress" : step.state === "next" ? "Next" : "Later"}</em>
-                <ChevronRight size={18} />
-              </button>
-            ))}
+          <section className="guided-daily-plan-card" aria-label={`${selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} preparation tasks`}>
+            <header>
+              <span><small>{selectedDay?.monthDay || `Day ${selectedPlanDay}`}</small><h2>{selectedDay?.relativeLabel || `Day ${selectedPlanDay}`}&apos;s tasks</h2></span>
+              <strong>{completedForSelectedDay}/{visibleTasks.length} completed</strong>
+            </header>
+            <progress max={Math.max(visibleTasks.length, 1)} value={completedForSelectedDay} />
+            <div className="guided-daily-task-list">
+              {visibleTasks.map((task, index) => {
+                const complete = isTaskComplete(task, completedTasks);
+                const active = !selectedDayComplete && index === currentTaskIndex;
+                const Icon = task.task_type === "practice_exam" ? FileQuestion : FileText;
+                return (
+                  <article className={`guided-daily-task-row ${complete ? "complete" : active ? "active" : "upcoming"}`} key={task.id || task.title}>
+                    <button className="guided-daily-task-check" onClick={() => onToggleTask(task)} aria-label={`${complete ? "Mark incomplete" : "Mark complete"}: ${task.title}`}>
+                      {complete ? <Check size={16} /> : index + 1}
+                    </button>
+                    <span className="guided-daily-task-icon"><Icon size={21} /></span>
+                    <button className="guided-daily-task-copy" onClick={() => onStartTask(task)}>
+                      <strong>{task.title}</strong>
+                      <small>{guidedTaskTypeLabel(task)} · {guidedTaskDuration(task)} min</small>
+                    </button>
+                    <em>{complete ? "Completed" : active ? "In progress" : "Not started"}</em>
+                    <button className="guided-daily-task-open" onClick={() => onStartTask(task)} aria-label={`Open ${task.title}`}><ChevronRight size={18} /></button>
+                  </article>
+                );
+              })}
+            </div>
           </section>
         </section>
 
         <aside className="guided-today-side">
-          <article className="guided-side-card guided-schedule-card" data-tour="today-week">
-            <header><CalendarDays size={24} /><h2>This week</h2></header>
-            <div className="guided-upcoming-list">
-              {visibleTasks.slice(0, 3).map((task, index) => {
-                const taskDate = new Date();
-                taskDate.setDate(taskDate.getDate() + Math.max(0, (task.day || index + 1) - 1));
-                return <button key={task.id || task.title} className="guided-upcoming-row" onClick={() => onStartTask(task)}><span className="guided-date-block"><small>{taskDate.toLocaleDateString(undefined, { month: "short" }).toUpperCase()}</small><strong>{taskDate.getDate()}</strong></span>{task.task_type === "practice_exam" ? <FileQuestion size={22} /> : <FileText size={22} />}<span><strong>{task.title}</strong><small>{task.duration_minutes || 30} min</small></span><em>{index === 0 ? "Today" : index === 1 ? "Next" : "Later"}</em></button>;
+          <article className="guided-side-card guided-progress-meter-card" data-tour="today-week">
+            <header><TrendingUp size={24} /><h2>Interview progress</h2></header>
+            <div className="guided-progress-meter-heading"><strong>{preparationDays.length} preparation days</strong><span>Interview {interviewDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span></div>
+            <div className="guided-interview-day-meter" aria-label="Preparation progress by day">
+              {preparationDays.map((day) => {
+                const dayTasks = buildDailyStudyTasks(plan, day.day);
+                const completedCount = dayTasks.filter((task) => isTaskComplete(task, completedTasks)).length;
+                const status = dayTasks.length > 0 && completedCount === dayTasks.length ? "complete" : day.day === selectedPlanDay ? "in-progress" : "upcoming";
+                return (
+                  <button key={day.day} className={`${status} ${day.day === selectedPlanDay ? "selected" : ""}`} onClick={() => setSelectedPlanDay(day.day)} aria-label={`${day.monthDay}: ${status.replace("-", " ")}`}>
+                    <span>{status === "complete" ? <Check size={13} /> : day.date.getDate()}</span>
+                    <small>{day.shortLabel}</small>
+                  </button>
+                );
               })}
             </div>
-            <button className="guided-text-button" onClick={onOpenSchedule}>View full schedule <ChevronRight size={17} /></button>
+            <div className="guided-interview-endpoint"><Target size={18} /><span><strong>Interview day</strong><small>{interviewDate.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</small></span></div>
+            <div className="guided-selected-day-topic"><small>{selectedDay?.isToday ? "Today’s topic" : `${selectedDay?.monthDay || `Day ${selectedPlanDay}`} topics`}</small><strong>{selectedTopic}</strong></div>
           </article>
 
           <button className="guided-side-card guided-readiness-preview" data-tour="today-readiness" onClick={onOpenReadiness}>
@@ -3138,13 +3184,67 @@ function GuidedTodayView({
             <span className="guided-text-button">See what&apos;s driving this score <ChevronRight size={17} /></span>
           </button>
 
-          <div className="guided-today-streak"><Flame size={19} /><strong>{completedToday}/{Math.max(visibleTasks.length, 1)}</strong><span>tasks completed today</span><small>{streak.count} day streak</small></div>
+          <div className="guided-today-streak"><Flame size={19} /><strong>{completedForSelectedDay}/{Math.max(visibleTasks.length, 1)}</strong><span>tasks completed {selectedDay?.isToday ? "today" : "for this day"}</span><small>{streak.count} day streak</small></div>
         </aside>
 
-        <button className="guided-onboarding-cue" onClick={onAddJob}><Sparkles size={22} /><span><strong>Preparing for another role?</strong> Add a job and every step stays organized separately.</span><Plus size={18} /></button>
+        <button className="guided-onboarding-cue" onClick={onAddJob}><Sparkles size={22} /><span><strong>New here?</strong> Add a job and we&apos;ll guide each step.</span><Plus size={18} /></button>
       </div>
     </section>
   );
+}
+
+function buildGuidedPreparationDays(planDays, selectedJob, plan) {
+  const maxTaskDay = Math.max(0, ...(planDays || []).map((day) => Number(day.day) || 0));
+  const totalDays = Math.max(1, Number(plan?.days_until_interview) || 0, maxTaskDay);
+  const interviewDate = guidedInterviewDate(selectedJob, plan, totalDays);
+  const startDate = new Date(interviewDate);
+  startDate.setHours(0, 0, 0, 0);
+  startDate.setDate(startDate.getDate() - totalDays);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return Array.from({ length: totalDays }, (_, index) => {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + index);
+    const difference = Math.round((date.getTime() - today.getTime()) / 86400000);
+    return {
+      day: index + 1,
+      date,
+      isToday: difference === 0,
+      relativeLabel: difference === 0 ? "Today" : difference === 1 ? "Tomorrow" : `Day ${index + 1}`,
+      shortLabel: difference === 0 ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" }),
+      monthDay: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    };
+  });
+}
+
+function guidedInterviewDate(selectedJob, plan, totalDays) {
+  const savedDate = selectedJob?.interview_at ? new Date(selectedJob.interview_at) : null;
+  if (savedDate && !Number.isNaN(savedDate.getTime())) return savedDate;
+  const date = new Date();
+  date.setDate(date.getDate() + Math.max(1, Number(plan?.days_until_interview) || totalDays || 1));
+  return date;
+}
+
+function guidedTaskTypeLabel(task) {
+  if (task?.task_type === "practice_exam") return "Exam";
+  if (task?.task_type === "mock_interview") return "Mock interview";
+  if (task?.task_type === "diagnostic") return "Overview";
+  return "Notes";
+}
+
+function guidedTaskDuration(task) {
+  if (task?.duration_minutes) return task.duration_minutes;
+  if (task?.task_type === "practice_exam") return 30;
+  if (task?.task_type === "mock_interview") return 45;
+  return 35;
+}
+
+function guidedTopicSummary(tasks, day) {
+  const topics = [...new Set((tasks || []).flatMap((task) => task.topics || []).filter(Boolean))].slice(0, 2);
+  const fallback = (tasks || []).find((task) => task.task_type !== "practice_exam")?.title?.replace(/^Read notes:\s*/i, "") || "Role preparation";
+  const summary = topics.length ? topics.join(" · ") : fallback;
+  return `${day === 1 ? "Overview" : "Focus"}: ${summary}`;
 }
 
 function GuidedSectionTabs({ title, description, tabs, active, onChange }) {
@@ -6941,8 +7041,7 @@ function isPlanDayComplete(plan, day, completedTasks) {
 }
 
 function countCompletedDayTasks(dayTasks, completedTasks) {
-  const today = dateKey(new Date());
-  return dayTasks.filter((task) => Boolean(completedTasks[`${today}:task:${task.id || task.title}`])).length;
+  return dayTasks.filter((task) => isTaskComplete(task, completedTasks)).length;
 }
 
 function topicsForStudyDay(plan, day) {
