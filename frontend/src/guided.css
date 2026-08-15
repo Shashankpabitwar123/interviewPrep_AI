@@ -627,10 +627,10 @@
 }
 
 .guided-job-modal {
-  width: min(920px, 100%);
-  max-height: calc(100vh - 48px);
+  width: min(760px, 100%);
+  max-height: min(900px, calc(100vh - 48px));
   overflow: auto;
-  padding: 28px;
+  padding: 26px;
   border: 1px solid #344158;
   border-radius: 14px;
   background: #0c172a;
@@ -652,7 +652,7 @@
 }
 
 .guided-job-modal h2 {
-  font-size: 30px;
+  font-size: 25px;
   letter-spacing: -0.04em;
 }
 
@@ -666,12 +666,12 @@
   margin: 24px 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 9px;
 }
 
 .guided-method-tabs > button {
-  min-height: 92px;
-  padding: 15px;
+  min-height: 82px;
+  padding: 12px;
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
@@ -705,7 +705,7 @@
 
 .guided-job-form {
   display: grid;
-  gap: 15px;
+  gap: 14px;
 }
 
 .guided-job-form label {
@@ -726,8 +726,8 @@
 .guided-job-form input,
 .guided-job-form textarea {
   width: 100%;
-  min-height: 48px;
-  padding: 0 13px;
+  min-height: 45px;
+  padding: 0 12px;
   border: 1px solid #344158;
   border-radius: 7px;
   outline: 0;
@@ -736,8 +736,8 @@
 }
 
 .guided-job-form textarea {
-  min-height: 180px;
-  padding: 13px;
+  min-height: 170px;
+  padding: 12px;
   resize: vertical;
 }
 
@@ -754,7 +754,7 @@
 }
 
 .guided-job-modal > footer {
-  margin-top: 22px;
+  margin-top: 24px;
   padding-top: 20px;
   display: flex;
   justify-content: flex-end;
