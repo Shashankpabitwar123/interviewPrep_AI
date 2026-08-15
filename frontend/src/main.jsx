@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import MarketingLanding from "./MarketingLanding.jsx";
+import "@fontsource/public-sans/400.css";
+import "@fontsource/public-sans/500.css";
+import "@fontsource/public-sans/600.css";
+import "@fontsource/public-sans/700.css";
 import {
   Activity,
   BarChart3,
@@ -35,7 +39,6 @@ import {
   Loader2,
   LogIn,
   LogOut,
-  Menu,
   MessageSquareText,
   MoreVertical,
   NotebookText,
@@ -48,6 +51,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Target,
   Trash2,
   UserRound,
   UserPlus,
@@ -56,6 +60,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 import "./guided.css";
+import "./approved-guided.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const EXTENSION_GUIDE_URL = "https://github.com/Shashankpabitwar123/interviewPrep_AI/tree/main/browser-extension";
@@ -253,7 +258,8 @@ function App() {
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [readinessReport, setReadinessReport] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [jobSwitcherOpen, setJobSwitcherOpen] = useState(false);
   const [selectedPlanDay, setSelectedPlanDay] = useState(1);
   const [user, setUser] = useState(() => loadSavedUser());
   const [authToken, setAuthToken] = useState(() => loadSavedToken());
@@ -2179,102 +2185,56 @@ function App() {
     setActiveView(item.target || targetForActivity(item.type));
   }
 
+  const selectedContextJob = jobs.find((job) => String(job.id) === String(plan?.job_post_id || selectedJobId)) || jobs[0] || null;
+
   return (
-    <div className={authToken ? `app-shell guided-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} theme-${theme}` : "marketing-host"}>
+    <div className={authToken ? `guided-shell theme-${theme}` : "marketing-host"}>
       {authToken ? (
         <>
-      <aside className={`sidebar ${isAdmin ? "admin-sidebar" : ""}`}>
-        <button className="brand" onClick={() => setActiveView("dashboard")}>
-          <img className="app-brand-logo" src="/prepinterview-logo.png" alt="" aria-hidden="true" />
-          <span>PrepInterview AI</span>
-        </button>
+          <GuidedTopNavigation
+            activeView={activeView}
+            onNavigate={(nextView) => {
+              setActiveView(nextView);
+              setProfileMenuOpen(false);
+              setJobSwitcherOpen(false);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            user={user}
+            status={status}
+            isAdmin={isAdmin}
+            profileOpen={profileMenuOpen}
+            setProfileOpen={setProfileMenuOpen}
+            onOpenSettings={() => {
+              setSettingsOpen(true);
+              setProfileMenuOpen(false);
+            }}
+            onLogout={logout}
+          />
 
-        <nav className="nav-main">
-          <NavItem icon={Home} label="Today" tourKey="dashboard" active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} />
-          <NavItem icon={BriefcaseBusiness} label="Jobs" tourKey="jobs" active={activeView === "jobs"} onClick={() => setActiveView("jobs")} />
-          <NavItem icon={BookOpen} label="Learn" tourKey="prep" active={["prep", "notes"].includes(activeView)} onClick={() => setActiveView("prep")} />
-          <NavItem icon={MessageSquareText} label="Practice" tourKey="exams" active={["exams", "data"].includes(activeView)} onClick={() => setActiveView("exams")} />
-        </nav>
-
-        <div className="guided-sidebar-context">
-          <span>Current job</span>
-          <strong>{plan?.job_title || "No job selected"}</strong>
-          <small>{plan ? `${plan.days_until_interview} days until interview` : "Add a job to begin"}</small>
-        </div>
-
-        <div className="sidebar-footer">
-          <NavItem icon={Settings} label="Settings" tourKey="settings" active={settingsOpen} onClick={() => setSettingsOpen((current) => !current)} settingsToggle />
-          {isAdmin && <NavItem icon={ShieldCheck} label="Admin" tourKey="developer" active={activeView === "developer"} onClick={() => setActiveView("developer")} />}
-          <NavItem icon={LogOut} label="Log out" onClick={logout} />
-          {settingsOpen && (
-            <>
-              <button type="button" className="settings-dismiss-layer" aria-label="Close settings" onClick={() => setSettingsOpen(false)} />
-              <SettingsView
-                user={user}
-                status={status}
-                theme={theme}
-                setTheme={setTheme}
-                soundVolume={soundVolume}
-                setSoundVolume={setSoundVolume}
-                allowLocalFallback={allowLocalFallback}
-                setAllowLocalFallback={setAllowLocalFallback}
-                deletedJobs={deletedJobs}
-                extensionState={extensionState}
-                restoreDeletedJob={restoreDeletedJob}
-                clearDeletedJob={clearDeletedJob}
-                loading={loading}
-                onToggleExtension={toggleExtensionBubble}
-                onInstallExtension={() => window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer")}
-                onRefreshExtension={refreshExtensionState}
-                onDeleteAccount={() => setConfirmDeleteAccount(true)}
-                onClose={() => setSettingsOpen(false)}
-                onReplayOnboarding={replayOnboarding}
-                onKnowMore={() => {
-                  setSettingsOpen(false);
-                  setActiveView("about");
-                }}
-              />
-            </>
-          )}
-        </div>
-      </aside>
-
-      <main className="workspace">
-        <header className="topbar">
-          <div className="top-left">
-            <button className="icon-button" onClick={() => setSidebarCollapsed((current) => !current)}><Menu size={19} /></button>
-            <h1>{viewTitle(activeView)}</h1>
-          </div>
-          <div className="top-actions">
-            <StatusIndicator status={status} />
-            <button className={`guided-utility ${["progress", "analytics"].includes(activeView) ? "active" : ""}`} onClick={() => setActiveView("progress")}><Activity size={17} />Readiness</button>
-            <button className={`guided-utility ${activeView === "calendar" ? "active" : ""}`} onClick={() => setActiveView("calendar")}><CalendarDays size={17} />Schedule</button>
-            <button className="primary guided-add-job" onClick={openAddJobModal}><Plus size={17} />Add job</button>
-            {user ? (
-              <div className="profile account-profile">
-                <span>{initialsFor(user.name)}</span>
-                <strong>{user.name}</strong>
-                <button className="icon-button" title="Log out" onClick={logout}><LogOut size={17} /></button>
-              </div>
-            ) : (
-              <div className="guest-auth">
-                <div className="profile guest-profile"><span>G</span><strong>Guest</strong></div>
-                <button className="auth-link" onClick={() => openAuth("login")}><LogIn size={16} /> Login</button>
-                <button className="auth-primary" onClick={() => openAuth("register")}><UserPlus size={16} /> Create Account</button>
-              </div>
-            )}
-          </div>
-        </header>
+          <main className="guided-app-main">
+            <GuidedJobContextBar
+              selectedJob={selectedContextJob}
+              selectedPlan={plan}
+              jobs={jobs}
+              jobMarkers={jobMarkers}
+              open={jobSwitcherOpen}
+              setOpen={setJobSwitcherOpen}
+              onSelect={useSavedJob}
+              onAddJob={openAddJobModal}
+            />
 
         {activeView === "dashboard" && (
           <GuidedTodayView
             plan={plan}
             jobs={jobs}
+            selectedJob={selectedContextJob}
             visibleTasks={visibleTasks}
             completedTasks={completedTasks}
             activity={activity}
             readiness={readinessReport}
             streak={streak}
+            examAttempts={examAttempts}
+            mockAttempts={mockAttempts}
             loadingStudyTaskId={loadingStudyTaskId}
             loadingExamTaskId={loadingExamTaskId}
             isStudyNoteGenerated={isStudyNoteGenerated}
@@ -2503,8 +2463,41 @@ function App() {
           <PlaceholderView title={viewTitle(activeView)} />
         )}
 
-        <footer>© 2026 PrepInterview AI. All rights reserved. <span>Version 0.1.0</span></footer>
+        <footer className="guided-footer">© 2026 PrepInterview AI. All rights reserved. <span>Version 0.1.0</span></footer>
       </main>
+
+          {settingsOpen && (
+            <>
+              <button type="button" className="settings-dismiss-layer" aria-label="Close settings" onClick={() => setSettingsOpen(false)} />
+              <div className="guided-settings-anchor">
+                <SettingsView
+                  user={user}
+                  status={status}
+                  theme={theme}
+                  setTheme={setTheme}
+                  soundVolume={soundVolume}
+                  setSoundVolume={setSoundVolume}
+                  allowLocalFallback={allowLocalFallback}
+                  setAllowLocalFallback={setAllowLocalFallback}
+                  deletedJobs={deletedJobs}
+                  extensionState={extensionState}
+                  restoreDeletedJob={restoreDeletedJob}
+                  clearDeletedJob={clearDeletedJob}
+                  loading={loading}
+                  onToggleExtension={toggleExtensionBubble}
+                  onInstallExtension={() => window.open(EXTENSION_GUIDE_URL, "_blank", "noopener,noreferrer")}
+                  onRefreshExtension={refreshExtensionState}
+                  onDeleteAccount={() => setConfirmDeleteAccount(true)}
+                  onClose={() => setSettingsOpen(false)}
+                  onReplayOnboarding={replayOnboarding}
+                  onKnowMore={() => {
+                    setSettingsOpen(false);
+                    setActiveView("about");
+                  }}
+                />
+              </div>
+            </>
+          )}
         </>
       ) : (
         <MarketingLanding
@@ -2940,14 +2933,105 @@ function OnboardingCoachmark({ mode, step, isAdmin, onNext, onSkip, onClose }) {
   );
 }
 
+function GuidedTopNavigation({ activeView, onNavigate, user, status, isAdmin, profileOpen, setProfileOpen, onOpenSettings, onLogout }) {
+  const navItems = [
+    ["dashboard", "Today", Home, ["dashboard"]],
+    ["jobs", "Jobs", BriefcaseBusiness, ["jobs"]],
+    ["prep", "Learn", BookOpen, ["prep", "notes"]],
+    ["exams", "Practice", MessageSquareText, ["exams", "data"]],
+  ];
+
+  return (
+    <header className="guided-top-navigation">
+      <button className="guided-brand-lockup" onClick={() => onNavigate("dashboard")} aria-label="PrepInterview AI home">
+        <img src="/prepinterview-logo.png" alt="" aria-hidden="true" />
+        <span>PrepInterview AI</span>
+      </button>
+
+      <nav className="guided-primary-navigation" aria-label="Primary navigation">
+        {navItems.map(([id, label, Icon, views]) => (
+          <button key={id} data-tour-nav={id} className={views.includes(activeView) ? "active" : ""} onClick={() => onNavigate(id)}>
+            <Icon size={19} strokeWidth={1.8} />
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <div className="guided-top-tools">
+        <span className="guided-current-date"><CalendarDays size={18} />{new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>
+        <div className="guided-profile-wrap">
+          <button className="guided-profile-trigger" onClick={() => setProfileOpen((current) => !current)} aria-expanded={profileOpen}>
+            <span>{initialsFor(user?.name)}</span>
+            <strong>{user?.name?.split(" ")[0] || "User"}</strong>
+            <ChevronDown size={15} />
+          </button>
+          {profileOpen && (
+            <div className="guided-profile-menu">
+              <div className="guided-profile-status"><StatusIndicator status={status} /><span>{user?.email}</span></div>
+              <button onClick={() => onNavigate("progress")}><Target size={18} />Readiness</button>
+              <button onClick={() => onNavigate("calendar")}><CalendarDays size={18} />Full schedule</button>
+              <button data-settings-toggle="true" data-tour="settings-button" onClick={onOpenSettings}><Settings size={18} />Settings</button>
+              <button onClick={() => onNavigate("about")}><Info size={18} />About PrepInterview AI</button>
+              {isAdmin && <button onClick={() => onNavigate("developer")}><ShieldCheck size={18} />Admin tools <small>Admin</small></button>}
+              <div className="guided-menu-separator" />
+              <button onClick={onLogout}><LogOut size={18} />Log out</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function GuidedJobContextBar({ selectedJob, selectedPlan, jobs, jobMarkers, open, setOpen, onSelect, onAddJob }) {
+  const role = selectedPlan?.job_title || selectedJob?.title || "Choose a job";
+  const company = selectedJob?.company || companyFromUrl(selectedJob?.source_url) || "";
+  const interviewLabel = selectedJob?.interview_at
+    ? new Date(selectedJob.interview_at).toLocaleDateString(undefined, { month: "long", day: "numeric" })
+    : selectedPlan?.days_until_interview
+      ? `${selectedPlan.days_until_interview} days away`
+      : "date not set";
+
+  return (
+    <section className="guided-job-context-row">
+      <div className="guided-job-switcher-wrap">
+        <button className="guided-job-switcher" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+          <BriefcaseBusiness size={25} />
+          <span>
+            <strong>{company ? `${role} at ${company}` : role}</strong>
+            <small>{selectedJob || selectedPlan ? `Interview ${interviewLabel}` : "Add a role to start your guided preparation"}</small>
+          </span>
+          <ChevronDown size={18} />
+        </button>
+        {open && (
+          <div className="guided-job-switcher-menu">
+            <header><strong>Switch job</strong><span>Your plan, notes, practice, and progress update together.</span></header>
+            {jobs.length ? jobs.map((job) => (
+              <button key={job.id} className={String(selectedJob?.id) === String(job.id) ? "selected" : ""} onClick={() => { onSelect(job); setOpen(false); }}>
+                <i style={{ backgroundColor: colorForJobId(job.id, jobMarkers, job.title) }} />
+                <span><strong>{job.title}</strong><small>{job.company || companyFromUrl(job.source_url) || "Saved job"}</small></span>
+                {String(selectedJob?.id) === String(job.id) && <Check size={16} />}
+              </button>
+            )) : <p>No saved jobs yet.</p>}
+          </div>
+        )}
+      </div>
+      <button className="guided-secondary-button guided-add-job-button" onClick={onAddJob}><Plus size={19} />Add a job</button>
+    </section>
+  );
+}
+
 function GuidedTodayView({
   plan,
   jobs,
+  selectedJob,
   visibleTasks,
   completedTasks,
   activity,
   readiness,
   streak,
+  examAttempts,
+  mockAttempts,
   loadingStudyTaskId,
   loadingExamTaskId,
   isStudyNoteGenerated,
@@ -2961,10 +3045,23 @@ function GuidedTodayView({
   onToggleTask,
   onOpenActivity,
 }) {
+  const [whyOpen, setWhyOpen] = useState(false);
   const nextTask = visibleTasks.find((task) => !isTaskComplete(task, completedTasks)) || visibleTasks[0];
+  const completedToday = visibleTasks.filter((task) => isTaskComplete(task, completedTasks)).length;
+  const completeExams = examAttempts.filter((attempt) => ["complete", "completed", "submitted"].includes(attempt.status) || attempt.result || attempt.score !== undefined).length;
+  const completeMocks = mockAttempts.filter((attempt) => ["complete", "completed", "submitted"].includes(attempt.status) || attempt.result || attempt.score !== undefined).length;
+  const planScore = readiness?.components?.find((component) => component.key === "plan")?.score || 0;
+  const company = selectedJob?.company || companyFromUrl(selectedJob?.source_url) || "your target company";
+  const journeySteps = [
+    { title: "Job understood", detail: "Role requirements and interview signals", state: "complete", Icon: ClipboardList, action: onOpenJobs },
+    { title: "Core skills", detail: "Learn the concepts that matter most", state: planScore >= 95 ? "complete" : "active", Icon: BarChart3, action: onOpenLearn },
+    { title: "Practice questions", detail: "Build accuracy and speed", state: completeExams ? "complete" : "next", Icon: FileQuestion, action: onOpenPractice },
+    { title: "Mock interview", detail: "Rehearse answers and get feedback", state: completeMocks ? "complete" : "later", Icon: MessageSquareText, action: onOpenPractice },
+  ];
+
   if (!plan) {
     return (
-      <section className="guided-today guided-empty-today" data-tour-page="dashboard">
+      <section className="guided-approved-today guided-empty-today" data-tour-page="dashboard">
         <div className="guided-welcome" data-tour="today-next-step">
           <span className="guided-step-number">1</span>
           <div>
@@ -2987,62 +3084,64 @@ function GuidedTodayView({
   }
 
   return (
-    <section className="guided-today" data-tour-page="dashboard">
-      <header className="guided-page-intro">
-        <div><h2>Prepare for {plan.job_title}</h2><p>Continue with the most useful task for this interview.</p></div>
-        <div className="guided-interview-countdown"><strong>{plan.days_until_interview}</strong><span>days left</span></div>
-      </header>
-
-      <div className="guided-today-grid">
-        <section className="guided-focus-panel" data-tour="today-next-step">
-          <div className="guided-panel-label"><Sparkles size={17} />Next best step</div>
+    <section className="guided-approved-today" data-tour-page="dashboard">
+      <div className="guided-today-layout">
+        <section className="guided-today-main">
+          <article className="guided-next-step-card" data-tour="today-next-step">
+            <div className="guided-next-step-eyebrow"><span>Your next best step</span><button onClick={() => setWhyOpen((current) => !current)}><Info size={18} />Why this task?</button></div>
           {nextTask ? (
             <>
               <h3>{nextTask.title}</h3>
-              <p>{nextTask.instructions || `Focus on ${(nextTask.topics || []).join(", ") || "the next role-specific topic"}.`}</p>
-              <div className="guided-topic-row">{(nextTask.topics || []).slice(0, 4).map((topic) => <span key={topic}>{topic}</span>)}</div>
-              <div className="guided-focus-actions">
-                <button className="primary" onClick={() => onStartTask(nextTask)} disabled={isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId)}>
+              <p>{nextTask.instructions || `Focus on ${(nextTask.topics || []).join(", ") || "the next role-specific topic"} before moving to practice.`}</p>
+              {whyOpen && <div className="guided-why-task"><BrainCircuit size={19} /><span><strong>Why this comes next:</strong> This task is next in your {plan.days_until_interview}-day plan for {company} and feeds directly into your readiness score.</span></div>}
+              <div className="guided-hero-actions">
+                <button className="guided-primary-button" onClick={() => onStartTask(nextTask)} disabled={isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId)}>
                   {isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId) ? <Loader2 className="spin" size={17} /> : nextTask.task_type === "practice_exam" ? <FileQuestion size={17} /> : <BookOpen size={17} />}
-                  {isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId) ? "Preparing..." : isStudyNoteGenerated(nextTask) ? "Open task" : "Start now"}
+                  {isTaskGenerating(nextTask, loadingStudyTaskId, loadingExamTaskId) ? "Preparing..." : isStudyNoteGenerated(nextTask) ? "Open next task" : "Start next task"}
                 </button>
-                <button className="outline-action" onClick={onOpenLearn}>View full plan</button>
+                <button className="guided-secondary-button" onClick={onOpenLearn}><ClipboardList size={18} />View full plan</button>
               </div>
             </>
           ) : <EmptyState text="Your current day has no remaining tasks. Open Learn to choose another day." />}
+          </article>
+
+          <section className="guided-journey" aria-label="Interview preparation journey">
+            {journeySteps.map((step, index) => (
+              <button className={`guided-journey-step ${step.state}`} key={step.title} onClick={step.action}>
+                <span className="guided-journey-marker">{step.state === "complete" ? <Check size={17} /> : index + 1}</span>
+                <span className="guided-journey-icon"><step.Icon size={25} /></span>
+                <span className="guided-journey-copy"><strong>{step.title}</strong><small>{step.detail}</small></span>
+                <em>{step.state === "complete" ? "Complete" : step.state === "active" ? "In progress" : step.state === "next" ? "Next" : "Later"}</em>
+                <ChevronRight size={18} />
+              </button>
+            ))}
+          </section>
         </section>
 
-        <aside className="guided-readiness-card" data-tour="today-readiness">
-          <div className="guided-panel-label"><Activity size={17} />Readiness</div>
-          <div className="guided-score"><strong>{readiness?.score ?? 0}%</strong><span>{readiness?.label || "Start preparing to create a score"}</span></div>
-          <div className="guided-component-list">
-            {(readiness?.components || []).slice(0, 4).map((component) => <div key={component.key}><span>{component.label}</span><progress max="100" value={component.score} /><strong>{component.score}%</strong></div>)}
-          </div>
-          <button className="text-action" onClick={onOpenReadiness}>See readiness details <ChevronRight size={15} /></button>
+        <aside className="guided-today-side">
+          <article className="guided-side-card guided-schedule-card" data-tour="today-week">
+            <header><CalendarDays size={24} /><h2>This week</h2></header>
+            <div className="guided-upcoming-list">
+              {visibleTasks.slice(0, 3).map((task, index) => {
+                const taskDate = new Date();
+                taskDate.setDate(taskDate.getDate() + Math.max(0, (task.day || index + 1) - 1));
+                return <button key={task.id || task.title} className="guided-upcoming-row" onClick={() => onStartTask(task)}><span className="guided-date-block"><small>{taskDate.toLocaleDateString(undefined, { month: "short" }).toUpperCase()}</small><strong>{taskDate.getDate()}</strong></span>{task.task_type === "practice_exam" ? <FileQuestion size={22} /> : <FileText size={22} />}<span><strong>{task.title}</strong><small>{task.duration_minutes || 30} min</small></span><em>{index === 0 ? "Today" : index === 1 ? "Next" : "Later"}</em></button>;
+              })}
+            </div>
+            <button className="guided-text-button" onClick={onOpenSchedule}>View full schedule <ChevronRight size={17} /></button>
+          </article>
+
+          <button className="guided-side-card guided-readiness-preview" data-tour="today-readiness" onClick={onOpenReadiness}>
+            <header><Target size={24} /><h2>Readiness</h2></header>
+            <div className="guided-readiness-summary"><strong>{readiness?.score ?? 0}%</strong><span>{readiness?.label || "Complete preparation work to build your score."}</span></div>
+            <progress max="100" value={readiness?.score ?? 0} />
+            <span className="guided-text-button">See what&apos;s driving this score <ChevronRight size={17} /></span>
+          </button>
+
+          <div className="guided-today-streak"><Flame size={19} /><strong>{completedToday}/{Math.max(visibleTasks.length, 1)}</strong><span>tasks completed today</span><small>{streak.count} day streak</small></div>
         </aside>
 
-        <section className="guided-week-panel" data-tour="today-week">
-          <header><div><h3>This week</h3><p>Complete the work already connected to this job.</p></div><button className="text-action" onClick={onOpenSchedule}>Open schedule</button></header>
-          <div className="guided-task-list">
-            {visibleTasks.slice(0, 4).map((task) => {
-              const done = isTaskComplete(task, completedTasks);
-              return <article key={task.id || task.title} className={done ? "done" : ""}><button className="guided-check" onClick={() => onToggleTask(task)} aria-label={done ? "Mark incomplete" : "Mark complete"}>{done && <Check size={14} />}</button><span><strong>{task.title}</strong><small>{task.task_type === "practice_exam" ? "Practice" : "Learn"} · {task.duration_minutes || 30} min</small></span><button className="text-action" onClick={() => onStartTask(task)}>{done ? "Review" : "Open"}</button></article>;
-            })}
-          </div>
-          <div className="guided-week-actions"><button className="outline-action" onClick={onOpenLearn}><BookOpen size={16} />Learn</button><button className="outline-action" onClick={onOpenPractice}><MessageSquareText size={16} />Practice</button></div>
-        </section>
-
-        <aside className="guided-context-panel" data-tour="today-workspace">
-          <header><h3>Your workspace</h3><button className="text-action" onClick={onOpenJobs}>All jobs</button></header>
-          <div className="guided-context-stat"><BriefcaseBusiness size={18} /><span><strong>{jobs.length}</strong><small>saved jobs</small></span></div>
-          <div className="guided-context-stat"><Flame size={18} /><span><strong>{streak.count}</strong><small>day study streak</small></span></div>
-          <div className="guided-context-stat"><CalendarDays size={18} /><span><strong>{plan.days_until_interview}</strong><small>days to prepare</small></span></div>
-        </aside>
-
-        <section className="guided-activity-panel">
-          <header><h3>Recent activity</h3></header>
-          {activity.length ? activity.slice(0, 4).map((item, index) => <ActivityRow key={`${item.id || item.title}-${index}`} item={item} onClick={() => onOpenActivity(item)} />) : <EmptyState text="Completed learning, exams, and mock interviews will appear here." />}
-        </section>
+        <button className="guided-onboarding-cue" onClick={onAddJob}><Sparkles size={22} /><span><strong>Preparing for another role?</strong> Add a job and every step stays organized separately.</span><Plus size={18} /></button>
       </div>
     </section>
   );
@@ -3081,21 +3180,6 @@ function GuidedAddJobModal({ mode, setMode, jobTitle, setJobTitle, company, setC
         {mode !== "extension" && <footer><button type="button" className="outline-action" disabled={loading} onClick={onSave}><Save size={16} />Save job only</button><button className="primary" disabled={loading}>{loading ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}Generate prep plan</button></footer>}
       </form>
     </div>
-  );
-}
-
-function NavItem({ icon: Icon, label, active, onClick, settingsToggle = false, tourKey = "" }) {
-  return (
-    <button
-      className={`nav-item ${active ? "active" : ""}`}
-      onClick={onClick}
-      data-settings-toggle={settingsToggle ? "true" : undefined}
-      data-tour={settingsToggle ? "settings-button" : undefined}
-      data-tour-nav={tourKey || undefined}
-    >
-      <Icon size={20} />
-      {label}
-    </button>
   );
 }
 
