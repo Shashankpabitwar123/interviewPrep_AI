@@ -732,6 +732,39 @@
   backdrop-filter: blur(16px);
 }
 
+.guided-generation-progress {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--approved-line-soft) 86%, transparent);
+}
+
+.guided-generation-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 56%;
+  background: linear-gradient(90deg, #ffd29b 0%, #f9b56f 35%, #b8eab1 72%, #7bdf9a 100%);
+  box-shadow: 0 0 10px rgba(167, 231, 159, 0.52);
+  animation: guided-generation-sweep 1.7s ease-in-out infinite;
+}
+
+@keyframes guided-generation-sweep {
+  0% { transform: translateX(-110%); }
+  60% { transform: translateX(120%); }
+  100% { transform: translateX(190%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guided-generation-progress::after {
+    width: 100%;
+    animation: none;
+  }
+}
+
 .guided-brand-lockup {
   justify-self: start;
   padding: 0;
@@ -2443,6 +2476,31 @@
   -webkit-line-clamp: 2;
 }
 
+.guided-job-source-link {
+  width: fit-content;
+  max-width: 100%;
+  margin: 16px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--approved-coral);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.guided-job-source-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guided-job-source-link:hover,
+.guided-job-source-link:focus-visible {
+  color: var(--approved-coral);
+  text-decoration: underline;
+}
+
 .guided-job-tags {
   display: flex;
   flex-wrap: wrap;
@@ -2578,6 +2636,42 @@
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-wrap;
+}
+
+.guided-raw-description-editor {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  color: var(--approved-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.guided-raw-description-editor textarea {
+  min-height: 290px;
+  width: 100%;
+  resize: vertical;
+  padding: 18px;
+  border: 1px solid var(--approved-line-soft);
+  border-radius: 9px;
+  outline: none;
+  color: var(--approved-text);
+  background: var(--approved-surface-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.65;
+}
+
+.guided-raw-description-editor textarea:focus {
+  border-color: var(--approved-coral);
+  box-shadow: 0 0 0 2px var(--approved-coral-soft);
+}
+
+.guided-raw-description-error {
+  margin: -8px 0 0;
+  color: var(--approved-coral);
+  font-size: 12px;
 }
 
 .guided-raw-description-modal > footer {

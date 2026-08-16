@@ -127,6 +127,30 @@ def test_job_analysis_endpoint_infers_title_when_user_leaves_it_blank() -> None:
     assert detail["title"] == "Sales Intern"
 
 
+def test_saved_job_description_can_be_updated_by_its_owner() -> None:
+    client = _client_with_memory_db()
+    token = _register(client, {"name": "Editor", "email": "editor@example.com", "password": "Password1!"}).json()["access_token"]
+    saved = client.post(
+        "/jobs/analyze",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "job_title": "Backend Software Engineer",
+            "job_description": "Build Python FastAPI REST APIs with SQL, testing, and collaborative engineering practices.",
+        },
+    ).json()
+
+    updated_text = "Build reliable Python services with FastAPI, SQL, thoughtful tests, and close collaboration across the product team."
+    response = client.patch(
+        f"/jobs/{saved['job_post_id']}/description",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"description": updated_text},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["description"] == updated_text
+    assert client.get(f"/jobs/{saved['job_post_id']}", headers={"Authorization": f"Bearer {token}"}).json()["description"] == updated_text
+
+
 def test_prep_plan_endpoint_saves_and_reads_plan() -> None:
     client = _client_with_memory_db()
 

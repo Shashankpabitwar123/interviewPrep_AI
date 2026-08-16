@@ -10,6 +10,7 @@ from app.schemas.job_analysis import (
     JobDescriptionAskRequest,
     JobDescriptionAskResponse,
     JobDescriptionBrief,
+    JobDescriptionUpdateRequest,
     JobPostDetail,
     JobPostSummary,
 )
@@ -20,7 +21,7 @@ from app.services.job_analyzer import (
     identify_job,
 )
 from app.services.job_source import resolve_job_description
-from app.services.persistence import delete_job, get_job_detail, list_jobs, save_job_analysis
+from app.services.persistence import delete_job, get_job_detail, list_jobs, save_job_analysis, update_job_description
 from app.services.auth_service import get_request_user
 from app.services.usage_service import record_usage_event
 
@@ -82,6 +83,30 @@ def get_job(
     job = get_job_detail(db, job_post_id, current_user)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.patch("/{job_post_id}/description", response_model=JobPostDetail)
+def update_saved_job_description(
+    job_post_id: int,
+    request: JobDescriptionUpdateRequest,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> JobPostDetail:
+    job = update_job_description(db, job_post_id, request.description, current_user)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    record_usage_event(
+        db,
+        current_user,
+        "job_description_updated",
+        "jobs",
+        provider="system",
+        settings=settings,
+        input_value={"description_length": len(job.description)},
+        detail={"job_post_id": job_post_id, "title": job.title},
+    )
     return job
 
 

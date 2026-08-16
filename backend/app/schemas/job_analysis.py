@@ -60,6 +60,10 @@ class JobPostDetail(BaseModel):
     hours_per_day: Optional[float] = None
 
 
+class JobDescriptionUpdateRequest(BaseModel):
+    description: str = Field(min_length=20, max_length=8000)
+
+
 class JobDescriptionBrief(BaseModel):
     company: str = ""
     role_title: str

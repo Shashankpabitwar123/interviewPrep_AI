@@ -1162,6 +1162,21 @@ function App() {
     };
   }
 
+  async function updateSavedJobDescription(jobId, description) {
+    const response = await apiFetch(`/jobs/${jobId}/description`, {
+      method: "PATCH",
+      body: JSON.stringify({ description }),
+    });
+    if (!response.ok) throw new Error(await readApiError(response, "Job description"));
+    const detail = await response.json();
+    setJobs((current) => current.map((job) => String(job.id) === String(jobId)
+      ? { ...job, description_preview: descriptionPreview(detail.description), ...detail }
+      : job));
+    addActivity({ type: "job", title: "Job description updated", detail: detail.title || "Saved job", target: "jobs" });
+    setStatus("Job description updated");
+    return detail;
+  }
+
   async function askJobBriefQuestion() {
     if (!jobBrief?.job?.id || !jobBriefQuestion.trim()) return;
     const questionText = jobBriefQuestion.trim();
@@ -2239,6 +2254,13 @@ function App() {
   }
 
   const activity = recentActivity.map((item) => ({ ...item, time: relativeTime(item.createdAt), target: item.target || targetForActivity(item.type) }));
+  const generationInProgress = loading && [
+    "Generating Plan",
+    "Generating Exam",
+    "Generating Study Notes",
+    "Generating Workspace Note",
+    "Starting Mock Interview",
+  ].includes(status);
 
   function openActivity(item) {
     setActiveView(item.target || targetForActivity(item.type));
@@ -2252,6 +2274,7 @@ function App() {
         <>
           <GuidedTopNavigation
             activeView={activeView}
+            generationInProgress={generationInProgress}
             onNavigate={(nextView) => {
               setActiveView(nextView);
               setProfileMenuOpen(false);
@@ -2323,6 +2346,7 @@ function App() {
             jobs={jobs}
             onSelectJob={useSavedJob}
             onLoadJobDetail={loadSavedJobDetail}
+            onUpdateDescription={updateSavedJobDescription}
             onOpenDescription={openJobDescription}
             onAddJob={openAddJobModal}
             onManageDeleted={() => setSettingsOpen(true)}
@@ -3010,7 +3034,7 @@ function OnboardingCoachmark({ mode, step, isAdmin, onNext, onSkip, onClose }) {
   );
 }
 
-function GuidedTopNavigation({ activeView, onNavigate, user, status, isAdmin, profileOpen, setProfileOpen, onOpenSettings, onLogout }) {
+function GuidedTopNavigation({ activeView, generationInProgress, onNavigate, user, status, isAdmin, profileOpen, setProfileOpen, onOpenSettings, onLogout }) {
   const navItems = [
     ["dashboard", "Today", Home, ["dashboard"]],
     ["jobs", "Jobs", BriefcaseBusiness, ["jobs"]],
@@ -3057,6 +3081,7 @@ function GuidedTopNavigation({ activeView, onNavigate, user, status, isAdmin, pr
           )}
         </div>
       </div>
+      {generationInProgress && <span className="guided-generation-progress" role="status" aria-label="Creating your interview preparation content" />}
     </header>
   );
 }
@@ -4330,6 +4355,7 @@ function JobsView({
   jobs,
   onSelectJob,
   onLoadJobDetail,
+  onUpdateDescription,
   onOpenDescription,
   onAddJob,
   onManageDeleted,
@@ -4356,6 +4382,10 @@ function JobsView({
   const [jobDetails, setJobDetails] = useState({});
   const [detailLoading, setDetailLoading] = useState(false);
   const [rawDescriptionOpen, setRawDescriptionOpen] = useState(false);
+  const [rawDescriptionDraft, setRawDescriptionDraft] = useState("");
+  const [editingRawDescription, setEditingRawDescription] = useState(false);
+  const [savingRawDescription, setSavingRawDescription] = useState(false);
+  const [rawDescriptionError, setRawDescriptionError] = useState("");
   const [copiedValue, setCopiedValue] = useState("");
 
   const filteredJobs = jobs.filter((job) => `${job.title} ${job.company || ""} ${job.description_preview || ""}`.toLowerCase().includes(searchText.trim().toLowerCase()));
@@ -4380,6 +4410,7 @@ function JobsView({
   const requiredSkills = selectedDetail?.analysis?.required_skills || extractResumeKeywords(descriptionText).slice(0, 6);
   const interviewFocus = (selectedDetail?.analysis?.interview_focus || []).flatMap((group) => group.topics || []).slice(0, 6);
   const lookingFor = summarizeJobForWorkspace(descriptionText, selectedJob);
+  const descriptionSummary = summarizeSavedJobDescription(selectedJob, descriptionText, requiredSkills, interviewFocus);
 
   useEffect(() => {
     if (!jobs.length) {
@@ -4431,6 +4462,40 @@ function JobsView({
     setDeleteMode(false);
     setDeleteRequested(false);
     setSelectedJobIds([]);
+  }
+
+  function openRawDescription() {
+    setRawDescriptionDraft(descriptionText);
+    setRawDescriptionError("");
+    setEditingRawDescription(false);
+    setRawDescriptionOpen(true);
+  }
+
+  function closeRawDescription() {
+    if (savingRawDescription) return;
+    setRawDescriptionOpen(false);
+    setEditingRawDescription(false);
+    setRawDescriptionError("");
+  }
+
+  async function saveRawDescription() {
+    const nextDescription = rawDescriptionDraft.trim();
+    if (nextDescription.length < 20) {
+      setRawDescriptionError("Enter at least 20 characters for the saved job description.");
+      return;
+    }
+    setSavingRawDescription(true);
+    setRawDescriptionError("");
+    try {
+      const updatedDetail = await onUpdateDescription(selectedJob.id, nextDescription);
+      setJobDetails((current) => ({ ...current, [String(selectedJob.id)]: updatedDetail }));
+      setRawDescriptionDraft(updatedDetail.description);
+      setEditingRawDescription(false);
+    } catch (error) {
+      setRawDescriptionError(error.message || "Could not save the job description.");
+    } finally {
+      setSavingRawDescription(false);
+    }
   }
 
   function requestSelectedDelete() {
@@ -4514,8 +4579,17 @@ function JobsView({
                     <GuidedJobMetric label="Practice" value={`${practiceAttempts.length} ${practiceAttempts.length === 1 ? "attempt" : "attempts"}`} detail={practiceAttempts.length ? "Exams and mock interviews" : "No attempts yet"} />
                   </div>
                   <article className="guided-job-source-panel">
-                    <header><h3>Job source</h3>{isDescriptionSource ? <button onClick={() => setRawDescriptionOpen(true)}>View full job description</button> : <button onClick={() => copyText(selectedJob.source_url, "url")}>{copiedValue === "url" ? "Copied" : "Copy URL"}</button>}</header>
-                    {isDescriptionSource ? <p className="description-preview">{descriptionText || "Loading the saved job description..."}</p> : <p>{displayUrl(selectedJob.source_url)}</p>}
+                    {isDescriptionSource ? (
+                      <>
+                        <header><h3>Job description</h3><button onClick={openRawDescription}>Read full description</button></header>
+                        <p className="description-preview">{descriptionSummary}</p>
+                      </>
+                    ) : (
+                      <>
+                        <header><h3>Job URL</h3></header>
+                        <a className="guided-job-source-link" href={normalizeUrl(selectedJob.source_url)} target="_blank" rel="noopener noreferrer"><span>{displayUrl(selectedJob.source_url)}</span><ExternalLink size={15} /></a>
+                      </>
+                    )}
                     {requiredSkills.length > 0 && <div className="guided-job-tags">{requiredSkills.slice(0, 6).map((skill) => <span key={skill}>{skill}</span>)}</div>}
                   </article>
                 </div>
@@ -4539,11 +4613,14 @@ function JobsView({
       </div>
 
       {rawDescriptionOpen && selectedJob && (
-        <div className="modal-backdrop guided-raw-description-backdrop" role="dialog" aria-modal="true" aria-labelledby="raw-description-title" onMouseDown={() => setRawDescriptionOpen(false)}>
+        <div className="modal-backdrop guided-raw-description-backdrop" role="dialog" aria-modal="true" aria-labelledby="raw-description-title" onMouseDown={closeRawDescription}>
           <section className="guided-raw-description-modal" onMouseDown={(event) => event.stopPropagation()}>
-            <header><div><small>Original pasted text</small><h2 id="raw-description-title">{selectedJob.title}</h2></div><button className="icon-button" onClick={() => setRawDescriptionOpen(false)}><X size={20} /></button></header>
-            <div className="guided-raw-description-text">{descriptionText || "The full saved description is still loading."}</div>
-            <footer><button className="guided-secondary-button" onClick={() => setRawDescriptionOpen(false)}>Close</button><button className="guided-primary-button" onClick={() => copyText(descriptionText, "description")}><Copy size={17} />{copiedValue === "description" ? "Copied" : "Copy description"}</button></footer>
+            <header><div><small>Pasted job description</small><h2 id="raw-description-title">{selectedJob.title}</h2></div><button className="icon-button" aria-label="Close job description" onClick={closeRawDescription}><X size={20} /></button></header>
+            {editingRawDescription ? (
+              <label className="guided-raw-description-editor"><span>Edit saved description</span><textarea value={rawDescriptionDraft} onChange={(event) => setRawDescriptionDraft(event.target.value)} disabled={savingRawDescription} /></label>
+            ) : <div className="guided-raw-description-text">{descriptionText || "The full saved description is still loading."}</div>}
+            {rawDescriptionError && <p className="guided-raw-description-error" role="alert">{rawDescriptionError}</p>}
+            <footer>{editingRawDescription ? <><button className="guided-secondary-button" disabled={savingRawDescription} onClick={() => { setEditingRawDescription(false); setRawDescriptionDraft(descriptionText); setRawDescriptionError(""); }}>Cancel</button><button className="guided-primary-button" disabled={savingRawDescription} onClick={saveRawDescription}>{savingRawDescription ? "Saving..." : "Save changes"}</button></> : <><button className="guided-secondary-button" onClick={closeRawDescription}>Close</button><button className="guided-secondary-button" onClick={() => setEditingRawDescription(true)}>Edit description</button><button className="guided-primary-button" onClick={() => copyText(descriptionText, "description")}><Copy size={17} />{copiedValue === "description" ? "Copied" : "Copy description"}</button></>}</footer>
           </section>
         </div>
       )}
@@ -4560,6 +4637,23 @@ function summarizeJobForWorkspace(description, job) {
   if (!clean) return `Review the requirements and responsibilities for ${job?.title || "this role"} before preparing.`;
   const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
   return sentences.slice(0, 2).join(" ").trim();
+}
+
+function summarizeSavedJobDescription(job, description, skills = [], focus = []) {
+  const clean = String(description || "").replace(/\s+/g, " ").trim();
+  if (!clean) return `The saved description for ${job?.title || "this role"} is loading.`;
+  const role = `${job?.title || "This role"}${job?.company ? ` at ${job.company}` : ""}`;
+  const selectedSkills = skills.filter(Boolean).slice(0, 3);
+  const selectedFocus = focus.filter(Boolean).slice(0, 2);
+  if (!selectedSkills.length && !selectedFocus.length) return summarizeJobForWorkspace(clean, job);
+  const skillText = selectedSkills.join(", ");
+  const focusText = selectedFocus.join(" and ");
+  return `${role} emphasizes ${skillText || "the responsibilities in the saved posting"}.${focusText ? ` The interview is likely to focus on ${focusText}.` : ""}`;
+}
+
+function descriptionPreview(description) {
+  const clean = String(description || "").replace(/\s+/g, " ").trim();
+  return clean.length <= 120 ? clean : `${clean.slice(0, 117).trimEnd()}...`;
 }
 
 function PrepPlanView({ plan, savedPlans, selectedPlanDay, setSelectedPlanDay, completedTasks, toggleTaskDone, loadPrepPlan, removePrepPlan, generateExam, startStudyTask, isStudyNoteGenerated, loading, loadingStudyTaskId, loadingExamTaskId, jobMarkers }) {

@@ -182,6 +182,24 @@ def get_job_detail(db: Session, job_post_id: int, user: Optional[User] = None) -
     )
 
 
+def update_job_description(
+    db: Session,
+    job_post_id: int,
+    description: str,
+    user: Optional[User] = None,
+) -> Optional[JobPostDetail]:
+    """Update the original saved job text without changing its plan or analysis."""
+
+    job = db.get(JobPost, job_post_id)
+    if job is None or not _owns_job(job, user):
+        return None
+
+    job.description = description.strip()
+    db.commit()
+    db.refresh(job)
+    return get_job_detail(db, job_post_id, user)
+
+
 def delete_job(db: Session, job_post_id: int, user: Optional[User] = None) -> bool:
     job = db.get(JobPost, job_post_id)
     if job is None or not _owns_job(job, user):
