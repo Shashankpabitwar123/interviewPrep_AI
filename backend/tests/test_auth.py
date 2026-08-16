@@ -14,7 +14,7 @@ from app.models import AnswerAttempt, EmailVerificationOTP, Exam, JobAnalysis, J
 
 def test_register_creates_user_without_exposing_password() -> None:
     client = _client_with_memory_db()
-    payload = {"name": "Shashank", "email": "Shashank@example.com", "password": "password123"}
+    payload = {"name": "Shashank", "email": "Shashank@example.com", "password": "Password1!"}
 
     response = _register(client, payload)
 
@@ -29,7 +29,7 @@ def test_register_creates_user_without_exposing_password() -> None:
 
 def test_register_rejects_duplicate_email() -> None:
     client = _client_with_memory_db()
-    payload = {"name": "Shashank", "email": "shashank@example.com", "password": "password123"}
+    payload = {"name": "Shashank", "email": "shashank@example.com", "password": "Password1!"}
 
     assert _register(client, payload).status_code == 200
     response = client.post("/auth/register/otp", json={"email": payload["email"]})
@@ -42,7 +42,7 @@ def test_register_requires_email_otp() -> None:
 
     response = client.post(
         "/auth/register",
-        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123"},
+        json={"name": "Shashank", "email": "shashank@example.com", "password": "Password1!"},
     )
 
     assert response.status_code == 400
@@ -55,7 +55,7 @@ def test_register_rejects_wrong_email_otp() -> None:
 
     response = client.post(
         "/auth/register",
-        json={"name": "Shashank", "email": "shashank@example.com", "password": "password123", "otp_code": "111111"},
+        json={"name": "Shashank", "email": "shashank@example.com", "password": "Password1!", "otp_code": "111111"},
     )
 
     assert response.status_code == 400
@@ -134,27 +134,32 @@ def test_register_otp_rejects_too_many_hourly_requests() -> None:
     assert "too many" in response.json()["detail"].lower()
 
 
-def test_register_rejects_password_without_letter_and_number() -> None:
+def test_register_rejects_password_missing_required_combinations() -> None:
     client = _client_with_memory_db()
 
-    no_number = client.post(
+    no_uppercase = client.post(
         "/auth/register",
-        json={"name": "Test User", "email": "test1@example.com", "password": "passwordonly"},
+        json={"name": "Test User", "email": "test1@example.com", "password": "password1!"},
     )
-    no_letter = client.post(
+    no_lowercase = client.post(
         "/auth/register",
-        json={"name": "Test User", "email": "test2@example.com", "password": "12345678"},
+        json={"name": "Test User", "email": "test2@example.com", "password": "PASSWORD1!"},
+    )
+    no_symbol = client.post(
+        "/auth/register",
+        json={"name": "Test User", "email": "test3@example.com", "password": "Password12"},
     )
 
-    assert no_number.status_code == 422
-    assert no_letter.status_code == 422
+    assert no_uppercase.status_code == 422
+    assert no_lowercase.status_code == 422
+    assert no_symbol.status_code == 422
 
 
 def test_login_accepts_correct_password_and_rejects_wrong_password() -> None:
     client = _client_with_memory_db()
-    _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "password123"})
+    _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "Password1!"})
 
-    login = client.post("/auth/login", json={"email": "shashank@example.com", "password": "password123"})
+    login = client.post("/auth/login", json={"email": "shashank@example.com", "password": "Password1!"})
     wrong_password = client.post("/auth/login", json={"email": "shashank@example.com", "password": "wrongpass123"})
 
     assert login.status_code == 200
@@ -165,7 +170,7 @@ def test_login_accepts_correct_password_and_rejects_wrong_password() -> None:
 
 def test_password_reset_updates_password_after_email_otp() -> None:
     client = _client_with_memory_db()
-    _register(client, {"name": "Shashank", "email": "reset@example.com", "password": "oldpass123"})
+    _register(client, {"name": "Shashank", "email": "reset@example.com", "password": "Oldpass1!"})
 
     otp_response = client.post("/auth/password-reset/otp", json={"email": "Reset@example.com"})
     assert otp_response.status_code == 200
@@ -175,13 +180,13 @@ def test_password_reset_updates_password_after_email_otp() -> None:
 
     reset_response = client.post(
         "/auth/password-reset",
-        json={"email": "reset@example.com", "otp_code": otp_body["dev_otp"], "new_password": "newpass456"},
+        json={"email": "reset@example.com", "otp_code": otp_body["dev_otp"], "new_password": "Newpass2!"},
     )
 
     assert reset_response.status_code == 200
     assert "password updated" in reset_response.json()["message"].lower()
-    assert client.post("/auth/login", json={"email": "reset@example.com", "password": "oldpass123"}).status_code == 401
-    login = client.post("/auth/login", json={"email": "reset@example.com", "password": "newpass456"})
+    assert client.post("/auth/login", json={"email": "reset@example.com", "password": "Oldpass1!"}).status_code == 401
+    login = client.post("/auth/login", json={"email": "reset@example.com", "password": "Newpass2!"})
     assert login.status_code == 200
     assert login.json()["user"]["email"] == "reset@example.com"
 
@@ -198,7 +203,7 @@ def test_password_reset_otp_does_not_reveal_missing_accounts() -> None:
 
 def test_password_reset_rejects_weak_new_password() -> None:
     client = _client_with_memory_db()
-    _register(client, {"name": "Shashank", "email": "weak-reset@example.com", "password": "oldpass123"})
+    _register(client, {"name": "Shashank", "email": "weak-reset@example.com", "password": "Oldpass1!"})
     otp_response = client.post("/auth/password-reset/otp", json={"email": "weak-reset@example.com"})
 
     response = client.post(
@@ -215,7 +220,7 @@ def test_password_reset_rejects_weak_new_password() -> None:
 
 def test_me_reads_user_from_bearer_token() -> None:
     client = _client_with_memory_db()
-    register = _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "password123"})
+    register = _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "Password1!"})
     token = register.json()["access_token"]
 
     response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -226,7 +231,7 @@ def test_me_reads_user_from_bearer_token() -> None:
 
 def test_delete_account_removes_user_owned_jobs_and_allows_re_registration() -> None:
     client = _client_with_memory_db()
-    register = _register(client, {"name": "Shashank", "email": "spabitwa@asu.edu", "password": "password123"})
+    register = _register(client, {"name": "Shashank", "email": "spabitwa@asu.edu", "password": "Password1!"})
     token = register.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     db = next(client.app.dependency_overrides[get_db]())
@@ -284,7 +289,7 @@ def test_delete_account_removes_user_owned_jobs_and_allows_re_registration() -> 
     code = _request_otp(client, "spabitwa@asu.edu")
     recreate = client.post(
         "/auth/register",
-        json={"name": "Shashank", "email": "spabitwa@asu.edu", "password": "newpass123", "otp_code": code},
+        json={"name": "Shashank", "email": "spabitwa@asu.edu", "password": "Newpass2!", "otp_code": code},
     )
     assert recreate.status_code == 200
 
@@ -299,7 +304,7 @@ def test_delete_account_requires_login() -> None:
 
 def test_delete_account_supports_post_fallback() -> None:
     client = _client_with_memory_db()
-    register = _register(client, {"name": "Shashank", "email": "fallback@example.com", "password": "password123"})
+    register = _register(client, {"name": "Shashank", "email": "fallback@example.com", "password": "Password1!"})
     token = register.json()["access_token"]
 
     response = client.post("/auth/me/delete", headers={"Authorization": f"Bearer {token}"})
@@ -312,7 +317,7 @@ def test_password_is_hashed_in_database() -> None:
     client = _client_with_memory_db()
     db = next(client.app.dependency_overrides[get_db]())
 
-    _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "password123"})
+    _register(client, {"name": "Shashank", "email": "shashank@example.com", "password": "Password1!"})
 
     user = db.query(User).filter(User.email == "shashank@example.com").first()
     assert user is not None

@@ -3,6 +3,21 @@ from datetime import datetime
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 
+PASSWORD_REQUIREMENTS_MESSAGE = (
+    "Password must be 8–128 characters and include an uppercase letter, lowercase letter, number, and symbol."
+)
+
+
+def validate_password_strength(value: str) -> str:
+    has_uppercase = any(character.isupper() for character in value)
+    has_lowercase = any(character.islower() for character in value)
+    has_number = any(character.isdigit() for character in value)
+    has_symbol = any(not character.isalnum() and not character.isspace() for character in value)
+    if not all((has_uppercase, has_lowercase, has_number, has_symbol)):
+        raise ValueError(PASSWORD_REQUIREMENTS_MESSAGE)
+    return value
+
+
 class RegisterRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=255)
@@ -11,12 +26,8 @@ class RegisterRequest(BaseModel):
 
     @field_validator("password")
     @classmethod
-    def password_has_letter_and_number(cls, value: str) -> str:
-        has_letter = any(character.isalpha() for character in value)
-        has_number = any(character.isdigit() for character in value)
-        if not has_letter or not has_number:
-            raise ValueError("Password must include at least one letter and one number.")
-        return value
+    def password_meets_requirements(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class LoginRequest(BaseModel):
@@ -45,12 +56,8 @@ class PasswordResetRequest(BaseModel):
 
     @field_validator("new_password")
     @classmethod
-    def new_password_has_letter_and_number(cls, value: str) -> str:
-        has_letter = any(character.isalpha() for character in value)
-        has_number = any(character.isdigit() for character in value)
-        if not has_letter or not has_number:
-            raise ValueError("Password must include at least one letter and one number.")
-        return value
+    def new_password_meets_requirements(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class MessageResponse(BaseModel):

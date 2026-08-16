@@ -14,6 +14,7 @@ __pycache__/
 # Frontend
 node_modules/
 dist/
+.vercel/
 
 # OS/editor
 .DS_Store
@@ -21,3 +22,5 @@ dist/
 
 # Generated docs renders
 docs/rendered-tomorrow-handoff/
+.vercel
+.env*

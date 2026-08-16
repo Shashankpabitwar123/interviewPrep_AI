@@ -35,8 +35,8 @@ def test_job_analysis_endpoint_saves_and_reads_job() -> None:
 
 def test_logged_in_users_only_see_their_own_jobs() -> None:
     client = _client_with_memory_db()
-    first = _register(client, {"name": "First User", "email": "first@example.com", "password": "password123"}).json()["access_token"]
-    second = _register(client, {"name": "Second User", "email": "second@example.com", "password": "password123"}).json()["access_token"]
+    first = _register(client, {"name": "First User", "email": "first@example.com", "password": "Password1!"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "second@example.com", "password": "Password1!"}).json()["access_token"]
 
     client.post(
         "/jobs/analyze",
@@ -384,8 +384,8 @@ def test_ai_only_study_note_generation_records_usage_without_route_error(monkeyp
 
 def test_study_note_generation_rejects_another_users_plan() -> None:
     client = _client_with_memory_db()
-    first = _register(client, {"name": "First User", "email": "note-first@example.com", "password": "password123"}).json()["access_token"]
-    second = _register(client, {"name": "Second User", "email": "note-second@example.com", "password": "password123"}).json()["access_token"]
+    first = _register(client, {"name": "First User", "email": "note-first@example.com", "password": "Password1!"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "note-second@example.com", "password": "Password1!"}).json()["access_token"]
     plan = client.post(
         "/prep-plans",
         headers={"Authorization": f"Bearer {first}"},
@@ -502,8 +502,8 @@ def test_legacy_interview_experiences_remain_visible_but_private_records_do_not_
             "difficulty": "medium",
         },
     ).json()
-    first = _register(client, {"name": "First User", "email": "experience-first@example.com", "password": "password123"}).json()["access_token"]
-    second = _register(client, {"name": "Second User", "email": "experience-second@example.com", "password": "password123"}).json()["access_token"]
+    first = _register(client, {"name": "First User", "email": "experience-first@example.com", "password": "Password1!"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "experience-second@example.com", "password": "Password1!"}).json()["access_token"]
     private = client.post(
         "/interview-experiences",
         headers={"Authorization": f"Bearer {first}"},

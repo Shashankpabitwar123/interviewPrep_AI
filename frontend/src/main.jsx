@@ -242,7 +242,7 @@ function App() {
   const [generatedStudyNotes, setGeneratedStudyNotes] = useState(() => loadLocalMap("interviewprep_generated_study_notes"));
   const [noteReader, setNoteReader] = useState(null);
   const [noteFolders, setNoteFolders] = useState(() => loadLocalList("interviewprep_note_folders"));
-  const [noteDraft, setNoteDraft] = useState({ title: "", body: "", planId: "", folder: "", subfolder: "" });
+  const [noteDraft, setNoteDraft] = useState({ title: "", body: "", planId: "", folder: "", subfolder: "", noteDate: "" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [calendarEvents, setCalendarEvents] = useState(() => loadLocalList("interviewprep_calendar_events"));
   const [calendarPlanDetails, setCalendarPlanDetails] = useState({});
@@ -1676,6 +1676,31 @@ function App() {
     return Boolean(generatedStudyNotes[studyNoteCacheKey(task)]?.content);
   }
 
+  function saveGeneratedNoteToWorkspace(content, task, cacheKey) {
+    if (!content || !plan) return;
+    const planId = String(plan.prep_plan_id || plan.id || plan.job_id || "");
+    const day = Number(task.day || selectedPlanDay || 1);
+    const noteDate = prepDateForDay(plan, selectedJob, day);
+    const nextNote = {
+      id: `generated-${cacheKey}`,
+      generationKey: cacheKey,
+      title: content.title || task.title.replace(/^Read notes:\s*/i, ""),
+      body: studyNoteContentToText(content),
+      planId,
+      folder: "Generated notes",
+      noteDate,
+      generated: true,
+      color: "#ff5d42",
+      createdAt: new Date().toISOString(),
+    };
+    setNotes((current) => {
+      if (current.some((note) => note.generationKey === cacheKey)) return current;
+      const next = [nextNote, ...current];
+      saveLocalList("interviewprep_notes", next);
+      return next;
+    });
+  }
+
   async function startStudyTask(task) {
     const taskKey = task.id || task.title;
     const cacheKey = studyNoteCacheKey(task);
@@ -1690,6 +1715,7 @@ function App() {
     }
     const cachedNote = generatedStudyNotes[cacheKey];
     if (cachedNote?.content) {
+      saveGeneratedNoteToWorkspace(cachedNote.content, task, cacheKey);
       setNoteReader({ task, content: cachedNote.content });
       setStatus(cachedNote.content.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
       addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: cachedNote.content.source || "saved", target: "prep" });
@@ -1729,6 +1755,7 @@ function App() {
         saveLocalMap("interviewprep_generated_study_notes", next);
         return next;
       });
+      saveGeneratedNoteToWorkspace(content, task, cacheKey);
       setNoteReader({ task, content });
       playGeneratedSound(soundVolume);
       setStatus(content.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
@@ -1751,6 +1778,7 @@ function App() {
         saveLocalMap("interviewprep_generated_study_notes", next);
         return next;
       });
+      saveGeneratedNoteToWorkspace(fallbackContent, task, cacheKey);
       setNoteReader({
         task,
         content: fallbackContent,
@@ -1785,6 +1813,7 @@ function App() {
     if (!noteDraft.title.trim() && !noteDraft.body.trim()) return;
     const folder = noteDraft.folder.trim() || "Notes";
     const subfolder = noteDraft.subfolder?.trim() || "";
+    const noteDate = noteDraft.noteDate || dateKey(new Date());
     const note = {
       id: crypto.randomUUID(),
       title: noteDraft.title.trim() || "Untitled note",
@@ -1792,15 +1821,16 @@ function App() {
       planId: noteDraft.planId,
       folder,
       subfolder,
+      noteDate,
       createdAt: new Date().toISOString(),
     };
     const nextNotes = [note, ...notes];
-    const nextFolders = noteFolders.includes(folder) ? noteFolders : [folder, ...noteFolders];
+    const nextFolders = addNoteFolder(noteFolders, folder, noteDraft.planId, noteDate);
     setNotes(nextNotes);
     setNoteFolders(nextFolders);
     saveLocalList("interviewprep_notes", nextNotes);
     saveLocalList("interviewprep_note_folders", nextFolders);
-    setNoteDraft({ title: "", body: "", planId: noteDraft.planId, folder, subfolder });
+    setNoteDraft({ title: "", body: "", planId: noteDraft.planId, folder, subfolder, noteDate });
     markStudyActivity("note-created");
     addActivity({ type: "note", title: "Note created", detail: note.title, badge: folder, target: "notes" });
     setStatus("Note Saved");
@@ -1818,11 +1848,15 @@ function App() {
         planId: noteDraft.planId,
         folder: noteDraft.folder.trim() || "Imported Notes",
         subfolder: noteDraft.subfolder?.trim() || "",
+        noteDate: noteDraft.noteDate || dateKey(new Date()),
         createdAt: new Date().toISOString(),
       };
       const nextNotes = [imported, ...notes];
+      const nextFolders = addNoteFolder(noteFolders, imported.folder, imported.planId, imported.noteDate);
       setNotes(nextNotes);
+      setNoteFolders(nextFolders);
       saveLocalList("interviewprep_notes", nextNotes);
+      saveLocalList("interviewprep_note_folders", nextFolders);
       markStudyActivity("note-imported");
       addActivity({ type: "note", title: "Note imported", detail: imported.title, badge: "import", target: "notes" });
       setStatus("Note Imported");
@@ -1830,7 +1864,7 @@ function App() {
     reader.readAsText(file);
   }
 
-  async function generateWorkspaceNote(planId, folder = "Generated Notes", subfolder = "") {
+  async function generateWorkspaceNote(planId, folder = "Generated notes", subfolder = "", noteDate = "") {
     if (!planId) {
       setStatus("Select A Job First");
       return;
@@ -1859,7 +1893,7 @@ function App() {
       content = await generatedResponse.json();
       if (!content && allowLocalFallback) content = generateStudyNote(planDetail, noteTask);
       if (!content) throw new Error("AI note generation is unavailable.");
-      const finalFolder = folder?.trim() || "Generated Notes";
+      const finalFolder = folder?.trim() || "Generated notes";
       const generatedNote = {
         id: crypto.randomUUID(),
         title: content.title || noteTask.title,
@@ -1867,11 +1901,12 @@ function App() {
         planId,
         folder: finalFolder,
         subfolder: subfolder?.trim() || "",
+        noteDate: noteDate || prepDateForDay(planDetail, selectedJob, noteTask.day || 1),
         generated: true,
         createdAt: new Date().toISOString(),
       };
       const nextNotes = [generatedNote, ...notes];
-      const nextFolders = noteFolders.includes(finalFolder) ? noteFolders : [finalFolder, ...noteFolders];
+      const nextFolders = addNoteFolder(noteFolders, finalFolder, planId, generatedNote.noteDate);
       setNotes(nextNotes);
       setNoteFolders(nextFolders);
       saveLocalList("interviewprep_notes", nextNotes);
@@ -1893,8 +1928,9 @@ function App() {
     saveLocalList("interviewprep_notes", nextNotes);
   }
 
-  function createBlankNote({ title, folder = "Notes", planId = "" }) {
+  function createBlankNote({ title, folder = "Notes", planId = "", noteDate = "" }) {
     const cleanFolder = normalizeNoteFolder(folder);
+    const scopedDate = noteDate || dateKey(new Date());
     const note = {
       id: crypto.randomUUID(),
       title: title.trim() || "Untitled note",
@@ -1902,11 +1938,12 @@ function App() {
       planId,
       folder: cleanFolder,
       subfolder: "",
+      noteDate: scopedDate,
       color: "#2563eb",
       createdAt: new Date().toISOString(),
     };
     const nextNotes = [note, ...notes];
-    const nextFolders = cleanFolder !== "Notes" && !noteFolders.includes(cleanFolder) ? [cleanFolder, ...noteFolders] : noteFolders;
+    const nextFolders = addNoteFolder(noteFolders, cleanFolder, planId, scopedDate);
     setNotes(nextNotes);
     setNoteFolders(nextFolders);
     saveLocalList("interviewprep_notes", nextNotes);
@@ -1917,10 +1954,13 @@ function App() {
   }
 
   function updateNote(noteId, patch) {
+    const currentNote = notes.find((note) => note.id === noteId);
     const nextNotes = notes.map((note) => (
       note.id === noteId ? { ...note, ...patch, updatedAt: new Date().toISOString() } : note
     ));
-    const nextFolders = patch.folder && !noteFolders.includes(patch.folder) ? [patch.folder, ...noteFolders] : noteFolders;
+    const nextFolders = patch.folder
+      ? addNoteFolder(noteFolders, patch.folder, patch.planId ?? currentNote?.planId, patch.noteDate ?? currentNote?.noteDate)
+      : noteFolders;
     setNotes(nextNotes);
     setNoteFolders(nextFolders);
     saveLocalList("interviewprep_notes", nextNotes);
@@ -1972,24 +2012,27 @@ function App() {
     }
   }
 
-  function createNoteFolder(folderName) {
+  function createNoteFolder(folderName, scope = {}) {
     const folder = folderName.trim();
     if (!folder) return;
-    if (noteFolders.includes(folder)) {
+    if (hasNoteFolder(noteFolders, folder, scope.planId, scope.noteDate)) {
       setStatus("Folder Already Exists");
       return;
     }
-    const nextFolders = [folder, ...noteFolders];
+    const nextFolders = addNoteFolder(noteFolders, folder, scope.planId, scope.noteDate);
     setNoteFolders(nextFolders);
     saveLocalList("interviewprep_note_folders", nextFolders);
     addActivity({ type: "note", title: "Folder created", detail: folder, badge: "folder", target: "notes" });
     setStatus("Folder Created");
   }
 
-  function deleteNoteFolder(folderName) {
-    const deletedCount = notes.filter((note) => normalizeNoteFolder(note.folder) === folderName).length;
-    const nextNotes = notes.filter((note) => normalizeNoteFolder(note.folder) !== folderName);
-    const nextFolders = noteFolders.filter((folder) => folder !== folderName);
+  function deleteNoteFolder(folderName, scope = {}) {
+    const matchesScope = (note) => normalizeNoteFolder(note.folder) === folderName
+      && String(note.planId || "") === String(scope.planId || "")
+      && String(note.noteDate || dateKey(new Date())) === String(scope.noteDate || dateKey(new Date()));
+    const deletedCount = notes.filter(matchesScope).length;
+    const nextNotes = notes.filter((note) => !matchesScope(note));
+    const nextFolders = noteFolders.filter((folder) => !matchesNoteFolder(folder, folderName, scope.planId, scope.noteDate));
     setNotes(nextNotes);
     setNoteFolders(nextFolders);
     saveLocalList("interviewprep_notes", nextNotes);
@@ -2068,7 +2111,7 @@ function App() {
 
     try {
       if ((authMode === "register" || (authMode === "reset" && authOtpSent)) && !isStrongPassword(authForm.password)) {
-        throw new Error("Password must be 8+ characters and include at least one letter and one number.");
+        throw new Error("Password must have 8+ characters, an uppercase letter, lowercase letter, number, and symbol.");
       }
 
       if (authMode === "reset") {
@@ -2383,6 +2426,8 @@ function App() {
         {activeView === "notes" && (
           <div data-tour-page="notes">
           <NotesView
+            plan={plan}
+            selectedJob={selectedContextJob}
             savedPlans={savedPlans}
             notes={notes}
             noteFolders={noteFolders}
@@ -2398,6 +2443,9 @@ function App() {
             createNoteFolder={createNoteFolder}
             deleteNoteFolder={deleteNoteFolder}
             generateWorkspaceNote={generateWorkspaceNote}
+            apiFetch={apiFetch}
+            readApiError={readApiError}
+            allowLocalFallback={allowLocalFallback}
             loading={loading}
           />
           </div>
@@ -2535,10 +2583,11 @@ function App() {
       )}
 
       {authOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
-          <form className="auth-modal" onSubmit={submitAuth}>
+        <div className="modal-backdrop auth-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+          <form className="auth-modal auth-themed-modal" onSubmit={submitAuth}>
             <div className="modal-head">
               <div>
+                <div className="auth-brand-lockup"><img src="/prepinterview-logo.png" alt="" aria-hidden="true" /><span>PrepInterview AI</span></div>
                 <h2 id="auth-modal-title">{authMode === "register" ? "Create account" : authMode === "reset" ? "Reset password" : "Login"}</h2>
                 <p>
                   {authMode === "register"
@@ -4849,95 +4898,94 @@ function CalendarView({ plan, planColor, calendarPlanDetails, jobMarkers, comple
   );
 }
 
-function NotesView({ savedPlans, notes, noteFolders, noteDraft, setNoteDraft, saveNote, importNotes, removeNote, createBlankNote, updateNote, improveSavedNote, improvingNoteId, createNoteFolder, deleteNoteFolder, generateWorkspaceNote, loading }) {
-  const [selectedPlanId, setSelectedPlanId] = useState(noteDraft.planId || savedPlans[0]?.id || "");
+function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraft, setNoteDraft, importNotes, removeNote, createBlankNote, updateNote, improveSavedNote, improvingNoteId, createNoteFolder, deleteNoteFolder, apiFetch, readApiError, allowLocalFallback, loading }) {
+  // The dashboard can be opened from a saved job before App has loaded its full
+  // active plan. Resolve that plan here so Notes always opens for the selected job.
+  const detailedPlans = useSavedPlanDetails(savedPlans || [], plan, apiFetch);
+  const activePlan = useMemo(() => {
+    const selectedJobId = String(selectedJob?.id || selectedJob?.job_post_id || "");
+    const matchingPlan = selectedJobId
+      ? detailedPlans.find((item) => String(item.job_post_id || item.job_id || "") === selectedJobId)
+      : null;
+    return matchingPlan || plan || detailedPlans[0] || null;
+  }, [detailedPlans, plan, selectedJob?.id, selectedJob?.job_post_id]);
+  const activePlanId = String(activePlan?.prep_plan_id || activePlan?.id || activePlan?.job_id || "");
+  const preparationDays = useMemo(() => buildGuidedPreparationDays(groupTasksByDay(activePlan?.tasks || []), selectedJob, activePlan), [activePlan, selectedJob]);
+  const todayDay = preparationDays.find((day) => day.isToday) || preparationDays[0];
+  const [selectedDate, setSelectedDate] = useState("");
   const [openNoteId, setOpenNoteId] = useState("");
-  const [editDraft, setEditDraft] = useState({ title: "", body: "", folder: "", subfolder: "", color: "#2563eb" });
-  const [treeOpen, setTreeOpen] = useState(false);
-  const [openFolders, setOpenFolders] = useState({});
-  const [creatingItem, setCreatingItem] = useState(null);
-  const [newItemName, setNewItemName] = useState("");
-  useEffect(() => {
-    setNoteDraft((current) => ({ ...current, planId: selectedPlanId }));
-  }, [selectedPlanId, setNoteDraft]);
-  const selectedPlan = savedPlans.find((savedPlan) => String(savedPlan.id) === String(selectedPlanId));
-  const visibleNotes = notes.filter((note) => selectedPlanId ? String(note.planId) === String(selectedPlanId) : !note.planId);
-  const grouped = groupNotesByFolder(visibleNotes);
-  const rootNotes = grouped.Notes || [];
-  const folderNames = [...new Set([...noteFolders, ...Object.keys(grouped)])].filter((folder) => folder && folder !== "Quick Notes" && folder !== "Notes");
-  const openNote = notes.find((note) => note.id === openNoteId);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState({ title: "", body: "", folder: "Generated notes", color: "#ff5d42" });
+  const [folderDraftOpen, setFolderDraftOpen] = useState(false);
+  const [folderName, setFolderName] = useState("");
+  const [draggedNoteId, setDraggedNoteId] = useState("");
+  const [dropFolder, setDropFolder] = useState("");
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
-    if (!openNote) {
-      setOpenNoteId("");
-      return;
-    }
+    const nextDate = todayDay ? dateKey(todayDay.date) : dateKey(new Date());
+    setSelectedDate(nextDate);
+    setOpenNoteId("");
+    setIsEditing(false);
+  }, [activePlanId, todayDay?.day]);
+
+  useEffect(() => {
+    setNoteDraft((current) => ({ ...current, planId: activePlanId, noteDate: selectedDate, folder: current.folder || "Generated notes" }));
+  }, [activePlanId, selectedDate, setNoteDraft]);
+
+  const visibleNotes = notes.filter((note) => String(note.planId || "") === activePlanId
+    && String(note.noteDate || dateKey(new Date())) === selectedDate);
+  const grouped = groupNotesByFolder(visibleNotes);
+  const scopedFolders = noteFolders
+    .filter((folder) => matchesNoteFolder(folder, noteFolderName(folder), activePlanId, selectedDate))
+    .map(noteFolderName);
+  const folderNames = ["Generated notes", ...new Set([...scopedFolders, ...Object.keys(grouped)])]
+    .filter((folder) => folder && folder !== "Notes" && folder !== "Quick Notes");
+  const openNote = visibleNotes.find((note) => note.id === openNoteId) || null;
+  const selectedDay = preparationDays.find((day) => dateKey(day.date) === selectedDate) || todayDay;
+  const interviewDate = guidedInterviewDate(selectedJob, activePlan, preparationDays.length || 1);
+
+  useEffect(() => {
+    if (!openNote) return;
     setEditDraft({
       title: openNote.title || "",
       body: openNote.body || "",
       folder: normalizeNoteFolder(openNote.folder),
-      subfolder: openNote.subfolder || "",
-      color: openNote.color || "#2563eb",
+      color: openNote.color || "#ff5d42",
     });
   }, [openNoteId, openNote?.updatedAt]);
 
-  function selectPlan(planId) {
-    setSelectedPlanId(planId);
-    setOpenNoteId("");
-    setCreatingItem(null);
-    setTreeOpen(false);
-    setNoteDraft({ ...noteDraft, planId, folder: noteDraft.folder || "Notes" });
-  }
-
-  function beginCreate(type, folder = "Notes") {
-    setTreeOpen(true);
-    if (type === "note" && folder !== "Notes") setOpenFolders((current) => ({ ...current, [folder]: true }));
-    setCreatingItem({ type, folder });
-    setNewItemName("");
-  }
-
-  function submitNewTreeItem(event) {
-    event.preventDefault();
-    const name = newItemName.trim();
-    if (!name || !creatingItem) return;
-    if (creatingItem.type === "folder") {
-      createNoteFolder(name);
-      setOpenFolders((current) => ({ ...current, [name]: true }));
-    } else {
-      const noteId = createBlankNote({ title: name, folder: creatingItem.folder || "Notes", planId: selectedPlanId });
-      setOpenNoteId(noteId);
-    }
-    setNewItemName("");
-    setCreatingItem(null);
-  }
-
   function openNoteEditor(note) {
     setOpenNoteId(note.id);
-    setEditDraft({
-      title: note.title || "",
-      body: note.body || "",
-      folder: normalizeNoteFolder(note.folder),
-      subfolder: note.subfolder || "",
-      color: note.color || "#2563eb",
-    });
+    setIsEditing(false);
+  }
+
+  function newNote(folder = "Generated notes") {
+    const noteId = createBlankNote({ title: "Untitled note", folder, planId: activePlanId, noteDate: selectedDate });
+    setOpenNoteId(noteId);
+    setIsEditing(true);
+  }
+
+  function createFolder(event) {
+    event.preventDefault();
+    if (!folderName.trim()) return;
+    createNoteFolder(folderName, { planId: activePlanId, noteDate: selectedDate });
+    setFolderName("");
+    setFolderDraftOpen(false);
   }
 
   function saveOpenNote(event) {
     event.preventDefault();
     if (!openNote) return;
-    const folder = editDraft.folder.trim() || "Notes";
     updateNote(openNote.id, {
       title: editDraft.title.trim() || "Untitled note",
       body: editDraft.body,
-      folder,
-      subfolder: editDraft.subfolder.trim(),
-      color: editDraft.color || "#2563eb",
+      folder: editDraft.folder.trim() || "Generated notes",
+      noteDate: selectedDate,
+      color: editDraft.color || "#ff5d42",
     });
-    setEditDraft((current) => ({ ...current, folder }));
-  }
-
-  function toggleFolder(folder) {
-    setOpenFolders((current) => ({ ...current, [folder]: !current[folder] }));
+    setIsEditing(false);
   }
 
   function confirmDeleteNote(note) {
@@ -4947,174 +4995,182 @@ function NotesView({ savedPlans, notes, noteFolders, noteDraft, setNoteDraft, sa
   }
 
   function confirmDeleteFolder(folder, folderNotes) {
+    if (folder === "Generated notes") return;
     const count = folderNotes.length;
-    const message = `Delete folder "${folder}" and ${count} note${count === 1 ? "" : "s"} inside it? This cannot be undone.`;
-    if (!window.confirm(message)) return;
-    deleteNoteFolder(folder);
+    if (!window.confirm(`Delete folder "${folder}" and ${count} note${count === 1 ? "" : "s"} inside it? This cannot be undone.`)) return;
+    deleteNoteFolder(folder, { planId: activePlanId, noteDate: selectedDate });
     if (folderNotes.some((note) => note.id === openNoteId)) setOpenNoteId("");
   }
 
+  function moveNoteToFolder(noteId, folder) {
+    if (!noteId || !folder) return;
+    updateNote(noteId, { folder, noteDate: selectedDate });
+    setDraggedNoteId("");
+    setDropFolder("");
+  }
+
+  async function askAboutNote(event) {
+    event.preventDefault();
+    const submittedQuestion = question.trim();
+    if (!openNote || !submittedQuestion || asking) return;
+    setAsking(true);
+    setQuestion("");
+    const history = openNote.qa || [];
+    try {
+      const response = await apiFetch("/study-notes/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          note_title: openNote.title,
+          role: activePlan?.job_title || selectedJob?.title || "",
+          topics: [openNote.title],
+          summary: openNote.body,
+          sections: [],
+          question: submittedQuestion,
+          history: history.map((item) => ({ question: item.question, answer: item.answer })),
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiError(response, "Note question"));
+      const data = await response.json();
+      updateNote(openNote.id, { qa: [...history, { id: crypto.randomUUID(), question: submittedQuestion, answer: data.answer, interviewUse: data.interview_use || "", source: data.source || "AI" }] });
+    } catch (error) {
+      const answer = allowLocalFallback
+        ? "AI is unavailable right now. Keep this question saved and retry when your AI connection is available."
+        : "AI is unavailable right now. Turn on local fallback in Settings if you want an offline response when the API is unavailable.";
+      updateNote(openNote.id, { qa: [...history, { id: crypto.randomUUID(), question: submittedQuestion, answer, interviewUse: "", source: "AI unavailable" }] });
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  if (!activePlan) {
+    return (
+      <section className="page-stack" data-tour-page="notes">
+        <section className="panel page-panel notes-empty-plan">
+          <NotebookText size={34} />
+          <h1>Notes</h1>
+          <p>Select a job with a preparation plan above. Your notes will then be organized by the dates leading to that interview.</p>
+        </section>
+      </section>
+    );
+  }
+
   return (
-    <section className="page-stack">
-      <section className="panel page-panel">
-        <PanelTitle icon={NotebookText} title="Notes" subtitle="Choose a job, then keep every folder, generated note, and personal note in one clean workspace." />
-        <div className="notes-job-strip">
-          {savedPlans.map((savedPlan) => (
-            <button
-              type="button"
-              key={savedPlan.id}
-              className={`notes-job-card ${String(selectedPlanId) === String(savedPlan.id) ? "selected" : ""}`}
-              onClick={() => selectPlan(savedPlan.id)}
-            >
-              <BriefcaseBusiness size={18} />
-              <span>{savedPlan.job_title}</span>
-              <small>{savedPlan.days_until_interview ?? savedPlan.total_days} days left</small>
-            </button>
-          ))}
-          <button type="button" className={`notes-job-card ${!selectedPlanId ? "selected" : ""}`} onClick={() => selectPlan("")}>
-            <NotebookText size={18} />
-            <span>General Notes</span>
-            <small>No job tag</small>
-          </button>
+    <section className="page-stack notes-page-redesign" data-tour-page="notes">
+      <section className="notes-heading">
+        <span>BUILD KNOWLEDGE</span>
+        <h1>Notes</h1>
+        <p>Everything for {activePlan.job_title || selectedJob?.title || "this interview"}, organized by the day you need it.</p>
+      </section>
+
+      <section className="notes-date-panel" aria-label="Preparation dates">
+        <div className="notes-date-panel-head">
+          <span><CalendarDays size={20} /><strong>Preparation notes</strong></span>
+          <small>Interview {interviewDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
+        </div>
+        <div className="notes-date-scroll">
+          {preparationDays.map((day) => {
+            const dayKey = dateKey(day.date);
+            const count = notes.filter((note) => String(note.planId || "") === activePlanId && String(note.noteDate || dateKey(new Date())) === dayKey).length;
+            return (
+              <button key={dayKey} type="button" className={`notes-date-button ${dayKey === selectedDate ? "selected" : ""} ${day.isToday ? "today" : ""}`} onClick={() => { setSelectedDate(dayKey); setOpenNoteId(""); setIsEditing(false); }}>
+                <strong>{day.date.getDate()}</strong>
+                <span>{day.shortLabel}</span>
+                <small>{count ? `${count} note${count === 1 ? "" : "s"}` : "No notes"}</small>
+              </button>
+            );
+          })}
         </div>
       </section>
 
-      <section className="panel page-panel notes-workspace">
-        <aside className="notes-folder-rail">
-          <div className="notes-tree-root">
-            <button type="button" className="tree-action-button" aria-label="New folder" title="New folder" onClick={() => beginCreate("folder")}>
-              <FolderPlus size={16} />
-            </button>
-            <button type="button" className="tree-action-button" aria-label="New note" title="New note" onClick={() => beginCreate("note", "Notes")}>
-              <FilePlus2 size={16} />
-            </button>
-            <button type="button" className="tree-toggle" aria-label="Toggle notes tree" title={treeOpen ? "Collapse notes" : "Expand notes"} onClick={() => setTreeOpen((current) => !current)}>
-              {treeOpen ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
-            </button>
+      <section className="notes-date-workspace">
+        <aside className="notes-date-rail">
+          <header>
             <div>
-              <strong>{selectedPlan?.job_title || "General Notes"}</strong>
-              <span>{visibleNotes.length ? `${visibleNotes.length} notes` : "No notes yet"}</span>
+              <span>{selectedDay?.monthDay || "Preparation day"}</span>
+              <strong>{selectedDay?.isToday ? "Today’s notes" : "Notes for this day"}</strong>
             </div>
-          </div>
-          {treeOpen && (
-            <div className="notes-tree-list">
-              {creatingItem?.type === "folder" && (
-                <form className="tree-inline-create" onSubmit={submitNewTreeItem}>
-                  <Folder size={15} />
-                  <input autoFocus placeholder="New folder" value={newItemName} onChange={(event) => setNewItemName(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setCreatingItem(null); }} />
-                </form>
-              )}
-              {creatingItem?.type === "note" && creatingItem.folder === "Notes" && (
-                <form className="tree-inline-create root-note-create" onSubmit={submitNewTreeItem}>
-                  <FileText size={15} />
-                  <input autoFocus placeholder="New note" value={newItemName} onChange={(event) => setNewItemName(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setCreatingItem(null); }} />
-                </form>
-              )}
-              {rootNotes.map((note) => (
-                <div className={`tree-row note-tree-row root-note-row ${openNoteId === note.id ? "selected" : ""}`} key={note.id}>
-                  <button type="button" className="tree-row-main" onClick={() => openNoteEditor(note)}>
-                    <FileText size={15} style={{ color: note.color || "#2563eb" }} />
-                    <span>{note.title}</span>
-                  </button>
-                  <button type="button" className="tree-hover-action danger" aria-label={`Delete ${note.title}`} title="Delete note" onClick={() => confirmDeleteNote(note)}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-              {!visibleNotes.length && !folderNames.length && !creatingItem ? <span className="tree-empty">No notes</span> : null}
-              {folderNames.map((folder) => {
-                const folderNotes = grouped[folder] || [];
-                const expanded = openFolders[folder] ?? false;
-                return (
-                  <div className="tree-folder-group" key={folder}>
-                    <div className="tree-row folder-tree-row">
-                      <button type="button" className="tree-row-main" onClick={() => toggleFolder(folder)}>
-                        {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                        <Folder size={15} />
-                        <span>{folder}</span>
-                        <small>{folderNotes.length}</small>
-                      </button>
-                      <button type="button" className="tree-folder-note-action" aria-label={`New note in ${folder}`} title="New note" onClick={() => beginCreate("note", folder)}>
-                        <FilePlus2 size={13} />
-                      </button>
-                      <button type="button" className="tree-hover-action danger" aria-label={`Delete ${folder}`} title="Delete folder" onClick={() => confirmDeleteFolder(folder, folderNotes)}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                    {expanded && (
-                      <div className="tree-children">
-                        {creatingItem?.type === "note" && creatingItem.folder === folder && (
-                          <form className="tree-inline-create note-create" onSubmit={submitNewTreeItem}>
-                            <FileText size={15} />
-                            <input autoFocus placeholder="New note" value={newItemName} onChange={(event) => setNewItemName(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setCreatingItem(null); }} />
-                          </form>
-                        )}
-                        {folderNotes.map((note) => (
-                          <div className={`tree-row note-tree-row ${openNoteId === note.id ? "selected" : ""}`} key={note.id}>
-                            <button type="button" className="tree-row-main" onClick={() => openNoteEditor(note)}>
-                              <FileText size={15} style={{ color: note.color || "#2563eb" }} />
-                              <span>{note.title}</span>
-                            </button>
-                            <button type="button" className="tree-hover-action danger" aria-label={`Delete ${note.title}`} title="Delete note" onClick={() => confirmDeleteNote(note)}>
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        ))}
-                        {!folderNotes.length && !(creatingItem?.type === "note" && creatingItem.folder === folder) && <span className="tree-empty indent">No notes</span>}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="notes-rail-actions">
+              <button type="button" onClick={() => setFolderDraftOpen((current) => !current)} title="Create folder" aria-label="Create folder"><FolderPlus size={17} /></button>
+              <button type="button" onClick={() => newNote("Generated notes")} title="Create note" aria-label="Create note"><FilePlus2 size={17} /></button>
             </div>
+          </header>
+          {folderDraftOpen && (
+            <form className="notes-folder-create" onSubmit={createFolder}>
+              <Folder size={15} />
+              <input autoFocus placeholder="Folder name" value={folderName} onChange={(event) => setFolderName(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setFolderDraftOpen(false); }} />
+              <button type="submit"><Check size={15} /></button>
+            </form>
           )}
+          <div className="notes-date-folder-list">
+            {folderNames.map((folder) => {
+              const folderNotes = grouped[folder] || [];
+              const isDropTarget = dropFolder === folder;
+              return (
+                <section key={folder} className={`notes-date-folder ${isDropTarget ? "drop-target" : ""}`} onDragOver={(event) => { event.preventDefault(); setDropFolder(folder); }} onDragLeave={() => setDropFolder("")} onDrop={(event) => { event.preventDefault(); moveNoteToFolder(event.dataTransfer.getData("text/plain") || draggedNoteId, folder); }}>
+                  <div className="notes-folder-label">
+                    <span><Folder size={16} />{folder}</span>
+                    <small>{folderNotes.length}</small>
+                    {folder !== "Generated notes" && <button type="button" onClick={() => confirmDeleteFolder(folder, folderNotes)} aria-label={`Delete ${folder}`} title={`Delete ${folder}`}><Trash2 size={14} /></button>}
+                  </div>
+                  <div className="notes-folder-notes">
+                    {folderNotes.map((note) => (
+                      <button key={note.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }} onClick={() => openNoteEditor(note)} className={`notes-file-row ${note.id === openNoteId ? "selected" : ""}`}>
+                        <FileText size={15} /><span><strong>{note.title}</strong><small>{note.generated ? "Generated note" : note.updatedAt ? "Edited note" : "Personal note"}</small></span>
+                      </button>
+                    ))}
+                    {!folderNotes.length && <small className="notes-folder-drop-copy">Drop a note here</small>}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+          <label className="notes-import-control">
+            <span><Plus size={16} />Import notes</span>
+            <small>TXT, MD, or CSV</small>
+            <input type="file" accept=".txt,.md,.csv" onChange={importNotes} />
+          </label>
         </aside>
 
-        <div className="notes-main">
+        <article className="notes-content-pane">
           {openNote ? (
-            <form className="note-editor-page" onSubmit={saveOpenNote}>
-              <div className="note-editor-toolbar">
-                <button type="button" className="outline-action" onClick={() => setOpenNoteId("")}>Back to notes</button>
+            <form onSubmit={saveOpenNote} className="notes-reader">
+              <header className="notes-reader-head">
                 <div>
-                  <button type="button" className="outline-action compact-action" disabled={improvingNoteId === openNote.id} onClick={() => improveSavedNote(openNote.id, selectedPlan?.job_title || "", editDraft)}>
-                    {improvingNoteId === openNote.id ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />} Improve with AI
-                  </button>
-                  <button type="button" className="danger-action compact-danger" onClick={() => confirmDeleteNote(openNote)}>
-                    <Trash2 size={15} /> Remove
-                  </button>
-                  <button className="primary"><Save size={16} /> Save</button>
+                  <span>{openNote.generated ? "GENERATED NOTE" : "PERSONAL NOTE"} · {selectedDay?.monthDay}</span>
+                  {isEditing ? <input className="notes-reader-title-input" value={editDraft.title} onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} /> : <h2>{openNote.title}</h2>}
+                  <small>{editDraft.folder || openNote.folder} · {openNote.updatedAt ? "Edited" : "Created"} {formatShortDate(openNote.updatedAt || openNote.createdAt)}</small>
                 </div>
-              </div>
-              <input className="note-editor-title" placeholder="Note title" value={editDraft.title} onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} />
-              <div className="note-editor-meta">
-                <label className="note-color-field">
-                  <Palette size={15} />
-                  <input type="color" value={editDraft.color || openNote.color || "#2563eb"} onChange={(event) => setEditDraft({ ...editDraft, color: event.target.value })} />
-                </label>
-                <input placeholder="Folder" value={editDraft.folder} onChange={(event) => setEditDraft({ ...editDraft, folder: event.target.value })} list="note-folders" />
-                <input placeholder="Subfolder" value={editDraft.subfolder} onChange={(event) => setEditDraft({ ...editDraft, subfolder: event.target.value })} />
-                <span>{openNote.updatedAt ? "Edited" : "Created"} {formatShortDate(openNote.updatedAt || openNote.createdAt)}</span>
-              </div>
-              <textarea className="note-editor-body" placeholder="Write or edit your note here..." value={editDraft.body} onChange={(event) => setEditDraft({ ...editDraft, body: event.target.value })} />
-              <datalist id="note-folders">
-                {noteFolders.map((folder) => <option key={folder} value={folder} />)}
-              </datalist>
+                <div className="notes-reader-actions">
+                  <button type="button" className="outline-action compact-action" disabled={improvingNoteId === openNote.id} onClick={() => improveSavedNote(openNote.id, activePlan?.job_title || selectedJob?.title || "", isEditing ? editDraft : null)}>{improvingNoteId === openNote.id ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}Improve with AI</button>
+                  {isEditing ? <button className="guided-primary-button" type="submit"><Save size={16} />Save changes</button> : <button type="button" className="outline-action compact-action" onClick={() => setIsEditing(true)}><FileText size={15} />Edit note</button>}
+                  <button type="button" className="notes-delete-note" onClick={() => confirmDeleteNote(openNote)} aria-label="Delete note" title="Delete note"><Trash2 size={16} /></button>
+                </div>
+              </header>
+              {isEditing ? (
+                <div className="notes-edit-fields">
+                  <div><label>Folder</label><select value={editDraft.folder} onChange={(event) => setEditDraft({ ...editDraft, folder: event.target.value })}>{folderNames.map((folder) => <option key={folder} value={folder}>{folder}</option>)}</select></div>
+                  <label className="note-color-field"><Palette size={15} /><input type="color" value={editDraft.color || "#ff5d42"} onChange={(event) => setEditDraft({ ...editDraft, color: event.target.value })} /></label>
+                  <textarea value={editDraft.body} onChange={(event) => setEditDraft({ ...editDraft, body: event.target.value })} placeholder="Write or edit your note here..." />
+                </div>
+              ) : (
+                <div className="notes-reader-body">{(openNote.body || "This note is empty. Choose Edit note to start writing.").split(/\n{2,}/).map((paragraph, index) => <p key={`${openNote.id}-${index}`}>{paragraph}</p>)}</div>
+              )}
+              <section className="notes-ask-ai">
+                <div><BrainCircuit size={20} /><span><strong>Ask AI about this note</strong><small>Ask for an explanation, example, or interview-ready answer.</small></span></div>
+                {(openNote.qa || []).map((item) => <article key={item.id}><strong>{item.question}</strong><p>{item.answer}</p>{item.interviewUse && <small>{item.interviewUse}</small>}</article>)}
+                <div className="notes-ask-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about anything in this note..." /><button type="button" disabled={!question.trim() || asking} onClick={askAboutNote}>{asking ? <Loader2 className="spin" size={16} /> : "Ask"}</button></div>
+              </section>
             </form>
           ) : (
-            <section className="note-empty-editor">
-              <NotebookText size={34} />
-              <strong>Select or create a note</strong>
-              <span>Use the folder-plus or note-plus beside the job title, then press Enter to create it.</span>
-              <button type="button" className="outline-action" disabled={!selectedPlanId || loading} onClick={() => generateWorkspaceNote(selectedPlanId, noteDraft.folder || "Generated Notes", noteDraft.subfolder || "")}>
-                {loading ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />} Generate AI Note
-              </button>
-              <label className="import-button">
-                <Plus size={16} /> Import Notes
-                <input type="file" accept=".txt,.md,.csv" onChange={importNotes} />
-              </label>
+            <section className="notes-empty-reader">
+              <NotebookText size={42} />
+              <h2>{visibleNotes.length ? "Choose a note to continue" : "This day is ready for your notes"}</h2>
+              <p>{visibleNotes.length ? "Open a note on the left, drag it into a folder, or create a new note for this preparation day." : "Generated notes from your plan will appear in Generated notes. You can also create a folder, add a personal note, or import existing notes."}</p>
+              <button type="button" className="guided-primary-button" onClick={() => newNote("Generated notes")}><FilePlus2 size={17} />Create a note</button>
             </section>
           )}
-        </div>
+        </article>
       </section>
     </section>
   );
@@ -6935,16 +6991,20 @@ function StatusIndicator({ status }) {
 function PasswordCriteria({ password }) {
   const checks = [
     ["8+ characters", password.length >= 8],
-    ["Has a letter", /[A-Za-z]/.test(password)],
-    ["Has a number", /\d/.test(password)],
+    ["an uppercase letter", /[A-Z]/.test(password)],
+    ["a lowercase letter", /[a-z]/.test(password)],
+    ["a number", /\d/.test(password)],
+    ["a symbol", /[^A-Za-z0-9\s]/.test(password)],
   ];
+  const missing = checks.filter(([, done]) => !done).map(([label]) => label);
+  const missingText = missing.length === 1
+    ? missing[0]
+    : `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}`;
   return (
-    <div className="password-criteria" aria-live="polite">
-      {checks.map(([label, done]) => (
-        <span key={label} className={done ? "met" : ""}>
-          <Check size={12} /> {label}
-        </span>
-      ))}
+    <div className={`password-requirements ${missing.length ? "needed" : "met"}`} aria-live="polite">
+      <span><Check size={16} />Password requirements</span>
+      <p>Use 8+ characters with uppercase and lowercase letters, a number, and a symbol.</p>
+      <small>{missing.length ? `Still needed: ${missingText}.` : "Password requirements complete."}</small>
     </div>
   );
 }
@@ -7768,7 +7828,12 @@ function loadAllowLocalFallback() {
 }
 
 function isStrongPassword(password) {
-  return password.length >= 8 && password.length <= 128 && /[A-Za-z]/.test(password) && /\d/.test(password);
+  return password.length >= 8
+    && password.length <= 128
+    && /[A-Z]/.test(password)
+    && /[a-z]/.test(password)
+    && /\d/.test(password)
+    && /[^A-Za-z0-9\s]/.test(password);
 }
 
 function statusKind(status = "") {
@@ -7925,6 +7990,37 @@ function groupNotesByFolder(notes) {
 function normalizeNoteFolder(folder) {
   if (!folder || folder === "Quick Notes") return "Notes";
   return folder;
+}
+
+function noteFolderName(folder) {
+  return typeof folder === "string" ? folder : folder?.name || "";
+}
+
+function matchesNoteFolder(folder, name, planId = "", noteDate = "") {
+  if (noteFolderName(folder) !== name) return false;
+  if (typeof folder === "string") return !planId && !noteDate;
+  return String(folder.planId || "") === String(planId || "")
+    && String(folder.noteDate || "") === String(noteDate || "");
+}
+
+function hasNoteFolder(folders, name, planId = "", noteDate = "") {
+  return (folders || []).some((folder) => matchesNoteFolder(folder, name, planId, noteDate));
+}
+
+function addNoteFolder(folders, name, planId = "", noteDate = "") {
+  const cleanName = normalizeNoteFolder(name);
+  if (!cleanName || cleanName === "Notes" || cleanName === "Generated notes" || hasNoteFolder(folders, cleanName, planId, noteDate)) return folders;
+  return [{ id: crypto.randomUUID(), name: cleanName, planId: String(planId || ""), noteDate: noteDate || "" }, ...(folders || [])];
+}
+
+function prepDateForDay(plan, selectedJob, day) {
+  const totalDays = Math.max(1, Number(plan?.days_until_interview) || 1);
+  const interviewDate = guidedInterviewDate(selectedJob, plan, totalDays);
+  const startDate = new Date(interviewDate);
+  startDate.setHours(0, 0, 0, 0);
+  startDate.setDate(startDate.getDate() - totalDays);
+  startDate.setDate(startDate.getDate() + Math.max(0, Number(day || 1) - 1));
+  return dateKey(startDate);
 }
 
 function improveNoteLocally(note) {
