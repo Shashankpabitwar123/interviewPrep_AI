@@ -3232,7 +3232,7 @@ function GuidedTodayView({
         <aside className="guided-today-side">
           <article className="guided-side-card guided-progress-meter-card" data-tour="today-week">
             <header><TrendingUp size={24} /><h2>Interview progress</h2></header>
-            <div className="guided-progress-meter-heading"><strong>{preparationDays.length} preparation days</strong><span>Interview {interviewDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span></div>
+            <div className="guided-progress-meter-heading"><strong>{preparationDays.length} preparation days</strong></div>
             <div className="guided-interview-day-meter" aria-label="Preparation progress by day">
               {preparationDays.map((day) => {
                 const dayTasks = buildDailyStudyTasks(plan, day.day);
@@ -3245,8 +3245,11 @@ function GuidedTodayView({
                   </button>
                 );
               })}
+              <div className="guided-interview-day-tile" aria-label={`Interview day: ${interviewDate.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}`}>
+                <span><Target size={15} />{interviewDate.getDate()}</span>
+                <small>Interview day</small>
+              </div>
             </div>
-            <div className="guided-interview-endpoint"><Target size={18} /><span><strong>Interview day</strong><small>{interviewDate.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</small></span></div>
             <div className="guided-selected-day-topic"><small>{selectedDay?.isToday ? "Today’s topic" : `${selectedDay?.monthDay || `Day ${selectedPlanDay}`} topics`}</small><strong>{selectedTopic}</strong></div>
           </article>
 
@@ -3270,21 +3273,26 @@ function buildGuidedPreparationDays(planDays, selectedJob, plan) {
   const maxTaskDay = Math.max(0, ...(planDays || []).map((day) => Number(day.day) || 0));
   const totalDays = Math.max(1, Number(plan?.days_until_interview) || 0, maxTaskDay);
   const interviewDate = guidedInterviewDate(selectedJob, plan, totalDays);
-  const startDate = new Date(interviewDate);
-  startDate.setHours(0, 0, 0, 0);
-  startDate.setDate(startDate.getDate() - totalDays);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const originalStartDate = new Date(interviewDate);
+  originalStartDate.setHours(0, 0, 0, 0);
+  originalStartDate.setDate(originalStartDate.getDate() - totalDays);
+  const preparationEndDate = new Date(interviewDate);
+  preparationEndDate.setHours(0, 0, 0, 0);
+  preparationEndDate.setDate(preparationEndDate.getDate() - 1);
+  const remainingDays = Math.max(0, Math.round((preparationEndDate.getTime() - today.getTime()) / 86400000) + 1);
 
-  return Array.from({ length: totalDays }, (_, index) => {
-    const date = new Date(startDate);
-    date.setDate(startDate.getDate() + index);
-    const difference = Math.round((date.getTime() - today.getTime()) / 86400000);
+  return Array.from({ length: remainingDays }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    const difference = index;
+    const planDay = Math.max(1, Math.round((date.getTime() - originalStartDate.getTime()) / 86400000) + 1);
     return {
-      day: index + 1,
+      day: planDay,
       date,
       isToday: difference === 0,
-      relativeLabel: difference === 0 ? "Today" : difference === 1 ? "Tomorrow" : `Day ${index + 1}`,
+      relativeLabel: difference === 0 ? "Today" : difference === 1 ? "Tomorrow" : `Day ${planDay}`,
       shortLabel: difference === 0 ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" }),
       monthDay: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
     };
