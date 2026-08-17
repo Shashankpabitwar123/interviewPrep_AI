@@ -1661,24 +1661,44 @@
 }
 
 .guided-plan-interview-tile {
+  position: relative;
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  align-items: center;
-  column-gap: 6px;
-  flex: 0 0 112px;
-  min-height: 58px;
-  padding: 8px 9px;
+  place-items: center;
+  align-content: center;
+  flex: 0 0 66px;
+  width: 66px;
+  aspect-ratio: 1;
+  gap: 1px;
+  padding: 7px;
   border: 1px solid var(--approved-coral);
-  border-radius: 10px;
+  border-radius: 50%;
   color: var(--approved-coral);
   background: color-mix(in srgb, var(--approved-coral-soft) 64%, var(--approved-surface-2));
   box-shadow: 0 0 16px var(--approved-coral-soft);
+  cursor: pointer;
+  isolation: isolate;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease;
 }
 
-.guided-plan-interview-tile svg { grid-row: span 2; }
-.guided-plan-interview-tile span { font-size: 10px; font-weight: 700; }
-.guided-plan-interview-tile strong { color: var(--approved-text); font-size: 15px; }
+.guided-plan-interview-tile:hover { transform: translateY(-1px); }
+.guided-plan-interview-tile svg { width: 14px; height: 14px; }
+.guided-plan-interview-tile span { font-size: 9px; font-weight: 700; }
+.guided-plan-interview-tile strong { color: var(--approved-text); font-size: 16px; line-height: 1; }
+.guided-plan-interview-tile.selected {
+  border: 2px solid var(--approved-coral);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--approved-coral) 86%, white), 0 0 0 3px var(--approved-surface-2), 0 0 0 5px color-mix(in srgb, var(--approved-coral) 52%, transparent), 0 0 20px color-mix(in srgb, var(--approved-coral) 42%, transparent);
+}
+.guided-plan-interview-tile.selected::after {
+  position: absolute;
+  z-index: -1;
+  inset: -9px;
+  content: "";
+  border: 1px solid color-mix(in srgb, var(--approved-coral) 68%, transparent);
+  border-radius: inherit;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--approved-coral) 42%, transparent);
+  animation: guided-plan-date-pulse 2.1s ease-in-out infinite;
+  pointer-events: none;
+}
 
 .guided-plan-layout {
   display: grid;
@@ -1698,6 +1718,112 @@
 
 .guided-plan-day-panel {
   padding: 18px;
+}
+
+.guided-interview-day-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(190px, .75fr);
+  align-items: center;
+  gap: 22px;
+  min-height: 290px;
+}
+
+.guided-interview-day-copy {
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.guided-interview-day-copy > span,
+.guided-interview-day-copy h2 { margin: 0; }
+.guided-interview-day-copy > span {
+  color: var(--approved-coral);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+.guided-interview-day-copy h2 { color: var(--approved-text); font-size: clamp(25px, 3vw, 37px); line-height: 1.04; letter-spacing: -.045em; }
+.guided-interview-day-copy p { max-width: 690px; margin: 0; color: var(--approved-soft); font-size: 14px; line-height: 1.55; }
+
+.guided-interview-schedule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 570px;
+  margin-top: 4px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--approved-coral) 58%, var(--approved-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--approved-coral-soft) 54%, var(--approved-surface-2));
+}
+.guided-interview-schedule svg { flex: 0 0 auto; color: var(--approved-coral); }
+.guided-interview-schedule div { display: grid; gap: 2px; min-width: 0; }
+.guided-interview-schedule strong { color: var(--approved-text); font-size: 13px; }
+.guided-interview-schedule span { overflow: hidden; color: var(--approved-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.guided-interview-mascot-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  min-height: 230px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--approved-coral) 38%, var(--approved-line));
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--approved-coral-soft) 72%, var(--approved-surface)) 0%, var(--approved-surface) 64%);
+}
+.guided-interview-mascot-stage::before {
+  position: absolute;
+  width: 158px;
+  height: 158px;
+  border: 1px solid color-mix(in srgb, var(--approved-mint) 52%, transparent);
+  border-radius: 50%;
+  content: "";
+  opacity: .72;
+}
+.guided-interview-mascot-stage img {
+  position: relative;
+  z-index: 1;
+  width: min(205px, 78%);
+  border-radius: 50%;
+  filter: saturate(1.05) brightness(1.06);
+  animation: guided-mascot-celebrate 2.5s ease-in-out infinite;
+}
+.guided-interview-mascot-stage figcaption {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+  color: var(--approved-soft);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+.guided-interview-mascot-stage i {
+  position: absolute;
+  z-index: 2;
+  width: 7px;
+  height: 7px;
+  background: var(--approved-coral);
+  animation: guided-interview-confetti 2.6s ease-in-out infinite;
+}
+.guided-interview-mascot-stage .confetti-one { top: 25%; left: 18%; }
+.guided-interview-mascot-stage .confetti-two { top: 18%; right: 19%; width: 6px; height: 6px; background: var(--approved-mint); animation-delay: -.8s; }
+.guided-interview-mascot-stage .confetti-three { top: 52%; right: 11%; width: 5px; height: 5px; animation-delay: -1.3s; }
+.guided-interview-mascot-stage .confetti-four { top: 46%; left: 10%; width: 5px; height: 5px; background: var(--approved-mint); animation-delay: -1.8s; }
+
+@keyframes guided-mascot-celebrate {
+  0%, 100% { transform: translateY(2px) rotate(-1deg) scale(1); }
+  28% { transform: translateY(-7px) rotate(1deg) scale(1.025); }
+  54% { transform: translateY(0) rotate(-.5deg) scale(1.01); }
+  76% { transform: translateY(-4px) rotate(.5deg) scale(1.02); }
+}
+@keyframes guided-interview-confetti {
+  0%, 100% { opacity: .35; transform: translateY(5px) rotate(0deg); }
+  50% { opacity: 1; transform: translateY(-10px) rotate(26deg); }
 }
 
 .guided-plan-day-head {
@@ -1880,6 +2006,7 @@
 @media (max-width: 900px) {
   .guided-plan-layout { grid-template-columns: 1fr; }
   .guided-plan-side-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .guided-interview-day-panel { grid-template-columns: 1fr minmax(190px, .52fr); }
 }
 
 @media (max-width: 620px) {
@@ -1891,6 +2018,16 @@
   .guided-plan-task { grid-template-columns: 27px 29px minmax(0, 1fr); }
   .guided-plan-task-action { grid-column: 3; justify-self: start; }
   .guided-plan-task-copy strong { white-space: normal; }
+  .guided-plan-interview-tile { flex-basis: 58px; width: 58px; }
+  .guided-interview-day-panel { grid-template-columns: 1fr; min-height: 0; }
+  .guided-interview-mascot-stage { min-height: 205px; }
+  .guided-interview-day-copy h2 { font-size: 27px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guided-plan-interview-tile.selected::after,
+  .guided-interview-mascot-stage img,
+  .guided-interview-mascot-stage i { animation: none; }
 }
 
 /* Saved job analysis: one compact, consistent reading order for every job. */
