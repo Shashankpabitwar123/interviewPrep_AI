@@ -1805,7 +1805,7 @@
   position: relative;
   z-index: 1;
   width: min(232px, 90%);
-  aspect-ratio: 362 / 350;
+  aspect-ratio: 1;
 }
 
 .guided-interview-dance img {

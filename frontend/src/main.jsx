@@ -73,7 +73,7 @@ const JOB_BRIEF_CACHE_KEY = "interviewprep_job_briefs";
 const JOB_BRIEF_CACHE_VERSION = 2;
 const JOB_BRIEF_QA_CACHE_KEY = "interviewprep_job_brief_questions";
 const INTERVIEW_DANCE_FRAMES = Array.from(
-  { length: 12 },
+  { length: 16 },
   (_, index) => `/interview-day-dance/frame-${String(index + 1).padStart(2, "0")}.png`,
 );
 const INTERVIEW_CELEBRATION_CONFETTI = [
@@ -5159,7 +5159,7 @@ function InterviewDayPanel({ plan, allDone, allTasks }) {
 
     const intervalId = window.setInterval(() => {
       setDanceFrame((currentFrame) => (currentFrame + 1) % INTERVIEW_DANCE_FRAMES.length);
-    }, 150);
+    }, 120);
     return () => window.clearInterval(intervalId);
   }, [planComplete]);
 
