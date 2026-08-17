@@ -5175,7 +5175,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             const dayKey = dateKey(day.date);
             const count = notes.filter((note) => String(note.planId || "") === activePlanId && String(note.noteDate || dateKey(new Date())) === dayKey).length;
             return (
-              <button key={dayKey} type="button" className={`notes-date-button ${dayKey === selectedDate ? "selected" : ""} ${day.isToday ? "today" : ""}`} onClick={() => { setSelectedDate(dayKey); setOpenNoteId(""); setIsEditing(false); }}>
+              <button key={dayKey} type="button" aria-label={`${day.shortLabel}, ${count ? `${count} note${count === 1 ? "" : "s"}` : "no notes"}`} className={`notes-date-button ${dayKey === selectedDate ? "selected" : ""} ${day.isToday ? "today" : ""}`} onClick={() => { setSelectedDate(dayKey); setOpenNoteId(""); setIsEditing(false); }}>
                 <strong>{day.date.getDate()}</strong>
                 <span>{day.shortLabel}</span>
                 <small>{count ? `${count} note${count === 1 ? "" : "s"}` : "No notes"}</small>

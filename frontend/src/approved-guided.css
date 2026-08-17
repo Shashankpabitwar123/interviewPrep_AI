@@ -123,25 +123,27 @@
 
 .notes-date-scroll {
   display: flex;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 14px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  padding-bottom: 4px;
+  padding: 2px 2px 5px;
   scrollbar-color: var(--approved-line) transparent;
+  scroll-snap-type: x proximity;
 }
 
 .notes-date-button {
-  flex: 0 0 108px;
-  min-height: 92px;
+  flex: 0 0 76px;
+  min-height: 58px;
   display: grid;
   justify-items: center;
   align-content: center;
-  gap: 3px;
+  gap: 4px;
   border: 1px solid var(--approved-line);
-  border-radius: 11px;
+  border-radius: 8px;
   color: var(--approved-soft);
   background: var(--approved-surface-2);
+  scroll-snap-align: start;
   transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
@@ -152,18 +154,18 @@
 
 .notes-date-button strong {
   color: var(--approved-text);
-  font-size: 21px;
+  font-size: 17px;
+  line-height: 1;
 }
 
 .notes-date-button span {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
+  line-height: 1;
 }
 
 .notes-date-button small {
-  color: var(--approved-muted);
-  font-size: 10px;
-  font-weight: 700;
+  display: none;
 }
 
 .notes-date-button.selected {
@@ -174,7 +176,7 @@
 }
 
 .notes-date-button.selected strong,
-.notes-date-button.selected small {
+.notes-date-button.selected span {
   color: var(--approved-coral);
 }
 
@@ -696,7 +698,7 @@
   }
 
   .notes-date-button {
-    flex-basis: 86px;
+    flex-basis: 70px;
   }
 
   .notes-reader-head {
