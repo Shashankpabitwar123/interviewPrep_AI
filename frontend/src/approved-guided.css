@@ -335,6 +335,22 @@
   text-align: left;
 }
 
+.notes-folder-select-button small {
+  margin-left: auto;
+  color: var(--approved-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.notes-folder-select-button > svg:first-child {
+  flex: 0 0 auto;
+  transition: transform 0.16s ease;
+}
+
+.notes-folder-select-button > svg:first-child.expanded {
+  transform: rotate(90deg);
+}
+
 .notes-folder-select-button svg,
 .notes-folder-rename svg {
   color: var(--approved-coral);
@@ -541,6 +557,17 @@
   padding: 0 13px;
 }
 
+.notes-autosave-status {
+  align-self: center;
+  color: var(--approved-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notes-autosave-status.saving {
+  color: var(--approved-coral);
+}
+
 .notes-delete-note:hover {
   border-color: #f45d3f;
   color: #f45d3f;
@@ -605,6 +632,21 @@
   resize: vertical;
   font: inherit;
   line-height: 1.75;
+}
+
+.notes-direct-editor textarea {
+  min-height: 430px;
+  background: var(--approved-surface);
+}
+
+.notes-file-create {
+  border-color: color-mix(in srgb, var(--approved-mint) 78%, var(--approved-line));
+  color: var(--approved-mint);
+  background: color-mix(in srgb, var(--approved-mint) 10%, var(--approved-surface));
+}
+
+.notes-file-create button {
+  color: var(--approved-mint);
 }
 
 .notes-color-picker {
