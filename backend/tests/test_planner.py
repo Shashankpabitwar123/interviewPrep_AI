@@ -2,7 +2,19 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import Settings
 from app.schemas.prep_plan import PrepPlanRequest, PrepTaskType
+from app.services import planner
 from app.services.planner import generate_prep_plan
+
+
+def test_prep_days_follow_calendar_dates_instead_of_rounded_hours(monkeypatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 17, 14, 0, tzinfo=tz)
+
+    monkeypatch.setattr(planner, "datetime", FixedDateTime)
+
+    assert planner._days_until(datetime(2026, 8, 28, 23, 59, tzinfo=timezone.utc)) == 11
 
 
 def test_generate_four_day_plan_includes_diagnostic_and_revision() -> None:

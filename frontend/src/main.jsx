@@ -7812,7 +7812,7 @@ function samplePlanDays() {
 }
 
 function buildDailyStudyTasks(plan, day) {
-  const planTasks = plan?.tasks?.filter((task) => task.day === day) || [];
+  const planTasks = plan?.tasks?.filter((task) => displayPlanDay(plan, task.day) === Number(day)) || [];
   const studySources = planTasks
     .filter((task) => !["exam", "practice_exam", "mock_interview"].includes(task.task_type))
     .slice(0, 3);
@@ -7861,7 +7861,7 @@ function countCompletedDayTasks(dayTasks, completedTasks) {
 }
 
 function topicsForStudyDay(plan, day) {
-  const tasks = plan?.tasks?.filter((task) => task.day === day) || [];
+  const tasks = plan?.tasks?.filter((task) => displayPlanDay(plan, task.day) === Number(day)) || [];
   const topics = tasks.flatMap((task) => task.topics || []);
   const unique = [...new Set(topics.filter(Boolean))];
   if (unique.length) return unique;
@@ -7877,8 +7877,8 @@ function topicsForWholePlan(plan) {
 function topicsThroughPlanDay(plan, day) {
   const seen = new Set();
   return (plan?.tasks || [])
-    .filter((task) => Number(task.day) <= Number(day))
-    .sort((left, right) => Number(left.day) - Number(right.day))
+    .filter((task) => displayPlanDay(plan, task.day) <= Number(day))
+    .sort((left, right) => displayPlanDay(plan, left.day) - displayPlanDay(plan, right.day))
     .flatMap((task) => task.topics || [])
     .filter((topic) => {
       const normalized = String(topic || "").trim().toLocaleLowerCase();
@@ -7889,22 +7889,46 @@ function topicsThroughPlanDay(plan, day) {
 }
 
 function buildPlanCalendarDays(plan) {
-  const taskDays = [...new Set((plan?.tasks || []).map((task) => Number(task.day)).filter(Boolean))].sort((a, b) => a - b);
-  const totalDays = Math.max(Number(plan?.days_until_interview) || 0, taskDays.at(-1) || 0, 1);
-  const rawInterview = plan?.interview_at || plan?.interview_date;
-  const parsedInterview = rawInterview ? new Date(rawInterview) : null;
-  const interviewDate = parsedInterview && !Number.isNaN(parsedInterview.getTime())
-    ? parsedInterview
-    : new Date(Date.now() + totalDays * 86_400_000);
-  interviewDate.setHours(12, 0, 0, 0);
-  const startDate = new Date(interviewDate);
-  startDate.setDate(interviewDate.getDate() - totalDays);
+  const interviewDate = planInterviewDate(plan);
+  const startDate = startOfLocalDay(new Date());
+  const totalDays = preparationCalendarDayCount(plan, interviewDate);
   const today = dateKey(new Date());
   return Array.from({ length: totalDays }, (_, index) => {
     const date = new Date(startDate);
     date.setDate(startDate.getDate() + index);
     return { day: index + 1, date, isToday: dateKey(date) === today, interviewDate };
   });
+}
+
+function startOfLocalDay(value) {
+  const date = new Date(value);
+  date.setHours(12, 0, 0, 0);
+  return date;
+}
+
+function planInterviewDate(plan) {
+  const rawInterview = plan?.interview_at || plan?.interview_date;
+  const fallbackDays = Math.max(Number(plan?.days_until_interview) || 0, 1);
+  const fallback = startOfLocalDay(new Date());
+  fallback.setDate(fallback.getDate() + fallbackDays);
+  if (!rawInterview) return fallback;
+
+  const dateOnly = String(rawInterview).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const parsed = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12)
+    : new Date(rawInterview);
+  return Number.isNaN(parsed.getTime()) ? fallback : startOfLocalDay(parsed);
+}
+
+function preparationCalendarDayCount(plan, interviewDate = planInterviewDate(plan)) {
+  const today = startOfLocalDay(new Date());
+  const calendarDays = Math.round((interviewDate.getTime() - today.getTime()) / 86_400_000);
+  return Math.max(1, calendarDays);
+}
+
+function displayPlanDay(plan, taskDay) {
+  const totalDays = preparationCalendarDayCount(plan);
+  return Math.min(Math.max(Number(taskDay) || 1, 1), totalDays);
 }
 
 function formatPlanDate(value) {

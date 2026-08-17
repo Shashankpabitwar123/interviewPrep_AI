@@ -1574,27 +1574,31 @@
 
 .guided-plan-date-rail {
   display: flex;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 16px;
   overflow-x: auto;
-  padding: 2px 1px 5px;
+  padding: 8px 8px 12px;
   scrollbar-width: thin;
   overscroll-behavior-inline: contain;
 }
 
 .guided-plan-date {
+  position: relative;
   display: grid;
   place-items: center;
   align-content: center;
-  flex: 0 0 70px;
-  min-height: 58px;
+  flex: 0 0 66px;
+  width: 66px;
+  aspect-ratio: 1;
   gap: 2px;
-  padding: 8px 7px;
+  padding: 7px;
   border: 1px solid var(--approved-line);
-  border-radius: 10px;
+  border-radius: 50%;
   color: var(--approved-muted);
   background: var(--approved-surface-2);
   cursor: pointer;
-  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+  isolation: isolate;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease;
 }
 
 .guided-plan-date:hover {
@@ -1614,9 +1618,21 @@
 }
 
 .guided-plan-date.selected {
-  border-color: var(--approved-coral);
-  box-shadow: inset 0 0 0 1px var(--approved-coral), 0 0 0 3px var(--approved-coral-soft);
+  border: 2px solid var(--approved-coral);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--approved-coral) 86%, white), 0 0 0 3px var(--approved-surface-2), 0 0 0 5px color-mix(in srgb, var(--approved-coral) 52%, transparent), 0 0 20px color-mix(in srgb, var(--approved-coral) 42%, transparent);
   background: color-mix(in srgb, var(--approved-coral-soft) 55%, var(--approved-surface-2));
+}
+
+.guided-plan-date.selected::after {
+  position: absolute;
+  z-index: -1;
+  inset: -9px;
+  content: "";
+  border: 1px solid color-mix(in srgb, var(--approved-coral) 68%, transparent);
+  border-radius: inherit;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--approved-coral) 42%, transparent);
+  animation: guided-plan-date-pulse 2.1s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .guided-plan-date.selected strong,
@@ -1636,7 +1652,12 @@
 
 .guided-plan-date.complete.selected {
   border-color: var(--approved-coral);
-  box-shadow: inset 0 0 0 1px var(--approved-coral), 0 0 0 3px var(--approved-coral-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--approved-coral) 86%, white), 0 0 0 3px var(--approved-surface-2), 0 0 0 5px color-mix(in srgb, var(--approved-coral) 52%, transparent), 0 0 20px color-mix(in srgb, var(--approved-coral) 42%, transparent);
+}
+
+@keyframes guided-plan-date-pulse {
+  0%, 100% { opacity: .32; transform: scale(.92); }
+  50% { opacity: .86; transform: scale(1.03); }
 }
 
 .guided-plan-interview-tile {
@@ -1864,7 +1885,7 @@
 @media (max-width: 620px) {
   .guided-plan-heading { align-items: start; flex-direction: column; }
   .guided-plan-heading-progress { justify-content: start; }
-  .guided-plan-date { flex-basis: 62px; }
+  .guided-plan-date { flex-basis: 58px; width: 58px; }
   .guided-plan-side-stack { grid-template-columns: 1fr; }
   .guided-plan-day-panel { padding: 13px; }
   .guided-plan-task { grid-template-columns: 27px 29px minmax(0, 1fr); }

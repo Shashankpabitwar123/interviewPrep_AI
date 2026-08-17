@@ -1,6 +1,5 @@
 from datetime import datetime
 import logging
-import math
 import re
 from typing import Optional
 
@@ -366,8 +365,10 @@ def _gemini_plan_schema() -> dict:
 
 def _days_until(interview_at: datetime) -> int:
     now = datetime.now(interview_at.tzinfo)
-    seconds = max((interview_at - now).total_seconds(), 0)
-    return max(1, math.ceil(seconds / 86_400))
+    # Plans are organized by preparation *dates*, not rounded 24-hour windows.
+    # That keeps a plan for Aug 28 starting on Aug 17 (not Aug 16) regardless
+    # of the time of day when the user creates it.
+    return max(1, (interview_at.date() - now.date()).days)
 
 
 def _detect_skills(job_description: str) -> list[SkillSignal]:
