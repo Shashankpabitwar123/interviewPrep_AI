@@ -2323,16 +2323,18 @@ function App() {
           />
 
           <main className={`guided-app-main ${activeView === "dashboard" ? "guided-app-main--today" : ""}`}>
-            <GuidedJobContextBar
-              selectedJob={selectedContextJob}
-              selectedPlan={plan}
-              jobs={jobs}
-              jobMarkers={jobMarkers}
-              open={jobSwitcherOpen}
-              setOpen={setJobSwitcherOpen}
-              onSelect={useSavedJob}
-              onAddJob={openAddJobModal}
-            />
+            {activeView !== "jobs" && (
+              <GuidedJobContextBar
+                selectedJob={selectedContextJob}
+                selectedPlan={plan}
+                jobs={jobs}
+                jobMarkers={jobMarkers}
+                open={jobSwitcherOpen}
+                setOpen={setJobSwitcherOpen}
+                onSelect={useSavedJob}
+                onAddJob={openAddJobModal}
+              />
+            )}
 
         {activeView === "dashboard" && (
           <GuidedTodayView
@@ -4441,6 +4443,7 @@ function JobsView({
     : [];
   const completedPlanTasks = selectedPlanTasks.filter((task) => isTaskComplete(task, completedTasks)).length;
   const nextTask = selectedPlanTasks.find((task) => !isTaskComplete(task, completedTasks));
+  const allPlanTasksComplete = selectedPlanIsLoaded && selectedPlanTasks.length > 0 && completedPlanTasks >= selectedPlanTasks.length;
   const matchingPlanId = matchingPlan?.id;
   const practiceAttempts = [...examAttempts, ...mockAttempts].filter((attempt) => String(attempt.prepPlanId || attempt.prep_plan_id) === String(matchingPlanId));
   const readinessScore = selectedPlanIsLoaded
@@ -4557,14 +4560,15 @@ function JobsView({
   return (
     <section className="guided-jobs-page">
       <header className="guided-jobs-heading">
-        <div><small>Your opportunities</small><h1>Jobs</h1><p>Every role keeps its job analysis, plan, learning, practice, and readiness together.</p></div>
-        <button className="guided-primary-button" onClick={onAddJob}><Plus size={19} />Add a job</button>
+        <div><span className="guided-jobs-title-line"><h1>Jobs</h1><b>{jobs.length}</b></span><p>Select a role to review its plan, source, and interview focus.</p></div>
+        <button className="guided-primary-button guided-jobs-add-button" onClick={onAddJob}><Plus size={17} />Add job</button>
       </header>
 
       <div className="guided-jobs-layout">
         <aside className="guided-job-list-panel">
+          <header className="guided-job-list-header"><strong>Saved jobs</strong><span>{filteredJobs.length} shown</span></header>
           <div className="guided-job-search-row">
-            <label><Search size={18} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search jobs" /></label>
+            <label><Search size={16} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search" /></label>
             {deleteMode ? (
               <div className="guided-delete-mode-actions">
                 <button className="cancel" title="Exit delete mode" onClick={cancelDeleteMode}><X size={18} /></button>
@@ -4586,8 +4590,8 @@ function JobsView({
                   {deleteMode && <input type="checkbox" checked={selected} onChange={() => toggleJobSelection(job.id)} aria-label={`Select ${job.title}`} />}
                   <button onClick={() => chooseJob(job)}>
                     <i style={{ backgroundColor: job.color || "#fc5b40" }} />
-                    <span><strong>{job.title}</strong><small>{job.company || companyFromUrl(job.source_url) || "Saved job"}</small><em>{jobPlan ? "Plan active" : "Job saved"}</em></span>
-                    <b>{jobProgress}%</b>
+                    <span><strong>{job.title}</strong><small>{job.company || companyFromUrl(job.source_url) || "Saved job"}</small><em>{jobPlan ? "Plan active" : "Saved"}</em></span>
+                    <b>{isCurrent && selectedPlanIsLoaded ? `${jobProgress}%` : jobPlan ? "Plan" : "Saved"}</b>
                   </button>
                 </div>
               );
@@ -4613,12 +4617,12 @@ function JobsView({
                 <div className="guided-job-overview">
                   <article className={`guided-job-plan-status ${matchingPlan ? "active" : "saved"}`}>
                     {matchingPlan ? <CheckCircle2 size={22} /> : <BriefcaseBusiness size={22} />}
-                    <span><strong>{matchingPlan ? "Your preparation plan is active" : "This job is saved"}</strong><small>{matchingPlan ? `${matchingPlan.days_until_interview} days · ${matchingPlan.task_count} tasks${selectedPlanIsLoaded ? ` · ${completedPlanTasks} completed` : ""}` : "Generate a plan when you are ready to begin preparing."}</small></span>
+                    <span><strong>{matchingPlan ? "Plan active" : "Job saved"}</strong><small>{matchingPlan ? `${matchingPlan.days_until_interview} days · ${matchingPlan.task_count} tasks${selectedPlanIsLoaded ? ` · ${completedPlanTasks} complete` : ""}` : "Create a plan when you are ready to prepare."}</small></span>
                     <button className="guided-secondary-button" onClick={() => matchingPlan ? onOpenPlan(matchingPlan.id) : onSelectJob(selectedJob)}>{matchingPlan ? "Open plan" : "Create plan"}</button>
                   </article>
                   <div className="guided-job-metrics">
-                    <GuidedJobMetric label="Readiness" value={`${readinessScore}%`} detail={readinessScore >= 70 ? "On track" : matchingPlan ? "Keep preparing" : "Plan not started"} />
-                    <GuidedJobMetric label="Next task" value={nextTask?.title?.replace(/^Read notes:\s*/i, "") || (matchingPlan ? "Open plan" : "Create plan")} detail={nextTask ? `${guidedTaskDuration(nextTask)} minutes` : matchingPlan ? `${matchingPlan.task_count} planned tasks` : "No tasks yet"} />
+                    <GuidedJobMetric label="Readiness" value={selectedPlanIsLoaded ? `${readinessScore}%` : "—"} detail={selectedPlanIsLoaded ? readinessScore >= 70 ? "On track" : "Keep preparing" : matchingPlan ? "Open plan to view" : "Plan not started"} />
+                    <GuidedJobMetric label="Next task" value={allPlanTasksComplete ? "All tasks complete" : nextTask?.title?.replace(/^Read notes:\s*/i, "") || (matchingPlan ? "Open plan" : "Create plan")} detail={allPlanTasksComplete ? "Review or practice again" : nextTask ? `${guidedTaskDuration(nextTask)} minutes` : matchingPlan ? `${matchingPlan.task_count} planned tasks` : "No tasks yet"} />
                     <GuidedJobMetric label="Practice" value={`${practiceAttempts.length} ${practiceAttempts.length === 1 ? "attempt" : "attempts"}`} detail={practiceAttempts.length ? "Exams and mock interviews" : "No attempts yet"} />
                   </div>
                   <article className="guided-job-source-panel">
@@ -4633,7 +4637,7 @@ function JobsView({
                         <a className="guided-job-source-link" href={normalizeUrl(selectedJob.source_url)} target="_blank" rel="noopener noreferrer"><span>{displayUrl(selectedJob.source_url)}</span><ExternalLink size={15} /></a>
                       </>
                     )}
-                    {requiredSkills.length > 0 && <div className="guided-job-tags">{requiredSkills.slice(0, 6).map((skill) => <span key={skill}>{skill}</span>)}</div>}
+                    {requiredSkills.length > 0 && <div className="guided-job-focus"><small>Preparation focus</small><div className="guided-job-tags">{requiredSkills.slice(0, 6).map((skill) => <span key={skill}>{shortJobFocusLabel(skill)}</span>)}</div></div>}
                   </article>
                 </div>
               ) : (
@@ -4673,6 +4677,18 @@ function JobsView({
 
 function GuidedJobMetric({ label, value, detail }) {
   return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
+}
+
+function shortJobFocusLabel(value) {
+  const clean = String(value || "")
+    .replace(/^mention\s+/i, "")
+    .replace(/^working knowledge of\s+/i, "")
+    .replace(/\s+only where you can connect it to a real example\.?$/i, "")
+    .replace(/\s+as it appears in the job description\.?$/i, "")
+    .replace(/[.]+$/, "")
+    .trim();
+  if (!clean) return "Role requirement";
+  return clean.length > 34 ? `${clean.slice(0, 32).trim()}…` : clean;
 }
 
 function summarizeJobForWorkspace(description, job) {
