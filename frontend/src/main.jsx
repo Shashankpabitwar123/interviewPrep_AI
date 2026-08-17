@@ -2322,7 +2322,7 @@ function App() {
             onLogout={logout}
           />
 
-          <main className="guided-app-main">
+          <main className={`guided-app-main ${activeView === "dashboard" ? "guided-app-main--today" : ""}`}>
             <GuidedJobContextBar
               selectedJob={selectedContextJob}
               selectedPlan={plan}
