@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +9,9 @@ class ExamGenerateRequest(BaseModel):
     question_count: int = Field(default=20, ge=3, le=60)
     difficulty: str = Field(default="medium", examples=["easy", "medium", "hard"])
     time_limit_minutes: Optional[int] = Field(default=None, ge=5, le=180)
+    # Plan-page scopes are resolved on the server from the stored prep plan.
+    # ``custom_topics`` keeps the existing Exams page API backward compatible.
+    scope: Optional[Literal["selected_day", "through_selected_day", "custom_topics"]] = None
     focus_topics: Optional[list[str]] = None
     auto_question_types: bool = True
     question_types: list[str] = Field(
@@ -37,6 +40,7 @@ class ExamResponse(BaseModel):
     prep_plan_id: int
     title: str
     day: int
+    scope: str
     time_limit_minutes: int
     questions: list[QuestionResponse]
 

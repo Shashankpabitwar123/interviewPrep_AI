@@ -1304,6 +1304,7 @@ function App() {
     setStatus("Generating Exam");
     try {
       const focusTopics = options.focusTopics || null;
+      const scope = options.scope || (focusTopics?.length ? "custom_topics" : "selected_day");
       const response = await apiFetch(`/exams/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1315,6 +1316,7 @@ function App() {
           time_limit_minutes: Number(effectiveSettings.timeLimit),
           question_types: questionTypes,
           auto_question_types: effectiveSettings.questionTypes.includes("auto"),
+          scope,
           focus_topics: focusTopics,
         }),
       });
@@ -1330,6 +1332,8 @@ function App() {
         difficulty: effectiveSettings.difficulty,
         questionTypes: effectiveSettings.questionTypes.includes("auto") ? ["AI selected"] : effectiveSettings.questionTypes,
         focusTopics,
+        scope: generatedExam.scope || scope,
+        scopeLabel: examScopeLabel(generatedExam.scope || scope, day),
         jobColor: colorForPlan(sourcePlan, jobMarkers),
         status: "ready",
         createdAt: new Date().toISOString(),
@@ -2919,7 +2923,7 @@ function App() {
             const prompt = practiceExamPrompt;
             setPracticeExamPrompt(null);
             generateExam(prompt.day, {
-              focusTopics: prompt.focusTopics,
+              scope: "selected_day",
               taskKey: prompt.taskKey,
               settingsOverride,
             });
@@ -4936,89 +4940,159 @@ function descriptionPreview(description) {
   return clean.length <= 120 ? clean : `${clean.slice(0, 117).trimEnd()}...`;
 }
 
-function PrepPlanView({ plan, savedPlans, selectedPlanDay, setSelectedPlanDay, completedTasks, toggleTaskDone, loadPrepPlan, removePrepPlan, generateExam, startStudyTask, isStudyNoteGenerated, loading, loadingStudyTaskId, loadingExamTaskId, jobMarkers }) {
-  const planDays = buildPlanMilestones(plan, "");
-  const selectedTasks = buildDailyStudyTasks(plan, selectedPlanDay);
-  return (
-    <section className="page-stack">
-      <section className="panel page-panel">
-        <PanelTitle
-          icon={ClipboardList}
-          title={plan ? plan.job_title : "Prep Plan"}
-          subtitle={plan ? `${plan.days_until_interview} days to interview • ${sourceLabel(plan.plan_source)}` : "Choose a saved prep plan from the list below."}
-        />
-        {plan ? (
-          <>
-            <PlanStepper days={planDays} selectedDay={selectedPlanDay} onSelectDay={setSelectedPlanDay} />
-            <PlanDayCarousel
-              days={planDays}
-              selectedDay={selectedPlanDay}
-              completedTasks={completedTasks}
-              plan={plan}
-              onSelectDay={setSelectedPlanDay}
-              compact
-            />
-            <div className="detail-grid">
-              <div>
-                <h3>Day {selectedPlanDay} Tasks</h3>
-                <div className="task-table">
-                  {selectedTasks.map((task) => (
-                    <div className={`task-row detail-task study-task-row ${task.task_type === "practice_exam" ? "exam-task" : ""}`} key={task.id || task.title}>
-                      <div>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(completedTasks[`${dateKey(new Date())}:task:${task.id || task.title}`])}
-                          onChange={() => toggleTaskDone(task)}
-                        />
-                        <span>{task.title}</span>
-                      </div>
-                      <small>{task.topics?.join(", ")}</small>
-                      <em>{task.task_type === "practice_exam" ? "Practice exam" : "Study notes"}</em>
-                      <button type="button" onClick={() => startStudyTask(task)} disabled={isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId)}>
-                        {isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) ? <><Loader2 className="spin" size={15} /> Generating...</> : isStudyNoteGenerated?.(task) ? "Open" : "Start"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <aside className="plan-summary-box">
-                <strong>Plan Summary</strong>
-                <p>{plan.plan_summary}</p>
-                <button
-                  className="primary"
-                  disabled={loading}
-                  onClick={() => startStudyTask({
-                    id: `day-${selectedPlanDay}-practice-exam`,
-                    day: selectedPlanDay,
-                    title: `Practice exam for Day ${selectedPlanDay}`,
-                    topics: selectedTasks.flatMap((task) => task.topics || []),
-                    task_type: "practice_exam",
-                  })}
-                >
-                  <FileQuestion size={16} /> Generate Practice Exam
-                </button>
-              </aside>
-            </div>
-          </>
-        ) : (
-          <EmptyState text="No prep plan is open yet. Pick a saved plan below." />
-        )}
-      </section>
+function PrepPlanView({ plan, selectedPlanDay, setSelectedPlanDay, completedTasks, toggleTaskDone, generateExam, startStudyTask, isStudyNoteGenerated, loading, loadingStudyTaskId, loadingExamTaskId }) {
+  const [extraOpen, setExtraOpen] = useState(false);
+  const [extraScope, setExtraScope] = useState("selected_day");
+  const [extraDifficulty, setExtraDifficulty] = useState("medium");
+  const calendarDays = useMemo(() => buildPlanCalendarDays(plan), [plan]);
+  const activeDay = calendarDays.some((item) => item.day === selectedPlanDay) ? selectedPlanDay : calendarDays[0]?.day || 1;
+  const selectedCalendarDay = calendarDays.find((item) => item.day === activeDay);
+  const selectedTasks = useMemo(() => buildDailyStudyTasks(plan, activeDay), [plan, activeDay]);
+  const selectedDone = countCompletedDayTasks(selectedTasks, completedTasks);
+  const allTasks = useMemo(() => calendarDays.flatMap((item) => buildDailyStudyTasks(plan, item.day)), [calendarDays, plan]);
+  const allDone = countCompletedDayTasks(allTasks, completedTasks);
+  const scopeTopics = extraScope === "through_selected_day" ? topicsThroughPlanDay(plan, activeDay) : topicsForStudyDay(plan, activeDay);
+  const selectedIsComplete = selectedTasks.length > 0 && selectedDone === selectedTasks.length;
+  const handleExtraExam = () => {
+    generateExam(activeDay, {
+      scope: extraScope,
+      taskKey: `extra-${extraScope}-day-${activeDay}`,
+      settingsOverride: settingsForDifficulty(extraDifficulty),
+    });
+  };
 
-      <section className="panel page-panel">
-        <PanelTitle icon={BookOpen} title="Saved Plans" />
-        <div className="plan-list compact">
-          {savedPlans.map((savedPlan) => (
-            <div className="plan-list-row" key={savedPlan.id} role="button" tabIndex={0} onClick={() => loadPrepPlan(savedPlan.id)}>
-              <div>
-                <strong><span className="inline-color-dot" style={{ background: colorForJobId(savedPlan.job_post_id, jobMarkers, savedPlan.job_title) }} />{savedPlan.job_title}</strong>
-                <span>{savedPlan.days_until_interview} days left • {savedPlan.task_count} tasks</span>
-              </div>
-              <button className="remove-button" onClick={(event) => { event.stopPropagation(); removePrepPlan(savedPlan.id); }}>Remove</button>
-            </div>
-          ))}
+  if (!plan) {
+    return (
+      <section className="page-stack guided-plan-page">
+        <section className="guided-plan-empty panel">
+          <ClipboardList size={21} />
+          <div><h1>Plan</h1><p>Add a job and generate a prep plan to see your schedule here.</p></div>
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <section className="page-stack guided-plan-page">
+      <header className="guided-plan-heading">
+        <div>
+          <span>PREPARATION PLAN</span>
+          <h1>{plan.job_title}</h1>
+          <p>{calendarDays.length} preparation days · Interview {formatPlanDate(calendarDays.at(-1)?.interviewDate)}</p>
+        </div>
+        <div className="guided-plan-heading-progress" aria-label="Overall preparation progress">
+          <strong>{allDone}/{allTasks.length || 0}</strong>
+          <span>tasks complete</span>
+        </div>
+      </header>
+
+      <section className="guided-plan-calendar panel" aria-label="Preparation dates">
+        <div className="guided-plan-calendar-head">
+          <span><CalendarDays size={17} /> Select a preparation day</span>
+          <small>Interview {formatPlanDate(calendarDays.at(-1)?.interviewDate)}</small>
+        </div>
+        <div className="guided-plan-date-rail">
+          {calendarDays.map((item) => {
+            const complete = isPlanDayComplete(plan, item.day, completedTasks);
+            return (
+              <button
+                type="button"
+                key={item.day}
+                className={`guided-plan-date ${item.day === activeDay ? "selected" : ""} ${complete ? "complete" : ""}`}
+                onClick={() => setSelectedPlanDay(item.day)}
+              >
+                <strong>{item.date.getDate()}</strong>
+                <span>{item.isToday ? "Today" : item.date.toLocaleDateString(undefined, { weekday: "short" })}</span>
+              </button>
+            );
+          })}
+          <div className="guided-plan-interview-tile" aria-label={`Interview day ${formatPlanDate(calendarDays.at(-1)?.interviewDate)}`}>
+            <Target size={15} />
+            <span>Interview day</span>
+            <strong>{calendarDays.at(-1)?.interviewDate?.getDate()}</strong>
+          </div>
         </div>
       </section>
+
+      <div className="guided-plan-layout">
+        <section className="guided-plan-day-panel panel">
+          <div className="guided-plan-day-head">
+            <div>
+              <span>{selectedCalendarDay?.isToday ? "TODAY" : `DAY ${activeDay}`}</span>
+              <h2>{selectedCalendarDay?.isToday ? "Today's preparation" : `Preparation for ${formatPlanDate(selectedCalendarDay?.date)}`}</h2>
+            </div>
+            <em className={selectedIsComplete ? "complete" : ""}>{selectedDone}/{selectedTasks.length} complete</em>
+          </div>
+          <div className="guided-plan-topic-row" aria-label="Topics for this day">
+            {topicsForStudyDay(plan, activeDay).slice(0, 4).map((topic) => <span key={topic}>{topic}</span>)}
+          </div>
+          <div className="guided-plan-task-list">
+            {selectedTasks.map((task, index) => {
+              const complete = isTaskComplete(task, completedTasks);
+              const generating = isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId);
+              const examTask = task.task_type === "practice_exam";
+              const action = generating ? "Preparing" : examTask ? "Choose difficulty" : isStudyNoteGenerated?.(task) ? "Open notes" : "Generate note";
+              return (
+                <article className={`guided-plan-task ${complete ? "complete" : ""}`} key={task.id || task.title}>
+                  <button type="button" className="guided-plan-task-check" onClick={() => toggleTaskDone(task)} aria-label={`${complete ? "Mark incomplete" : "Mark complete"}: ${task.title}`}>
+                    {complete ? <Check size={15} /> : index + 1}
+                  </button>
+                  <div className="guided-plan-task-icon">{examTask ? <FileQuestion size={17} /> : <NotebookText size={17} />}</div>
+                  <div className="guided-plan-task-copy">
+                    <strong>{task.title}</strong>
+                    <span>{examTask ? "Practice exam" : "Study note"} · {task.duration_minutes || (examTask ? 30 : 35)} min</span>
+                  </div>
+                  <button type="button" className="guided-plan-task-action" onClick={() => startStudyTask(task)} disabled={generating || loading}>
+                    {generating ? <Loader2 size={15} className="spin" /> : null}{action}<ChevronRight size={15} />
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <aside className="guided-plan-side-stack">
+          <section className="guided-plan-health panel">
+            <div><TrendingUp size={18} /><span>Plan health</span></div>
+            <strong>{Math.round((allDone / Math.max(1, allTasks.length)) * 100)}%</strong>
+            <p>{calendarDays.length - calendarDays.filter((item) => isPlanDayComplete(plan, item.day, completedTasks)).length} days still to complete</p>
+            <div className="guided-plan-progress-track"><span style={{ width: `${Math.round((allDone / Math.max(1, allTasks.length)) * 100)}%` }} /></div>
+          </section>
+
+          <section className={`guided-extra-exam panel ${extraOpen ? "open" : ""}`}>
+            <button type="button" className="guided-extra-exam-trigger" onClick={() => setExtraOpen((current) => !current)}>
+              <span><FileQuestion size={18} /> Extra practice exam</span><ChevronDown size={17} />
+            </button>
+            {extraOpen && (
+              <div className="guided-extra-exam-body">
+                <p>Generate an additional exam without changing today’s scheduled practice.</p>
+                <div className="guided-extra-scope-grid" role="radiogroup" aria-label="Exam coverage">
+                  <button type="button" className={extraScope === "selected_day" ? "selected" : ""} onClick={() => setExtraScope("selected_day")}>
+                    <strong>{selectedCalendarDay?.isToday ? "Today only" : `Day ${activeDay} only`}</strong>
+                    <span>Only this day’s notes and topics</span>
+                  </button>
+                  <button type="button" className={extraScope === "through_selected_day" ? "selected" : ""} onClick={() => setExtraScope("through_selected_day")}>
+                    <strong>Syllabus through Day {activeDay}</strong>
+                    <span>Everything learned so far, never future topics</span>
+                  </button>
+                </div>
+                <div className="guided-extra-topic-list">
+                  {scopeTopics.slice(0, 6).map((topic) => <span key={topic}>{topic}</span>)}
+                </div>
+                <div className="guided-extra-exam-footer">
+                  <div className="guided-extra-difficulty" aria-label="Exam difficulty">
+                    {["easy", "medium", "hard"].map((difficulty) => <button type="button" key={difficulty} className={extraDifficulty === difficulty ? "selected" : ""} onClick={() => setExtraDifficulty(difficulty)}>{difficulty}</button>)}
+                  </div>
+                  <button type="button" className="guided-primary-action" onClick={handleExtraExam} disabled={loading || !scopeTopics.length}>
+                    {loading ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
+                    Generate extra exam
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
     </section>
   );
 }
@@ -5122,7 +5196,7 @@ function ExamsView({ plan, savedPlans, planSearch, setPlanSearch, loadPrepPlan, 
               <div className="attempt-card" key={attempt.id}>
                 <div>
                   <strong><span className="inline-color-dot" style={{ background: attempt.jobColor || colorForJobId(attempt.jobPostId || attempt.prepPlanId, jobMarkers, attempt.jobTitle) }} />{attempt.exam.title}</strong>
-                  <span>{attempt.jobTitle} • Day {attempt.day} • {attempt.difficulty} • {attempt.exam.questions.length} questions • {attempt.exam.time_limit_minutes} min</span>
+                  <span>{attempt.jobTitle} • {attempt.scopeLabel || examScopeLabel(attempt.scope, attempt.day)} • {attempt.difficulty} • {attempt.exam.questions.length} questions • {attempt.exam.time_limit_minutes} min</span>
                   <small>{(attempt.questionTypes || []).join(", ")}</small>
                 </div>
                 <em className={attempt.status === "complete" ? "complete" : ""}>
@@ -7740,7 +7814,7 @@ function samplePlanDays() {
 function buildDailyStudyTasks(plan, day) {
   const planTasks = plan?.tasks?.filter((task) => task.day === day) || [];
   const studySources = planTasks
-    .filter((task) => task.task_type !== "exam" && task.task_type !== "mock_interview")
+    .filter((task) => !["exam", "practice_exam", "mock_interview"].includes(task.task_type))
     .slice(0, 3);
   const fallbackTopics = topicsForStudyDay(plan, day);
   const sources = studySources.length ? studySources : fallbackTopics.slice(0, 3).map((topic) => ({
@@ -7798,6 +7872,50 @@ function topicsForWholePlan(plan) {
   const topics = (plan?.tasks || []).flatMap((task) => task.topics || []);
   const unique = [...new Set(topics.filter(Boolean))];
   return unique.length ? unique : topicsForStudyDay(plan, 1);
+}
+
+function topicsThroughPlanDay(plan, day) {
+  const seen = new Set();
+  return (plan?.tasks || [])
+    .filter((task) => Number(task.day) <= Number(day))
+    .sort((left, right) => Number(left.day) - Number(right.day))
+    .flatMap((task) => task.topics || [])
+    .filter((topic) => {
+      const normalized = String(topic || "").trim().toLocaleLowerCase();
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+}
+
+function buildPlanCalendarDays(plan) {
+  const taskDays = [...new Set((plan?.tasks || []).map((task) => Number(task.day)).filter(Boolean))].sort((a, b) => a - b);
+  const totalDays = Math.max(Number(plan?.days_until_interview) || 0, taskDays.at(-1) || 0, 1);
+  const rawInterview = plan?.interview_at || plan?.interview_date;
+  const parsedInterview = rawInterview ? new Date(rawInterview) : null;
+  const interviewDate = parsedInterview && !Number.isNaN(parsedInterview.getTime())
+    ? parsedInterview
+    : new Date(Date.now() + totalDays * 86_400_000);
+  interviewDate.setHours(12, 0, 0, 0);
+  const startDate = new Date(interviewDate);
+  startDate.setDate(interviewDate.getDate() - totalDays);
+  const today = dateKey(new Date());
+  return Array.from({ length: totalDays }, (_, index) => {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + index);
+    return { day: index + 1, date, isToday: dateKey(date) === today, interviewDate };
+  });
+}
+
+function formatPlanDate(value) {
+  if (!value || Number.isNaN(new Date(value).getTime())) return "scheduled date";
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function examScopeLabel(scope, day) {
+  if (scope === "through_selected_day") return `Syllabus through Day ${day}`;
+  if (scope === "custom_topics") return "Custom focus";
+  return `Day ${day} only`;
 }
 
 function generateStudyNote(plan, task) {

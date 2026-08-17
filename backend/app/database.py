@@ -83,6 +83,9 @@ def _apply_lightweight_migrations() -> None:
         with engine.begin() as connection:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_interview_experiences_user_id ON interview_experiences (user_id)"))
 
+    if "exams" in table_names:
+        _add_missing_columns("exams", {"scope": "VARCHAR(40) DEFAULT 'selected_day'"})
+
 
 def _add_missing_columns(table_name: str, column_sql: dict[str, str]) -> None:
     inspector = inspect(engine)

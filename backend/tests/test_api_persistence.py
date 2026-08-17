@@ -377,6 +377,68 @@ def test_exam_generation_can_focus_on_day_note_topics() -> None:
     assert {topic for question in exam["questions"] for topic in question["topics"]} <= {"REST APIs", "SQL joins"}
 
 
+def test_extra_exam_scopes_are_resolved_from_the_saved_plan() -> None:
+    """The Plan page sends a scope, not a browser-controlled topic list."""
+
+    client = _client_with_memory_db()
+    plan_response = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Backend Software Engineer",
+            "job_description": "Python SQL REST APIs Docker testing and system design.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=8)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    )
+    prep_plan_id = plan_response.json()["prep_plan_id"]
+    plan = client.get(f"/prep-plans/{prep_plan_id}").json()
+    selected_day = min(2, max(task["day"] for task in plan["tasks"]))
+
+    selected_topics = {
+        topic
+        for task in plan["tasks"]
+        if task["day"] == selected_day
+        for topic in task["topics"]
+    }
+    through_topics = {
+        topic
+        for task in plan["tasks"]
+        if task["day"] <= selected_day
+        for topic in task["topics"]
+    }
+
+    selected_response = client.post(
+        "/exams/generate",
+        json={
+            "prep_plan_id": prep_plan_id,
+            "day": selected_day,
+            "scope": "selected_day",
+            # A Plan-page request must not be widened by an arbitrary payload.
+            "focus_topics": ["Not in the plan"],
+            "question_count": 3,
+        },
+    )
+    through_response = client.post(
+        "/exams/generate",
+        json={
+            "prep_plan_id": prep_plan_id,
+            "day": selected_day,
+            "scope": "through_selected_day",
+            "question_count": 3,
+        },
+    )
+
+    selected_exam = selected_response.json()
+    through_exam = through_response.json()
+    assert selected_response.status_code == 200
+    assert through_response.status_code == 200
+    assert selected_exam["scope"] == "selected_day"
+    assert through_exam["scope"] == "through_selected_day"
+    assert {topic for question in selected_exam["questions"] for topic in question["topics"]} <= selected_topics
+    assert {topic for question in through_exam["questions"] for topic in question["topics"]} <= through_topics
+
+
 def test_ai_only_study_note_generation_records_usage_without_route_error(monkeypatch) -> None:
     client = _client_with_memory_db()
     client.headers.update({"X-Allow-Local-Fallback": "false"})

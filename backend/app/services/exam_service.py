@@ -55,17 +55,18 @@ def generate_exam_for_plan(
     if plan is None or not _owns_plan(plan, user):
         return None
 
-    topics = [topic for topic in (request.focus_topics or []) if topic.strip()] or _topics_for_day(plan, request.day)
+    scope, topics = _resolve_exam_scope(plan, request)
     db_exam = Exam(
         prep_plan_id=plan.id,
-        title=f"Day {request.day} {request.difficulty.title()} Interview Prep Exam",
+        title=_exam_title(request.day, request.difficulty, scope),
         day=request.day,
+        scope=scope,
         time_limit_minutes=request.time_limit_minutes or max(20, request.question_count * 6),
     )
     db.add(db_exam)
     db.flush()
 
-    generated = _generate_questions_with_ai(plan, topics, request, settings) or []
+    generated = _generate_questions_with_ai(plan, topics, request, settings, scope) or []
     if len(generated) < request.question_count:
         require_ai_result(
             "AI exam generation did not return enough questions. Enable local fallback in settings to fill the exam with offline questions."
@@ -153,6 +154,44 @@ def _topics_for_day(plan: PrepPlan, day: int) -> list[str]:
     return topics or ["Python", "Problem Solving"]
 
 
+def _topics_through_day(plan: PrepPlan, day: int) -> list[str]:
+    """Return ordered, de-duplicated topics learned through a plan day.
+
+    The Plan page deliberately sends only the scope and selected day. This
+    resolver is the source of truth, so an extra syllabus exam never includes
+    later material simply because the browser supplied it.
+    """
+
+    topics: list[str] = []
+    seen: set[str] = set()
+    for task in sorted(plan.tasks, key=lambda item: (item.day, item.id)):
+        if task.day > day:
+            continue
+        for topic in task.topics or []:
+            clean = topic.strip()
+            key = clean.casefold()
+            if clean and key not in seen:
+                seen.add(key)
+                topics.append(clean)
+    return topics or _topics_for_day(plan, day)
+
+
+def _resolve_exam_scope(plan: PrepPlan, request: ExamGenerateRequest) -> tuple[str, list[str]]:
+    custom_topics = [topic.strip() for topic in (request.focus_topics or []) if topic and topic.strip()]
+    scope = request.scope or ("custom_topics" if custom_topics else "selected_day")
+
+    if scope == "through_selected_day":
+        return scope, _topics_through_day(plan, request.day)
+    if scope == "custom_topics":
+        return scope, custom_topics or _topics_for_day(plan, request.day)
+    return "selected_day", _topics_for_day(plan, request.day)
+
+
+def _exam_title(day: int, difficulty: str, scope: str) -> str:
+    prefix = f"Syllabus through Day {day}" if scope == "through_selected_day" else f"Day {day}"
+    return f"{prefix} {difficulty.title()} Interview Prep Exam"
+
+
 def _owns_plan(plan: PrepPlan, user: Optional[User]) -> bool:
     if user:
         return plan.job_post.user_id == user.id
@@ -202,6 +241,7 @@ def _generate_questions_with_ai(
     topics: list[str],
     request: ExamGenerateRequest,
     settings: Optional[Settings],
+    scope: str,
 ) -> Optional[list[dict]]:
     if not settings or not settings.ai_enabled:
         require_ai_result("No AI provider is configured for exam generation. Enable local fallback in settings to create an offline exam.")
@@ -218,6 +258,7 @@ def _generate_questions_with_ai(
             plan,
             topics,
             request,
+            scope=scope,
             batch_question_count=batch_size,
             batch_number=batch_number,
             existing_prompts=[question["prompt"] for question in questions[-12:]],
@@ -332,13 +373,16 @@ def _exam_prompt(
     plan: PrepPlan,
     topics: list[str],
     request: ExamGenerateRequest,
+    scope: str = "selected_day",
     batch_question_count: Optional[int] = None,
     batch_number: int = 1,
     existing_prompts: Optional[list[str]] = None,
 ) -> str:
-    scope = "modified focus topics" if request.focus_topics else "selected day topics"
-    if request.focus_topics and len(request.focus_topics) >= 5:
-        scope = "full prep plan topics"
+    scope_label = {
+        "selected_day": "the selected day's planned topics only",
+        "through_selected_day": f"all planned topics from Day 1 through Day {request.day}; do not use future-day material",
+        "custom_topics": "the custom focus topics selected by the user",
+    }.get(scope, "the selected day's planned topics only")
     allowed_types = ", ".join(request.question_types)
     question_count = batch_question_count or request.question_count
     avoid_block = ""
@@ -366,7 +410,7 @@ def _exam_prompt(
         f"Role: {plan.job_post.title}\n"
         f"Company/job context: {getattr(plan.job_post, 'description', '')[:2000]}\n"
         f"Prep plan summary: {plan.summary}\n"
-        f"Exam scope: {scope}\n"
+        f"Exam scope: {scope_label}\n"
         f"Day: {request.day}\n"
         f"Question count for this batch: {question_count}\n"
         f"Total exam question target: {request.question_count}\n"
@@ -684,6 +728,7 @@ def _exam_to_response(exam: Exam) -> ExamResponse:
         prep_plan_id=exam.prep_plan_id,
         title=exam.title,
         day=exam.day,
+        scope=exam.scope or "selected_day",
         time_limit_minutes=exam.time_limit_minutes,
         questions=questions,
     )

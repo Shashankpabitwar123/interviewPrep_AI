@@ -150,6 +150,7 @@ class Exam(TimestampMixin, Base):
     prep_plan_id: Mapped[int] = mapped_column(ForeignKey("prep_plans.id"))
     title: Mapped[str] = mapped_column(String(200))
     day: Mapped[int] = mapped_column(Integer)
+    scope: Mapped[str] = mapped_column(String(40), default="selected_day", server_default="selected_day")
     time_limit_minutes: Mapped[int] = mapped_column(Integer)
 
     prep_plan: Mapped["PrepPlan"] = relationship(back_populates="exams")
