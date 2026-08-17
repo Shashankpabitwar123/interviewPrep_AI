@@ -231,9 +231,9 @@
 }
 
 .notes-rail-actions button,
-.notes-folder-label button,
 .notes-folder-create button,
-.notes-delete-note {
+.notes-delete-note,
+.notes-folder-label > button:not(.notes-folder-select-button) {
   display: inline-grid;
   width: 30px;
   height: 30px;
@@ -245,7 +245,7 @@
 }
 
 .notes-rail-actions button:hover,
-.notes-folder-label button:hover {
+.notes-folder-label > button:not(.notes-folder-select-button):hover {
   border-color: var(--approved-coral);
   color: var(--approved-coral);
 }
@@ -303,7 +303,8 @@
 }
 
 .notes-folder-label,
-.notes-folder-label > span {
+.notes-folder-select-button,
+.notes-folder-rename {
   display: flex;
   align-items: center;
 }
@@ -317,17 +318,35 @@
   font-weight: 800;
 }
 
-.notes-folder-label > span {
+.notes-folder-select-button,
+.notes-folder-rename {
   min-width: 0;
   flex: 1;
   gap: 7px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--approved-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
 }
 
-.notes-folder-label > span svg {
+.notes-folder-select-button svg,
+.notes-folder-rename svg {
   color: var(--approved-coral);
 }
 
-.notes-folder-label button {
+.notes-folder-select-button:hover,
+.notes-folder-select-button.selected {
+  color: var(--approved-coral);
+  background: var(--approved-coral-soft);
+}
+
+.notes-folder-label > button:not(.notes-folder-select-button) {
   width: 24px;
   height: 24px;
   opacity: 0;
@@ -337,9 +356,29 @@
   opacity: 1;
 }
 
-.notes-folder-label button:hover {
+.notes-folder-label > button:not(.notes-folder-select-button):hover {
   border-color: #f45d3f;
   color: #f45d3f;
+}
+
+.notes-folder-rename {
+  padding: 0 4px;
+  border: 1px solid var(--approved-coral);
+  background: var(--approved-coral-soft);
+}
+
+.notes-folder-rename input,
+.notes-file-rename input {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--approved-text);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .notes-folder-notes {
@@ -360,6 +399,19 @@
   color: var(--approved-soft);
   background: transparent;
   text-align: left;
+}
+
+.notes-file-rename {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid var(--approved-coral);
+  border-radius: 8px;
+  color: var(--approved-soft);
+  background: var(--approved-coral-soft);
 }
 
 .notes-file-row:hover,

@@ -2043,6 +2043,31 @@ function App() {
     setStatus("Folder Created");
   }
 
+  function renameNoteFolder(folderName, nextFolderName, scope = {}) {
+    const currentFolder = normalizeNoteFolder(folderName).trim();
+    const renamedFolder = normalizeNoteFolder(nextFolderName).trim();
+    if (!currentFolder || currentFolder === "Notes" || !renamedFolder || renamedFolder === currentFolder) return false;
+    if (hasNoteFolder(noteFolders, renamedFolder, scope.planId, scope.noteDate)) {
+      setStatus("Folder Already Exists");
+      return false;
+    }
+    const belongsToFolder = (note) => normalizeNoteFolder(note.folder) === currentFolder
+      && String(note.planId || "") === String(scope.planId || "")
+      && String(note.noteDate || dateKey(new Date())) === String(scope.noteDate || dateKey(new Date()));
+    const nextNotes = notes.map((note) => (
+      belongsToFolder(note) ? { ...note, folder: renamedFolder, updatedAt: new Date().toISOString() } : note
+    ));
+    const remainingFolders = noteFolders.filter((folder) => !matchesNoteFolder(folder, currentFolder, scope.planId, scope.noteDate));
+    const nextFolders = addNoteFolder(remainingFolders, renamedFolder, scope.planId, scope.noteDate);
+    setNotes(nextNotes);
+    setNoteFolders(nextFolders);
+    saveLocalList("interviewprep_notes", nextNotes);
+    saveLocalList("interviewprep_note_folders", nextFolders);
+    addActivity({ type: "note", title: "Folder renamed", detail: `${currentFolder} to ${renamedFolder}`, badge: "folder", target: "notes" });
+    setStatus("Folder Renamed");
+    return true;
+  }
+
   function deleteNoteFolder(folderName, scope = {}) {
     const matchesScope = (note) => normalizeNoteFolder(note.folder) === folderName
       && String(note.planId || "") === String(scope.planId || "")
@@ -2467,6 +2492,7 @@ function App() {
             improveSavedNote={improveSavedNote}
             improvingNoteId={improvingNoteId}
             createNoteFolder={createNoteFolder}
+            renameNoteFolder={renameNoteFolder}
             deleteNoteFolder={deleteNoteFolder}
             generateWorkspaceNote={generateWorkspaceNote}
             apiFetch={apiFetch}
@@ -5002,7 +5028,7 @@ function CalendarView({ plan, planColor, calendarPlanDetails, jobMarkers, comple
   );
 }
 
-function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraft, setNoteDraft, importNotes, removeNote, createBlankNote, updateNote, improveSavedNote, improvingNoteId, createNoteFolder, deleteNoteFolder, apiFetch, readApiError, allowLocalFallback, loading }) {
+function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraft, setNoteDraft, importNotes, removeNote, createBlankNote, updateNote, improveSavedNote, improvingNoteId, createNoteFolder, renameNoteFolder, deleteNoteFolder, apiFetch, readApiError, allowLocalFallback, loading }) {
   // The dashboard can be opened from a saved job before App has loaded its full
   // active plan. Resolve that plan here so Notes always opens for the selected job.
   const detailedPlans = useSavedPlanDetails(savedPlans || [], plan, apiFetch);
@@ -5022,6 +5048,11 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   const [editDraft, setEditDraft] = useState({ title: "", body: "", folder: "Notes", color: "#ff5d42" });
   const [folderDraftOpen, setFolderDraftOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
+  const [selectedFolder, setSelectedFolder] = useState("Notes");
+  const [renamingFolder, setRenamingFolder] = useState("");
+  const [folderRenameValue, setFolderRenameValue] = useState("");
+  const [renamingNoteId, setRenamingNoteId] = useState("");
+  const [noteRenameValue, setNoteRenameValue] = useState("");
   const [draggedNoteId, setDraggedNoteId] = useState("");
   const [dropFolder, setDropFolder] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
@@ -5033,6 +5064,9 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
     setSelectedDate(nextDate);
     setOpenNoteId("");
     setIsEditing(false);
+    setSelectedFolder("Notes");
+    setRenamingFolder("");
+    setRenamingNoteId("");
   }, [activePlanId, todayDay?.day]);
 
   useEffect(() => {
@@ -5070,22 +5104,75 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
 
   function openNoteEditor(note) {
     setOpenNoteId(note.id);
+    setSelectedFolder(normalizeNoteFolder(note.folder));
     setIsEditing(false);
     setColorPickerOpen(false);
   }
 
+  function startEditingNote(note = openNote) {
+    if (!note) return;
+    const existingFolder = normalizeNoteFolder(note.folder);
+    setEditDraft({
+      title: note.title || "",
+      body: note.body || "",
+      folder: ["Generated notes", "Quick Notes"].includes(existingFolder) ? "Notes" : existingFolder,
+      color: note.color || "#ff5d42",
+    });
+    setOpenNoteId(note.id);
+    setSelectedFolder(existingFolder);
+    setIsEditing(true);
+    setColorPickerOpen(false);
+  }
+
   function newNote(folder = "Notes") {
-    const noteId = createBlankNote({ title: "Untitled note", folder, planId: activePlanId, noteDate: selectedDate });
+    const targetFolder = normalizeNoteFolder(folder || selectedFolder || "Notes");
+    const noteId = createBlankNote({ title: "Untitled note", folder: targetFolder, planId: activePlanId, noteDate: selectedDate });
+    setSelectedFolder(targetFolder);
     setOpenNoteId(noteId);
     setIsEditing(true);
+    setEditDraft({ title: "Untitled note", body: "", folder: targetFolder, color: "#2563eb" });
+    setColorPickerOpen(false);
   }
 
   function createFolder(event) {
     event.preventDefault();
     if (!folderName.trim()) return;
-    createNoteFolder(folderName, { planId: activePlanId, noteDate: selectedDate });
+    const nextFolder = folderName.trim();
+    createNoteFolder(nextFolder, { planId: activePlanId, noteDate: selectedDate });
+    setSelectedFolder(nextFolder);
     setFolderName("");
     setFolderDraftOpen(false);
+  }
+
+  function selectFolder(folder) {
+    setSelectedFolder(folder);
+    setRenamingFolder("");
+  }
+
+  function startFolderRename(folder) {
+    setSelectedFolder(folder);
+    setRenamingFolder(folder);
+    setFolderRenameValue(folder);
+  }
+
+  function finishFolderRename(folder) {
+    const renamedFolder = folderRenameValue.trim();
+    setRenamingFolder("");
+    if (!renamedFolder || renamedFolder === folder) return;
+    if (renameNoteFolder(folder, renamedFolder, { planId: activePlanId, noteDate: selectedDate })) setSelectedFolder(renamedFolder);
+  }
+
+  function startNoteRename(note) {
+    setOpenNoteId(note.id);
+    setIsEditing(false);
+    setRenamingNoteId(note.id);
+    setNoteRenameValue(note.title || "Untitled note");
+  }
+
+  function finishNoteRename(note) {
+    const title = noteRenameValue.trim() || "Untitled note";
+    setRenamingNoteId("");
+    if (title !== note.title) updateNote(note.id, { title });
   }
 
   function saveOpenNote(event) {
@@ -5112,12 +5199,14 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
     const count = folderNotes.length;
     if (!window.confirm(`Delete folder "${folder}" and ${count} note${count === 1 ? "" : "s"} inside it? This cannot be undone.`)) return;
     deleteNoteFolder(folder, { planId: activePlanId, noteDate: selectedDate });
+    if (selectedFolder === folder) setSelectedFolder("Notes");
     if (folderNotes.some((note) => note.id === openNoteId)) setOpenNoteId("");
   }
 
   function moveNoteToFolder(noteId, folder) {
     if (!noteId || !folder) return;
     updateNote(noteId, { folder, noteDate: selectedDate });
+    setSelectedFolder(folder);
     setDraggedNoteId("");
     setDropFolder("");
   }
@@ -5205,7 +5294,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             </div>
             <div className="notes-rail-actions">
               <button type="button" onClick={() => setFolderDraftOpen((current) => !current)} title="Create folder" aria-label="Create folder"><FolderPlus size={17} /></button>
-              <button type="button" onClick={() => newNote()} title="Create note" aria-label="Create note"><FilePlus2 size={17} /></button>
+              <button type="button" onClick={() => newNote(selectedFolder)} title={`Add file to ${selectedFolder === "Notes" ? "notes" : selectedFolder}`} aria-label={`Add file to ${selectedFolder === "Notes" ? "notes" : selectedFolder}`}><FilePlus2 size={17} /></button>
             </div>
           </header>
           {folderDraftOpen && (
@@ -5217,9 +5306,16 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
           )}
           <div className="notes-date-folder-list">
             {unfiledNotes.map((note) => (
-              <button key={note.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }} onClick={() => openNoteEditor(note)} className={`notes-file-row ${note.id === openNoteId ? "selected" : ""}`}>
-                <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} /><span><strong>{note.title}</strong></span>
-              </button>
+              renamingNoteId === note.id ? (
+                <div key={note.id} className="notes-file-rename">
+                  <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} />
+                  <input autoFocus value={noteRenameValue} aria-label="Rename note" onChange={(event) => setNoteRenameValue(event.target.value)} onBlur={() => finishNoteRename(note)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setRenamingNoteId(""); setNoteRenameValue(""); } }} />
+                </div>
+              ) : (
+                <button key={note.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }} onClick={() => openNoteEditor(note)} onDoubleClick={() => startNoteRename(note)} className={`notes-file-row ${note.id === openNoteId ? "selected" : ""}`}>
+                  <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} /><span><strong>{note.title}</strong></span>
+                </button>
+              )
             ))}
             {folderNames.map((folder) => {
               const folderNotes = grouped[folder] || [];
@@ -5227,14 +5323,25 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
               return (
                 <section key={folder} className={`notes-date-folder ${isDropTarget ? "drop-target" : ""}`} onDragOver={(event) => { event.preventDefault(); setDropFolder(folder); }} onDragLeave={() => setDropFolder("")} onDrop={(event) => { event.preventDefault(); moveNoteToFolder(event.dataTransfer.getData("text/plain") || draggedNoteId, folder); }}>
                   <div className="notes-folder-label">
-                    <span><Folder size={16} />{folder}</span>
+                    {renamingFolder === folder ? (
+                      <label className="notes-folder-rename"><Folder size={16} /><input autoFocus value={folderRenameValue} aria-label="Rename folder" onChange={(event) => setFolderRenameValue(event.target.value)} onBlur={() => finishFolderRename(folder)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setRenamingFolder(""); setFolderRenameValue(""); } }} /></label>
+                    ) : (
+                      <button type="button" className={`notes-folder-select-button ${selectedFolder === folder ? "selected" : ""}`} onClick={() => selectFolder(folder)} onDoubleClick={() => startFolderRename(folder)} title="Click to select. Double-click to rename."><Folder size={16} />{folder}</button>
+                    )}
                     <button type="button" onClick={() => confirmDeleteFolder(folder, folderNotes)} aria-label={`Delete ${folder}`} title={`Delete ${folder}`}><Trash2 size={14} /></button>
                   </div>
                   <div className="notes-folder-notes">
                     {folderNotes.map((note) => (
-                      <button key={note.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }} onClick={() => openNoteEditor(note)} className={`notes-file-row ${note.id === openNoteId ? "selected" : ""}`}>
-                        <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} /><span><strong>{note.title}</strong></span>
-                      </button>
+                      renamingNoteId === note.id ? (
+                        <div key={note.id} className="notes-file-rename">
+                          <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} />
+                          <input autoFocus value={noteRenameValue} aria-label="Rename note" onChange={(event) => setNoteRenameValue(event.target.value)} onBlur={() => finishNoteRename(note)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setRenamingNoteId(""); setNoteRenameValue(""); } }} />
+                        </div>
+                      ) : (
+                        <button key={note.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }} onClick={() => openNoteEditor(note)} onDoubleClick={() => startNoteRename(note)} className={`notes-file-row ${note.id === openNoteId ? "selected" : ""}`}>
+                          <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} /><span><strong>{note.title}</strong></span>
+                        </button>
+                      )
                     ))}
                     {!folderNotes.length && isDropTarget && <small className="notes-folder-drop-copy">Drop here</small>}
                   </div>
@@ -5258,7 +5365,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
                 </div>
                 <div className="notes-reader-actions">
                   <button type="button" className="outline-action compact-action" disabled={improvingNoteId === openNote.id} onClick={() => improveSavedNote(openNote.id, activePlan?.job_title || selectedJob?.title || "", isEditing ? editDraft : null)}>{improvingNoteId === openNote.id ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}Improve with AI</button>
-                  {isEditing ? <button className="guided-primary-button" type="submit"><Save size={16} />Save changes</button> : <button type="button" className="outline-action compact-action" onClick={() => setIsEditing(true)}><FileText size={15} />Edit note</button>}
+                  {isEditing ? <button className="guided-primary-button" type="submit"><Save size={16} />Save changes</button> : <button type="button" className="outline-action compact-action" onClick={() => startEditingNote(openNote)}><FileText size={15} />Edit note</button>}
                   <button type="button" className="notes-delete-note" onClick={() => confirmDeleteNote(openNote)} aria-label="Delete note" title="Delete note"><Trash2 size={16} /></button>
                 </div>
               </header>
@@ -5287,7 +5394,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
               <NotebookText size={42} />
               <h2>{visibleNotes.length ? "Choose a note to continue" : "This day is ready for your notes"}</h2>
               <p>{visibleNotes.length ? "Open a note on the left, drag it into a folder, or create a new note for this preparation day." : "Create a folder, add a note, or import existing notes for this preparation day."}</p>
-              <button type="button" className="guided-primary-button" onClick={() => newNote()}><FilePlus2 size={17} />Create a note</button>
+              <button type="button" className="guided-primary-button" onClick={() => newNote(selectedFolder)}><FilePlus2 size={17} />Create a note</button>
             </section>
           )}
         </article>
