@@ -9,6 +9,7 @@ from app.schemas.job_analysis import (
     InterviewFocus,
     JobAnalysisRequest,
     JobAnalysisResponse,
+    JobCoreSkill,
     JobAnalysisPriority,
     JobAnalysisRequirements,
     JobDescriptionAskResponse,
@@ -34,6 +35,37 @@ Return only JSON matching this shape:
 AUTO_TITLE_VALUES = {"auto-detect role", "auto detect role", "saved job url", "captured job", "job description"}
 AUTO_COMPANY_VALUES = {"auto-detect company", "auto detect company", "detected company"}
 logger = logging.getLogger(__name__)
+
+
+# This is the deliberately small, user-facing skills vocabulary.  It keeps the
+# workspace focused on tools a candidate can study instead of showing vague
+# requirement sentences such as "ability to work independently".
+CORE_SKILL_CATALOG: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("Python", "software", ("python", "fastapi", "django", "flask", "pandas", "numpy")),
+    ("SQL", "data", ("sql", "postgresql", "postgres", "mysql", "snowflake", "bigquery", "redshift")),
+    ("Power BI", "data", ("power bi", "powerbi", "power query", "dax")),
+    ("Tableau", "data", ("tableau",)),
+    ("Excel", "data", ("excel", "pivot table", "vlookup", "xlookup")),
+    ("R", "data", ("r language", "r programming", "r studio", "rstudio")),
+    ("Data modeling", "data", ("data modeling", "data modelling", "star schema", "dimensional modeling")),
+    ("ETL / ELT", "data", ("etl", "elt", "data pipeline", "data integration")),
+    ("Spark", "data", ("apache spark", "pyspark", "spark")),
+    ("JavaScript", "software", ("javascript", "ecmascript")),
+    ("TypeScript", "software", ("typescript",)),
+    ("React", "software", ("react", "reactjs", "react.js")),
+    ("Node.js", "software", ("node.js", "nodejs", "node js", "express.js")),
+    ("Java", "software", ("java", "spring boot", "spring framework")),
+    ("C#", "software", ("c#", "csharp", ".net", "dotnet")),
+    ("Linux", "platform", ("linux", "unix", "bash", "shell scripting")),
+    ("Git", "workflow", ("git", "github", "gitlab", "bitbucket")),
+    ("Docker", "platform", ("docker", "containerization", "containers")),
+    ("Kubernetes", "platform", ("kubernetes", "k8s")),
+    ("REST APIs", "software", ("rest api", "restful", "api development", "http api", "endpoint")),
+    ("AWS", "cloud", ("aws", "amazon web services")),
+    ("Azure", "cloud", ("azure", "microsoft azure")),
+    ("Google Cloud", "cloud", ("google cloud", "gcp")),
+    ("Figma", "workflow", ("figma",)),
+)
 
 
 def analyze_job_description(request: JobAnalysisRequest, settings: Settings) -> JobAnalysisResponse:
@@ -231,6 +263,7 @@ def analysis_from_job_brief(brief: JobDescriptionBrief) -> JobAnalysisResponse:
         company=brief.company,
         seniority=_detect_seniority(f"{brief.role_title} {' '.join(brief.requirements.experience_and_education)}"),
         required_skills=required_skills,
+        core_skills=brief.core_skills,
         interview_focus=[InterviewFocus(category=category, topics=topics[:5]) for category, topics in grouped_topics.items()],
         coding_difficulty=_detect_difficulty(" ".join(required_skills + [topic.topic for topic in brief.interview_topics])),
         behavioral_themes=brief.behavioral_story_prompts[:6] or ["teamwork", "communication"],
@@ -547,6 +580,9 @@ def _heuristic_interview_topics(keywords: list[str], responsibilities: list[str]
 
 
 def _brief_skill_labels(brief: JobDescriptionBrief) -> list[str]:
+    if brief.core_skills:
+        return [skill.name for skill in brief.core_skills[:8]]
+
     candidates = [
         *brief.requirements.must_have,
         *brief.requirements.preferred,
@@ -607,7 +643,9 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
                     "Keep role_summary to two sentences maximum. Use 3 items for what_matters_most, 3-6 "
                     "interview_topics, 2-4 behavioral_story_prompts, 2-4 positioning_prompts, and 2-4 "
                     "questions_to_ask. Unknowns should be things the candidate should verify, not warnings "
-                    "you invented."
+                    "you invented. For core_skills, return 3-8 short canonical technology or tool labels that "
+                    "are explicitly named in the posting, such as Power BI, Linux, Tableau, or SQL. Never "
+                    "put broad traits, complete requirement sentences, or inferred technologies in core_skills."
                 ),
             },
             {
@@ -624,7 +662,7 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
 def _brief_with_gemini(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
     prompt = (
         "Create a fixed job-analysis JSON object for interview preparation. Use only the supplied posting.\n"
-        "Return keys: analysis_version, company, role_title, role_summary, what_matters_most, requirements, "
+        "Return keys: analysis_version, company, role_title, role_summary, core_skills, what_matters_most, requirements, "
         "responsibilities, interview_topics, behavioral_story_prompts, positioning_prompts, questions_to_ask, "
         "unknowns_to_verify. Keep it minimal and specific. Never invent company facts, sponsorship, or eligibility. "
         "Only include eligibility constraints explicitly stated in the posting.\n\n"
@@ -642,6 +680,7 @@ def _brief_from_ai_data(data: dict, title: str, description: str, source_url: st
     responsibilities = _json_list(data.get("responsibilities"), 5) or fallback.responsibilities
     priorities = _priority_items_from_ai_data(data.get("what_matters_most"), fallback.what_matters_most)
     topics = _interview_topics_from_ai_data(data.get("interview_topics"), fallback.interview_topics)
+    core_skills = _core_skills_from_ai_data(data.get("core_skills"), fallback.core_skills)
     summary = _clean_summary(data.get("role_summary")) or fallback.role_summary
 
     raw_role_title = _clean_summary(data.get("role_title"))
@@ -650,6 +689,7 @@ def _brief_from_ai_data(data: dict, title: str, description: str, source_url: st
         company=_clean_company_candidate(str(data.get("company") or "")) or fallback.company,
         role_title=_clean_role_title(raw_role_title) if raw_role_title else fallback.role_title,
         role_summary=summary,
+        core_skills=core_skills,
         what_matters_most=priorities,
         requirements=requirements,
         responsibilities=responsibilities,
@@ -753,6 +793,15 @@ def _job_brief_schema() -> dict[str, Any]:
         },
         "required": ["topic", "why_it_matters", "priority", "category"],
     }
+    core_skill_field = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "category": {"type": "string", "enum": ["data", "software", "platform", "cloud", "workflow", "other"]},
+            "priority": {"type": "string", "enum": ["critical", "important", "supporting"]},
+        },
+        "required": ["name", "category", "priority"],
+    }
     return {
         "type": "object",
         "properties": {
@@ -760,6 +809,7 @@ def _job_brief_schema() -> dict[str, Any]:
             "company": {"type": "string"},
             "role_title": {"type": "string"},
             "role_summary": {"type": "string"},
+            "core_skills": {"type": "array", "items": core_skill_field},
             "what_matters_most": {"type": "array", "items": priority_field},
             "requirements": requirement_field,
             "responsibilities": list_field,
@@ -774,6 +824,7 @@ def _job_brief_schema() -> dict[str, Any]:
             "company",
             "role_title",
             "role_summary",
+            "core_skills",
             "what_matters_most",
             "requirements",
             "responsibilities",
@@ -791,6 +842,7 @@ def _heuristic_brief(title: str, description: str, source_url: str | None, sourc
     company = infer_company_name("", description, source_url)
     role = infer_role_title(title, description, source_url)
     lower = description.lower()
+    core_skills = extract_core_skills(description)
     requirements = _lines_after_headings(lines, ["software experience required", "requirements", "required", "qualifications", "ideal candidate"], 8)
     responsibilities = _lines_after_headings(lines, ["what you'll do", "responsibilities", "what you will do", "duties"], 8)
     looking_for = _lines_after_headings(lines, ["ideal candidate", "who you are", "we're looking for", "looking for"], 6)
@@ -811,6 +863,7 @@ def _heuristic_brief(title: str, description: str, source_url: str | None, sourc
             f"{company + ' is hiring ' if company else 'This posting is for '}{role}. "
             f"The work emphasizes {', '.join(keywords[:3]) or 'role-specific fundamentals'} and clear examples tied to the posted responsibilities."
         ),
+        core_skills=core_skills,
         what_matters_most=priorities,
         requirements=JobAnalysisRequirements(
             must_have=must_have,
@@ -871,6 +924,64 @@ def _keyword_summary(text: str) -> list[str]:
     return topics or ["communication", "problem solving", "role fundamentals"]
 
 
+def extract_core_skills(description: str, limit: int = 8) -> list[JobCoreSkill]:
+    """Return compact, evidence-based technologies/tools from one job posting.
+
+    The deterministic catalogue is the grounding layer: AI may rank the
+    detected candidates, but it cannot introduce a tool that does not appear
+    in the saved job source. This makes the result safe to reuse in the job
+    overview, prep plan, notes, exams, and mock-interview prompts.
+    """
+
+    text = re.sub(r"\s+", " ", description or "").lower()
+    matches: list[tuple[int, str, str]] = []
+    for name, category, aliases in CORE_SKILL_CATALOG:
+        positions = [_skill_alias_position(text, alias) for alias in aliases]
+        positions = [position for position in positions if position is not None]
+        if positions:
+            matches.append((min(positions), name, category))
+
+    matches.sort(key=lambda item: item[0])
+    skills: list[JobCoreSkill] = []
+    for _, name, category in matches[:limit]:
+        skills.append(JobCoreSkill(
+            name=name,
+            category=category,
+            priority="critical" if len(skills) < 3 else "important",
+        ))
+    return skills
+
+
+def _skill_alias_position(text: str, alias: str) -> int | None:
+    """Find an alias as a standalone technology term, not inside another word."""
+
+    match = re.search(rf"(?<!\\w){re.escape(alias)}(?!\\w)", text, flags=re.IGNORECASE)
+    return match.start() if match else None
+
+
+def _core_skills_from_ai_data(value: Any, fallback: list[JobCoreSkill]) -> list[JobCoreSkill]:
+    """Use AI ordering only for known, source-grounded core skills."""
+
+    by_name = {skill.name.lower(): skill for skill in fallback}
+    selected: list[JobCoreSkill] = []
+    if isinstance(value, list):
+        for raw in value:
+            if not isinstance(raw, dict):
+                continue
+            candidate = _clean_summary(raw.get("name")).lower()
+            matched = by_name.get(candidate)
+            if matched is None or any(skill.name == matched.name for skill in selected):
+                continue
+            selected.append(JobCoreSkill(
+                name=matched.name,
+                category=matched.category,
+                priority=_normalize_priority(raw.get("priority")),
+            ))
+            if len(selected) >= 8:
+                break
+    return selected or fallback[:8]
+
+
 def _analyze_with_openai(request: JobAnalysisRequest, settings: Settings) -> JobAnalysisResponse:
     from openai import OpenAI
 
@@ -904,6 +1015,7 @@ def _heuristic_analysis(request: JobAnalysisRequest, source: str) -> JobAnalysis
         company=infer_company_name(getattr(request, "company", ""), request.job_description, request.source_url),
         seniority=_detect_seniority(role_text),
         required_skills=skills,
+        core_skills=extract_core_skills(request.job_description),
         interview_focus=_build_focus(skills),
         coding_difficulty=_detect_difficulty(role_text),
         behavioral_themes=_detect_behavioral_themes(text),

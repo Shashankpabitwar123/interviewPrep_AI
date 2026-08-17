@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import JobAnalysis, JobPost, PrepPlan, PrepTask, User
 from app.schemas.job_analysis import JobAnalysisResponse, JobDescriptionBrief, JobPostDetail, JobPostSummary
 from app.schemas.prep_plan import PrepPlanResponse, PrepPlanSummary, SkillSignal
+from app.services.job_analyzer import extract_core_skills
 
 
 def save_job_analysis(
@@ -162,6 +163,11 @@ def get_job_detail(db: Session, job_post_id: int, user: Optional[User] = None) -
 
     analysis = None
     if job.analysis:
+        brief = get_saved_job_brief(db, job_post_id, user)
+        # v2 briefs created before core skills were added remain valid. Fall
+        # back to deterministic extraction so older jobs get the same concise
+        # source-grounded technology tags without a new provider request.
+        core_skills = brief.core_skills if brief and brief.core_skills else extract_core_skills(job.description)
         analysis = JobAnalysisResponse(
             job_post_id=job.id,
             analysis_id=job.analysis.id,
@@ -169,6 +175,7 @@ def get_job_detail(db: Session, job_post_id: int, user: Optional[User] = None) -
             company=job.company or "",
             seniority=job.analysis.seniority,
             required_skills=job.analysis.required_skills,
+            core_skills=core_skills,
             interview_focus=job.analysis.interview_focus,
             coding_difficulty=job.analysis.coding_difficulty,
             behavioral_themes=job.analysis.behavioral_themes,

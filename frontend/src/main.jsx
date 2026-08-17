@@ -4478,6 +4478,8 @@ function JobsView({
   const descriptionText = selectedDetail?.description || selectedJob?.description_preview || "";
   const isDescriptionSource = Boolean(selectedJob && !selectedJob.source_url);
   const requiredSkills = selectedDetail?.analysis?.required_skills || extractResumeKeywords(descriptionText).slice(0, 6);
+  const coreSkills = (selectedDetail?.analysis?.core_skills || []).map((skill) => skill?.name).filter(Boolean);
+  const preparationSkills = coreSkills.length ? coreSkills : extractPreparationSkills(descriptionText);
   const interviewFocus = (selectedDetail?.analysis?.interview_focus || []).flatMap((group) => group.topics || []).slice(0, 6);
   const lookingFor = summarizeJobForWorkspace(descriptionText, selectedJob);
   const descriptionSummary = summarizeSavedJobDescription(selectedJob, descriptionText, requiredSkills, interviewFocus);
@@ -4715,10 +4717,10 @@ function JobsView({
                     ) : (
                       <>
                         <header><h3>Job URL</h3></header>
-                        <a className="guided-job-source-link" href={normalizeUrl(selectedJob.source_url)} target="_blank" rel="noopener noreferrer"><span>{displayUrl(selectedJob.source_url)}</span><ExternalLink size={15} /></a>
+                        <a className="guided-job-source-link" href={normalizeUrl(selectedJob.source_url)} target="_blank" rel="noopener noreferrer"><span>{fullJobUrl(selectedJob.source_url)}</span><ExternalLink size={15} /></a>
                       </>
                     )}
-                    {requiredSkills.length > 0 && <div className="guided-job-focus"><small>Preparation focus</small><div className="guided-job-tags">{requiredSkills.slice(0, 6).map((skill) => <span key={skill}>{shortJobFocusLabel(skill)}</span>)}</div></div>}
+                    {preparationSkills.length > 0 && <div className="guided-job-focus"><small>Preparation focus</small><div className="guided-job-tags">{preparationSkills.slice(0, 8).map((skill) => <span key={skill}>{skill}</span>)}</div></div>}
                   </article>
                 </div>
               ) : (
@@ -4890,16 +4892,24 @@ function priorityLabel(priority) {
   return "Important";
 }
 
-function shortJobFocusLabel(value) {
-  const clean = String(value || "")
-    .replace(/^mention\s+/i, "")
-    .replace(/^working knowledge of\s+/i, "")
-    .replace(/\s+only where you can connect it to a real example\.?$/i, "")
-    .replace(/\s+as it appears in the job description\.?$/i, "")
-    .replace(/[.]+$/, "")
-    .trim();
-  if (!clean) return "Role requirement";
-  return clean.length > 34 ? `${clean.slice(0, 32).trim()}…` : clean;
+function extractPreparationSkills(description) {
+  const text = String(description || "").toLowerCase();
+  const skills = [
+    ["Power BI", ["power bi", "powerbi", "power query", "dax"]],
+    ["Tableau", ["tableau"]],
+    ["SQL", ["sql", "postgresql", "postgres", "mysql", "snowflake", "bigquery"]],
+    ["Python", ["python", "pandas", "numpy", "fastapi", "django", "flask"]],
+    ["Excel", ["excel", "pivot table", "vlookup", "xlookup"]],
+    ["Linux", ["linux", "unix", "bash", "shell scripting"]],
+    ["JavaScript", ["javascript", "ecmascript"]],
+    ["TypeScript", ["typescript"]],
+    ["React", ["react", "reactjs", "react.js"]],
+    ["Node.js", ["node.js", "nodejs", "node js", "express.js"]],
+    ["Git", ["git", "github", "gitlab"]],
+    ["Docker", ["docker", "containerization"]],
+    ["AWS", ["aws", "amazon web services"]],
+  ];
+  return skills.filter(([, aliases]) => aliases.some((alias) => text.includes(alias))).map(([name]) => name).slice(0, 8);
 }
 
 function summarizeJobForWorkspace(description, job) {
@@ -8052,6 +8062,11 @@ function normalizeUrl(url) {
 function displayUrl(url) {
   if (!url) return "saved";
   return url.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+}
+
+function fullJobUrl(url) {
+  if (!url) return "saved";
+  return String(url).trim();
 }
 
 function colorForPlan(plan, markers = {}) {

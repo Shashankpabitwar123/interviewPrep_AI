@@ -25,6 +25,14 @@ class InterviewFocus(BaseModel):
     topics: list[str]
 
 
+class JobCoreSkill(BaseModel):
+    """A concise, source-grounded technology or tool for job preparation."""
+
+    name: str
+    category: Literal["data", "software", "platform", "cloud", "workflow", "other"] = "other"
+    priority: Literal["critical", "important", "supporting"] = "important"
+
+
 class JobAnalysisResponse(BaseModel):
     job_post_id: Optional[int] = None
     analysis_id: Optional[int] = None
@@ -32,6 +40,7 @@ class JobAnalysisResponse(BaseModel):
     company: str = ""
     seniority: str
     required_skills: list[str]
+    core_skills: list[JobCoreSkill] = Field(default_factory=list)
     interview_focus: list[InterviewFocus]
     coding_difficulty: str
     behavioral_themes: list[str]
@@ -97,6 +106,7 @@ class JobDescriptionBrief(BaseModel):
     company: str = ""
     role_title: str
     role_summary: str
+    core_skills: list[JobCoreSkill] = Field(default_factory=list)
     what_matters_most: list[JobAnalysisPriority] = Field(default_factory=list)
     requirements: JobAnalysisRequirements = Field(default_factory=JobAnalysisRequirements)
     responsibilities: list[str] = Field(default_factory=list)

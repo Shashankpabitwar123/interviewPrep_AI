@@ -1,6 +1,6 @@
 from app.config import Settings
 from app.schemas.job_analysis import JobAnalysisRequest
-from app.services.job_analyzer import analysis_from_job_brief, analyze_job_description, build_job_description_brief
+from app.services.job_analyzer import analysis_from_job_brief, analyze_job_description, build_job_description_brief, extract_core_skills
 
 
 def test_heuristic_job_analysis_extracts_role_signals() -> None:
@@ -35,3 +35,22 @@ def test_structured_job_brief_maps_to_the_compact_plan_analysis() -> None:
     assert brief.interview_topics
     assert compact.required_skills
     assert compact.interview_focus
+
+
+def test_core_skills_are_short_source_grounded_technologies() -> None:
+    description = "Use Power BI, Tableau, SQL, Linux, and Python to build reporting workflows."
+
+    skills = extract_core_skills(description)
+
+    assert [skill.name for skill in skills] == ["Power BI", "Tableau", "SQL", "Linux", "Python"]
+    assert all(skill.name not in {"Communication", "Problem solving"} for skill in skills)
+
+
+def test_structured_brief_exposes_core_skills_to_the_compact_analysis() -> None:
+    description = "Data Analyst role using Power BI, Tableau, SQL, and Excel."
+
+    brief = build_job_description_brief("Data Analyst", description, None, Settings(openai_api_key=None))
+    compact = analysis_from_job_brief(brief)
+
+    assert [skill.name for skill in compact.core_skills] == ["Power BI", "Tableau", "SQL", "Excel"]
+    assert compact.required_skills[:4] == ["Power BI", "Tableau", "SQL", "Excel"]

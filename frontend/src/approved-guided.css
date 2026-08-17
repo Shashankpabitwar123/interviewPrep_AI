@@ -3910,7 +3910,7 @@
 }
 
 .guided-job-source-panel {
-  min-height: 158px;
+  min-height: 0;
   padding: 20px;
   display: flex;
   flex: 1;
@@ -3933,6 +3933,23 @@
 .guided-job-source-panel > p,
 .guided-job-source-link {
   margin: 13px 0;
+}
+
+.guided-job-source-link {
+  width: 100%;
+  align-items: flex-start;
+  line-height: 1.45;
+}
+
+.guided-job-source-link svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.guided-job-source-link span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .guided-job-source-panel > p {
