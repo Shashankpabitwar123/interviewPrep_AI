@@ -5076,3 +5076,231 @@
     padding-left: 13px;
   }
 }
+
+/* Notes follows the same compact date-control system as the approved Plan page. */
+.notes-page-redesign {
+  gap: 16px;
+}
+
+.notes-heading h1 {
+  font-size: clamp(27px, 2.4vw, 33px);
+}
+
+.notes-heading p {
+  font-size: 14px;
+}
+
+.notes-date-panel {
+  padding: 14px 16px 16px;
+}
+
+.notes-date-scroll {
+  gap: 16px;
+  margin-top: 0;
+  overflow: visible;
+  padding: 8px 8px 12px;
+}
+
+.notes-date-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  flex: 0 0 56px;
+  width: 56px;
+  min-width: 56px;
+  min-height: 56px;
+  aspect-ratio: 1;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--approved-line);
+  border-radius: 50%;
+  color: var(--approved-muted);
+  background: var(--approved-surface-2);
+  cursor: pointer;
+  isolation: isolate;
+  scroll-snap-align: none;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+
+.notes-date-button > span {
+  position: static;
+  display: block;
+  width: auto;
+  min-height: 0;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  transition: none;
+}
+
+.notes-date-button strong {
+  color: var(--approved-soft);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.notes-date-button small {
+  display: none;
+}
+
+.notes-date-button:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--approved-coral) 62%, var(--approved-line));
+}
+
+.notes-date-button:hover > span {
+  border: 0;
+  color: inherit;
+  transform: none;
+}
+
+.notes-date-button.today:not(.selected) {
+  color: var(--approved-muted);
+}
+
+.notes-date-button.today:not(.selected) > span,
+.notes-date-button.today:not(.selected) strong {
+  color: inherit;
+  border: 0;
+  background: transparent;
+}
+
+.notes-date-button.selected {
+  border: 2px solid var(--approved-coral);
+  color: var(--approved-coral);
+  background: color-mix(in srgb, var(--approved-coral-soft) 55%, var(--approved-surface-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--approved-coral) 86%, white), 0 0 0 3px var(--approved-surface-2), 0 0 0 5px color-mix(in srgb, var(--approved-coral) 52%, transparent), 0 0 20px color-mix(in srgb, var(--approved-coral) 42%, transparent);
+}
+
+.notes-date-button.selected::after {
+  position: absolute;
+  z-index: -1;
+  inset: -9px;
+  content: "";
+  border: 1px solid color-mix(in srgb, var(--approved-coral) 68%, transparent);
+  border-radius: inherit;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--approved-coral) 42%, transparent);
+  animation: guided-plan-date-pulse 2.1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.notes-date-button.selected strong,
+.notes-date-button.selected > span {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--approved-coral);
+}
+
+.notes-date-button.interview-date {
+  border-color: var(--approved-coral);
+  color: var(--approved-coral);
+  background: color-mix(in srgb, var(--approved-coral-soft) 64%, var(--approved-surface-2));
+  box-shadow: 0 0 16px var(--approved-coral-soft);
+}
+
+.notes-date-button.interview-date svg {
+  width: 13px;
+  height: 13px;
+}
+
+.notes-date-button.interview-date > span {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--approved-coral);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.notes-date-button.interview-date strong {
+  color: var(--approved-text);
+  font-size: 15px;
+}
+
+.notes-date-workspace {
+  grid-template-columns: minmax(230px, .2fr) minmax(0, 1fr);
+  min-height: 520px;
+  border-radius: 13px;
+}
+
+.notes-date-rail > header {
+  min-height: 64px;
+  padding: 13px 14px;
+}
+
+.notes-content-pane {
+  padding: 18px;
+}
+
+.notes-reader {
+  min-height: 480px;
+}
+
+.notes-direct-editor textarea {
+  min-height: 280px;
+}
+
+.notes-delete-note {
+  display: inline-flex;
+  width: auto;
+  min-width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-color: color-mix(in srgb, var(--approved-coral) 52%, var(--approved-line));
+  border-radius: 7px;
+  color: var(--approved-coral);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.notes-delete-note:hover {
+  border-color: var(--approved-coral);
+  background: var(--approved-coral-soft);
+}
+
+.notes-color-picker {
+  position: relative;
+  isolation: isolate;
+}
+
+.notes-color-options {
+  top: calc(100% + 7px);
+  right: 0;
+  left: auto;
+  max-width: calc(100vw - 52px);
+  transform: none;
+}
+
+@media (max-width: 700px) {
+  .notes-date-scroll {
+    gap: 14px;
+    overflow-x: auto;
+  }
+
+  .notes-date-workspace {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .notes-date-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--approved-line);
+  }
+
+  .notes-delete-note span {
+    display: none;
+  }
+}

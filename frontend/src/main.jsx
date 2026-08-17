@@ -2416,7 +2416,6 @@ function App() {
         )}
 
         {activeView === "prep" && <GuidedSectionTabs title="Plan" description="Follow your day-by-day preparation plan for the selected job." tabs={[]} active={activeView} onChange={setActiveView} />}
-        {activeView === "notes" && <GuidedSectionTabs title="Notes" description="Create, organize, and review your interview study notes." tabs={[]} active={activeView} onChange={setActiveView} />}
         {["exams", "data"].includes(activeView) && <GuidedSectionTabs title="Practice" description="Test your knowledge, rehearse answers aloud, and review interview evidence." tabs={[{ id: "exams", label: "Exams & mocks" }, { id: "data", label: "Interview insights" }]} active={activeView} onChange={setActiveView} />}
         {["progress", "analytics"].includes(activeView) && <GuidedSectionTabs title="Readiness" description="See what is improving, what needs work, and the next best action." tabs={[{ id: "progress", label: "Overview" }, { id: "analytics", label: "Trends" }]} active={activeView} onChange={setActiveView} />}
 
@@ -5739,14 +5738,15 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             const count = notes.filter((note) => String(note.planId || "") === activePlanId && String(note.noteDate || dateKey(new Date())) === dayKey).length;
             return (
               <button key={dayKey} type="button" aria-label={`${day.shortLabel}, ${count ? `${count} note${count === 1 ? "" : "s"}` : "no notes"}`} className={`notes-date-button ${dayKey === selectedDate ? "selected" : ""} ${day.isToday ? "today" : ""}`} onClick={() => { setSelectedDate(dayKey); setOpenNoteId(""); setFolderDraftOpen(false); setNoteDraftOpen(false); }}>
-                <span><strong>{day.date.getDate()}</strong></span>
-                <small>{day.isToday ? "Today" : day.shortLabel}</small>
+                <strong>{day.date.getDate()}</strong>
+                <span>{day.isToday ? "Today" : day.shortLabel}</span>
               </button>
             );
           })}
           <button type="button" aria-label={`Interview day, ${interviewDate.toLocaleDateString(undefined, { month: "long", day: "numeric" })}`} className={`notes-date-button interview-date ${selectedDate === interviewDateKey ? "selected" : ""}`} onClick={() => { setSelectedDate(interviewDateKey); setOpenNoteId(""); setFolderDraftOpen(false); setNoteDraftOpen(false); }}>
-            <span><Target size={16} /><strong>{interviewDate.getDate()}</strong></span>
-            <small>Interview</small>
+            <Target size={13} />
+            <span>Interview</span>
+            <strong>{interviewDate.getDate()}</strong>
           </button>
         </div>
       </section>
@@ -5842,7 +5842,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
                 </div>
                 <div className="notes-reader-actions">
                   <button type="button" className="outline-action compact-action" disabled={improvingNoteId === openNote.id} onClick={() => improveSavedNote(openNote.id, activePlan?.job_title || selectedJob?.title || "", editDraft)}>{improvingNoteId === openNote.id ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}Improve with AI</button>
-                  <button type="button" className="notes-delete-note" onClick={() => confirmDeleteNote(openNote)} aria-label="Delete note" title="Delete note"><Trash2 size={16} /></button>
+                  <button type="button" className="notes-delete-note" onClick={() => confirmDeleteNote(openNote)} aria-label="Delete note" title="Delete note"><Trash2 size={15} /><span>Delete note</span></button>
                 </div>
               </header>
               <div className="notes-edit-fields notes-direct-editor">
