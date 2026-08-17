@@ -104,6 +104,8 @@ const EXAM_TYPE_OPTIONS = [
   ["coding", "Coding"],
 ];
 
+const NOTE_COLOR_OPTIONS = ["#ff5d42", "#f2bd5c", "#7cdda5", "#5d8bff", "#9f83f4", "#df7ca9"];
+
 const ONBOARDING_VERSION = 1;
 
 const DASHBOARD_TOUR_STEPS = [
@@ -5017,11 +5019,12 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   const [selectedDate, setSelectedDate] = useState("");
   const [openNoteId, setOpenNoteId] = useState("");
   const [isEditing, setIsEditing] = useState(false);
-  const [editDraft, setEditDraft] = useState({ title: "", body: "", folder: "Generated notes", color: "#ff5d42" });
+  const [editDraft, setEditDraft] = useState({ title: "", body: "", folder: "Notes", color: "#ff5d42" });
   const [folderDraftOpen, setFolderDraftOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [draggedNoteId, setDraggedNoteId] = useState("");
   const [dropFolder, setDropFolder] = useState("");
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
 
@@ -5033,7 +5036,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   }, [activePlanId, todayDay?.day]);
 
   useEffect(() => {
-    setNoteDraft((current) => ({ ...current, planId: activePlanId, noteDate: selectedDate, folder: current.folder || "Generated notes" }));
+    setNoteDraft((current) => ({ ...current, planId: activePlanId, noteDate: selectedDate, folder: current.folder || "Notes" }));
   }, [activePlanId, selectedDate, setNoteDraft]);
 
   const visibleNotes = notes.filter((note) => String(note.planId || "") === activePlanId
@@ -5042,18 +5045,25 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   const scopedFolders = noteFolders
     .filter((folder) => matchesNoteFolder(folder, noteFolderName(folder), activePlanId, selectedDate))
     .map(noteFolderName);
-  const folderNames = ["Generated notes", ...new Set([...scopedFolders, ...Object.keys(grouped)])]
-    .filter((folder) => folder && folder !== "Notes" && folder !== "Quick Notes");
+  const unfiledNotes = [
+    ...(grouped.Notes || []),
+    ...(grouped["Generated notes"] || []),
+    ...(grouped["Quick Notes"] || []),
+  ];
+  const folderNames = [...new Set([...scopedFolders, ...Object.keys(grouped)])]
+    .filter((folder) => folder && !["Notes", "Quick Notes", "Generated notes"].includes(folder));
+  const folderOptions = ["Notes", ...folderNames];
   const openNote = visibleNotes.find((note) => note.id === openNoteId) || null;
   const selectedDay = preparationDays.find((day) => dateKey(day.date) === selectedDate) || todayDay;
   const interviewDate = guidedInterviewDate(selectedJob, activePlan, preparationDays.length || 1);
 
   useEffect(() => {
     if (!openNote) return;
+    const existingFolder = normalizeNoteFolder(openNote.folder);
     setEditDraft({
       title: openNote.title || "",
       body: openNote.body || "",
-      folder: normalizeNoteFolder(openNote.folder),
+      folder: ["Generated notes", "Quick Notes"].includes(existingFolder) ? "Notes" : existingFolder,
       color: openNote.color || "#ff5d42",
     });
   }, [openNoteId, openNote?.updatedAt]);
@@ -5061,9 +5071,10 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   function openNoteEditor(note) {
     setOpenNoteId(note.id);
     setIsEditing(false);
+    setColorPickerOpen(false);
   }
 
-  function newNote(folder = "Generated notes") {
+  function newNote(folder = "Notes") {
     const noteId = createBlankNote({ title: "Untitled note", folder, planId: activePlanId, noteDate: selectedDate });
     setOpenNoteId(noteId);
     setIsEditing(true);
@@ -5083,11 +5094,12 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
     updateNote(openNote.id, {
       title: editDraft.title.trim() || "Untitled note",
       body: editDraft.body,
-      folder: editDraft.folder.trim() || "Generated notes",
+      folder: editDraft.folder.trim() || "Notes",
       noteDate: selectedDate,
       color: editDraft.color || "#ff5d42",
     });
     setIsEditing(false);
+    setColorPickerOpen(false);
   }
 
   function confirmDeleteNote(note) {
@@ -5097,7 +5109,6 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   }
 
   function confirmDeleteFolder(folder, folderNotes) {
-    if (folder === "Generated notes") return;
     const count = folderNotes.length;
     if (!window.confirm(`Delete folder "${folder}" and ${count} note${count === 1 ? "" : "s"} inside it? This cannot be undone.`)) return;
     deleteNoteFolder(folder, { planId: activePlanId, noteDate: selectedDate });
@@ -5190,11 +5201,11 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
           <header>
             <div>
               <span>{selectedDay?.monthDay || "Preparation day"}</span>
-              <strong>{selectedDay?.isToday ? "Today’s notes" : "Notes for this day"}</strong>
+              <strong>Notes</strong>
             </div>
             <div className="notes-rail-actions">
               <button type="button" onClick={() => setFolderDraftOpen((current) => !current)} title="Create folder" aria-label="Create folder"><FolderPlus size={17} /></button>
-              <button type="button" onClick={() => newNote("Generated notes")} title="Create note" aria-label="Create note"><FilePlus2 size={17} /></button>
+              <button type="button" onClick={() => newNote()} title="Create note" aria-label="Create note"><FilePlus2 size={17} /></button>
             </div>
           </header>
           {folderDraftOpen && (
@@ -5205,6 +5216,11 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             </form>
           )}
           <div className="notes-date-folder-list">
+            {unfiledNotes.map((note) => (
+              <button key={note.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }} onClick={() => openNoteEditor(note)} className={`notes-file-row ${note.id === openNoteId ? "selected" : ""}`}>
+                <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} /><span><strong>{note.title}</strong></span>
+              </button>
+            ))}
             {folderNames.map((folder) => {
               const folderNotes = grouped[folder] || [];
               const isDropTarget = dropFolder === folder;
@@ -5212,24 +5228,22 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
                 <section key={folder} className={`notes-date-folder ${isDropTarget ? "drop-target" : ""}`} onDragOver={(event) => { event.preventDefault(); setDropFolder(folder); }} onDragLeave={() => setDropFolder("")} onDrop={(event) => { event.preventDefault(); moveNoteToFolder(event.dataTransfer.getData("text/plain") || draggedNoteId, folder); }}>
                   <div className="notes-folder-label">
                     <span><Folder size={16} />{folder}</span>
-                    <small>{folderNotes.length}</small>
-                    {folder !== "Generated notes" && <button type="button" onClick={() => confirmDeleteFolder(folder, folderNotes)} aria-label={`Delete ${folder}`} title={`Delete ${folder}`}><Trash2 size={14} /></button>}
+                    <button type="button" onClick={() => confirmDeleteFolder(folder, folderNotes)} aria-label={`Delete ${folder}`} title={`Delete ${folder}`}><Trash2 size={14} /></button>
                   </div>
                   <div className="notes-folder-notes">
                     {folderNotes.map((note) => (
                       <button key={note.id} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }} onClick={() => openNoteEditor(note)} className={`notes-file-row ${note.id === openNoteId ? "selected" : ""}`}>
-                        <FileText size={15} /><span><strong>{note.title}</strong><small>{note.generated ? "Generated note" : note.updatedAt ? "Edited note" : "Personal note"}</small></span>
+                        <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} /><span><strong>{note.title}</strong></span>
                       </button>
                     ))}
-                    {!folderNotes.length && <small className="notes-folder-drop-copy">Drop a note here</small>}
+                    {!folderNotes.length && isDropTarget && <small className="notes-folder-drop-copy">Drop here</small>}
                   </div>
                 </section>
               );
             })}
           </div>
           <label className="notes-import-control">
-            <span><Plus size={16} />Import notes</span>
-            <small>TXT, MD, or CSV</small>
+            <span><Plus size={16} />Import</span>
             <input type="file" accept=".txt,.md,.csv" onChange={importNotes} />
           </label>
         </aside>
@@ -5239,9 +5253,8 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             <form onSubmit={saveOpenNote} className="notes-reader">
               <header className="notes-reader-head">
                 <div>
-                  <span>{openNote.generated ? "GENERATED NOTE" : "PERSONAL NOTE"} · {selectedDay?.monthDay}</span>
+                  <span>{selectedDay?.monthDay}</span>
                   {isEditing ? <input className="notes-reader-title-input" value={editDraft.title} onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} /> : <h2>{openNote.title}</h2>}
-                  <small>{editDraft.folder || openNote.folder} · {openNote.updatedAt ? "Edited" : "Created"} {formatShortDate(openNote.updatedAt || openNote.createdAt)}</small>
                 </div>
                 <div className="notes-reader-actions">
                   <button type="button" className="outline-action compact-action" disabled={improvingNoteId === openNote.id} onClick={() => improveSavedNote(openNote.id, activePlan?.job_title || selectedJob?.title || "", isEditing ? editDraft : null)}>{improvingNoteId === openNote.id ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}Improve with AI</button>
@@ -5251,8 +5264,13 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
               </header>
               {isEditing ? (
                 <div className="notes-edit-fields">
-                  <div><label>Folder</label><select value={editDraft.folder} onChange={(event) => setEditDraft({ ...editDraft, folder: event.target.value })}>{folderNames.map((folder) => <option key={folder} value={folder}>{folder}</option>)}</select></div>
-                  <label className="note-color-field"><Palette size={15} /><input type="color" value={editDraft.color || "#ff5d42"} onChange={(event) => setEditDraft({ ...editDraft, color: event.target.value })} /></label>
+                  <div className="notes-edit-toolbar">
+                    <label className="notes-folder-select"><Folder size={15} /><span className="sr-only">Folder</span><select value={editDraft.folder} onChange={(event) => setEditDraft({ ...editDraft, folder: event.target.value })}>{folderOptions.map((folder) => <option key={folder} value={folder}>{folder === "Notes" ? "No folder" : folder}</option>)}</select></label>
+                    <div className="notes-color-picker">
+                      <button type="button" className="notes-color-trigger" aria-label="Change note color" aria-expanded={colorPickerOpen} onClick={() => setColorPickerOpen((current) => !current)}><span style={{ backgroundColor: editDraft.color || "#ff5d42" }} /></button>
+                      {colorPickerOpen && <div className="notes-color-options" role="menu" aria-label="Note colors">{NOTE_COLOR_OPTIONS.map((color) => <button key={color} type="button" className={color === (editDraft.color || "#ff5d42") ? "selected" : ""} style={{ backgroundColor: color }} aria-label={`Use ${color} note color`} onClick={() => { setEditDraft({ ...editDraft, color }); setColorPickerOpen(false); }} />)}</div>}
+                    </div>
+                  </div>
                   <textarea value={editDraft.body} onChange={(event) => setEditDraft({ ...editDraft, body: event.target.value })} placeholder="Write or edit your note here..." />
                 </div>
               ) : (
@@ -5268,8 +5286,8 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             <section className="notes-empty-reader">
               <NotebookText size={42} />
               <h2>{visibleNotes.length ? "Choose a note to continue" : "This day is ready for your notes"}</h2>
-              <p>{visibleNotes.length ? "Open a note on the left, drag it into a folder, or create a new note for this preparation day." : "Generated notes from your plan will appear in Generated notes. You can also create a folder, add a personal note, or import existing notes."}</p>
-              <button type="button" className="guided-primary-button" onClick={() => newNote("Generated notes")}><FilePlus2 size={17} />Create a note</button>
+              <p>{visibleNotes.length ? "Open a note on the left, drag it into a folder, or create a new note for this preparation day." : "Create a folder, add a note, or import existing notes for this preparation day."}</p>
+              <button type="button" className="guided-primary-button" onClick={() => newNote()}><FilePlus2 size={17} />Create a note</button>
             </section>
           )}
         </article>
