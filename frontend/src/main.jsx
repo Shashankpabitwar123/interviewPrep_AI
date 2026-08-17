@@ -2322,7 +2322,7 @@ function App() {
             onLogout={logout}
           />
 
-          <main className={`guided-app-main ${activeView === "dashboard" ? "guided-app-main--today" : ""}`}>
+          <main className={`guided-app-main ${activeView === "dashboard" ? "guided-app-main--today" : ""} ${activeView === "jobs" ? "guided-app-main--jobs" : ""}`}>
             {activeView !== "jobs" && (
               <GuidedJobContextBar
                 selectedJob={selectedContextJob}

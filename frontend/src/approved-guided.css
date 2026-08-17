@@ -3251,14 +3251,24 @@
 }
 
 /* Jobs workspace: compact management surface with one clear selection flow. */
+.guided-app-main--jobs {
+  width: min(100%, 1460px);
+  min-height: calc(100vh - 74px);
+  padding-top: 32px;
+  padding-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
 .guided-jobs-page {
   padding-top: 0;
+  flex: 1 0 auto;
 }
 
 .guided-jobs-heading {
-  margin-bottom: 16px;
+  margin-bottom: 22px;
   align-items: center;
-  gap: 18px;
+  gap: 22px;
 }
 
 .guided-jobs-title-line {
@@ -3269,13 +3279,13 @@
 
 .guided-jobs-title-line h1 {
   margin: 0;
-  font-size: clamp(28px, 3vw, 36px);
+  font-size: clamp(31px, 3.2vw, 40px);
   letter-spacing: -0.04em;
 }
 
 .guided-jobs-title-line b {
-  min-width: 25px;
-  height: 25px;
+  min-width: 27px;
+  height: 27px;
   padding: 0 7px;
   display: inline-grid;
   place-items: center;
@@ -3283,24 +3293,24 @@
   border-radius: 999px;
   color: var(--approved-soft);
   background: var(--approved-surface-2);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .guided-jobs-heading p {
-  margin-top: 5px;
-  font-size: 12px;
+  margin-top: 7px;
+  font-size: 13px;
 }
 
 .guided-jobs-add-button {
-  min-height: 40px;
-  padding: 0 15px;
+  min-height: 44px;
+  padding: 0 17px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .guided-jobs-layout {
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 294px minmax(0, 1fr);
+  gap: 18px;
 }
 
 .guided-job-list-panel,
@@ -3309,7 +3319,7 @@
 }
 
 .guided-job-list-panel {
-  padding: 12px;
+  padding: 14px;
 }
 
 .guided-job-list-header {
@@ -3323,12 +3333,12 @@
 }
 
 .guided-job-list-header strong {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .guided-job-list-header span {
   color: var(--approved-muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .guided-job-search-row {
@@ -3338,8 +3348,8 @@
 .guided-job-search-row > label,
 .guided-delete-mode-trigger,
 .guided-delete-mode-actions button {
-  height: 38px;
-  min-height: 38px;
+  height: 42px;
+  min-height: 42px;
   border-radius: 7px;
 }
 
@@ -3349,12 +3359,12 @@
 }
 
 .guided-job-search-row input {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .guided-delete-mode-trigger,
 .guided-delete-mode-actions button {
-  width: 38px;
+  width: 42px;
 }
 
 .guided-delete-mode-label {
@@ -3382,8 +3392,8 @@
 }
 
 .guided-job-list-row > button {
-  min-height: 68px;
-  padding: 9px 10px;
+  min-height: 76px;
+  padding: 11px 11px;
   grid-template-columns: 4px minmax(0, 1fr) auto;
   gap: 9px;
 }
@@ -3398,13 +3408,13 @@
 }
 
 .guided-job-list-row > button strong {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .guided-job-list-row > button small,
 .guided-job-list-row > button em,
 .guided-job-list-row > button > b {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .guided-job-list-row > button > b {
@@ -3421,12 +3431,12 @@
 }
 
 .guided-job-detail-panel {
-  min-height: 500px;
+  min-height: 570px;
 }
 
 .guided-job-detail-header {
-  min-height: 74px;
-  padding: 15px 18px;
+  min-height: 82px;
+  padding: 17px 20px;
   gap: 12px;
 }
 
@@ -3440,12 +3450,12 @@
 }
 
 .guided-job-detail-header h2 {
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .guided-job-detail-header p {
-  margin-top: 3px;
-  font-size: 10px;
+  margin-top: 4px;
+  font-size: 11px;
 }
 
 .guided-job-detail-header .icon-button {
@@ -3454,23 +3464,23 @@
 }
 
 .guided-job-tabs {
-  padding: 0 18px;
+  padding: 0 20px;
 }
 
 .guided-job-tabs button {
-  min-height: 42px;
-  padding: 0 13px;
-  font-size: 11px;
+  min-height: 46px;
+  padding: 0 15px;
+  font-size: 12px;
 }
 
 .guided-job-overview,
 .guided-job-analysis-view {
-  padding: 16px 18px 18px;
+  padding: 20px 20px 22px;
 }
 
 .guided-job-plan-status {
-  min-height: 54px;
-  padding: 10px 12px;
+  min-height: 60px;
+  padding: 12px 14px;
   gap: 10px;
   border-color: var(--approved-line-soft);
   border-radius: 7px;
@@ -3492,11 +3502,11 @@
 }
 
 .guided-job-plan-status strong {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .guided-job-plan-status small {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .guided-job-plan-status .guided-secondary-button {
@@ -3507,7 +3517,7 @@
 }
 
 .guided-job-metrics {
-  margin: 12px 0;
+  margin: 14px 0;
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--approved-line-soft);
@@ -3516,8 +3526,8 @@
 }
 
 .guided-job-metrics article {
-  min-height: 84px;
-  padding: 13px 15px;
+  min-height: 94px;
+  padding: 15px 17px;
   gap: 4px;
   border: 0;
   border-right: 1px solid var(--approved-line-soft);
@@ -3531,27 +3541,27 @@
 
 .guided-job-metrics span,
 .guided-job-metrics small {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .guided-job-metrics strong {
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .guided-job-source-panel {
-  padding: 14px 15px;
+  padding: 17px;
   border-color: var(--approved-line-soft);
   border-radius: 7px;
   background: transparent;
 }
 
 .guided-job-source-panel h3 {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .guided-job-source-panel header button,
 .guided-job-source-link {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .guided-job-source-panel > p,
@@ -3560,7 +3570,7 @@
 }
 
 .guided-job-source-panel > p {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -3581,8 +3591,13 @@
 }
 
 .guided-job-tags span {
-  padding: 4px 7px;
-  font-size: 9px;
+  padding: 5px 8px;
+  font-size: 10px;
+}
+
+.guided-app-main--jobs .guided-footer {
+  margin-top: 24px;
+  padding-top: 16px;
 }
 
 .guided-job-analysis-view > section,
@@ -3629,7 +3644,7 @@
 
 @media (max-width: 1040px) {
   .guided-jobs-layout {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 250px minmax(0, 1fr);
   }
 
   .guided-job-list-panel {
@@ -3639,6 +3654,12 @@
 }
 
 @media (max-width: 820px) {
+  .guided-app-main--jobs {
+    min-height: calc(100vh - 70px);
+    padding-top: 24px;
+    padding-bottom: 18px;
+  }
+
   .guided-jobs-heading {
     align-items: flex-end;
   }
@@ -3672,6 +3693,10 @@
 }
 
 @media (max-width: 560px) {
+  .guided-app-main--jobs {
+    padding-top: 20px;
+  }
+
   .guided-jobs-heading p,
   .guided-job-list-header span {
     display: none;
