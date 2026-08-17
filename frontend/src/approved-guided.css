@@ -1799,16 +1799,6 @@
   min-height: 242px;
   margin: 0;
   overflow: hidden;
-  background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--approved-coral-soft) 28%, transparent) 0%, transparent 64%);
-}
-.guided-interview-mascot-stage::before {
-  position: absolute;
-  width: 190px;
-  height: 190px;
-  border: 1px solid color-mix(in srgb, var(--approved-mint) 36%, transparent);
-  border-radius: 50%;
-  content: "";
-  opacity: .68;
 }
 
 .guided-interview-dance {
@@ -1819,39 +1809,12 @@
 }
 
 .guided-interview-dance img {
-  position: absolute;
-  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
-  opacity: 0;
   image-rendering: pixelated;
   filter: drop-shadow(0 10px 13px color-mix(in srgb, #000 42%, transparent));
-}
-
-.guided-interview-dance:not(.is-dancing) img:first-child {
-  opacity: 1;
-}
-
-.guided-interview-dance.is-dancing img {
-  animation: guided-mascot-dance 1.8s steps(1, end) infinite;
-}
-
-.guided-interview-dance.is-dancing img:nth-child(2) { animation-delay: -.15s; }
-.guided-interview-dance.is-dancing img:nth-child(3) { animation-delay: -.30s; }
-.guided-interview-dance.is-dancing img:nth-child(4) { animation-delay: -.45s; }
-.guided-interview-dance.is-dancing img:nth-child(5) { animation-delay: -.60s; }
-.guided-interview-dance.is-dancing img:nth-child(6) { animation-delay: -.75s; }
-.guided-interview-dance.is-dancing img:nth-child(7) { animation-delay: -.90s; }
-.guided-interview-dance.is-dancing img:nth-child(8) { animation-delay: -1.05s; }
-.guided-interview-dance.is-dancing img:nth-child(9) { animation-delay: -1.20s; }
-.guided-interview-dance.is-dancing img:nth-child(10) { animation-delay: -1.35s; }
-.guided-interview-dance.is-dancing img:nth-child(11) { animation-delay: -1.50s; }
-.guided-interview-dance.is-dancing img:nth-child(12) { animation-delay: -1.65s; }
-
-@keyframes guided-mascot-dance {
-  0%, 8.32% { opacity: 1; }
-  8.33%, 100% { opacity: 0; }
 }
 
 @keyframes guided-celebration-confetti {
@@ -2074,10 +2037,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .guided-plan-interview-tile.selected::after,
-  .guided-interview-dance.is-dancing img,
   .guided-celebration-confetti i { animation: none; }
-  .guided-interview-dance.is-dancing img { opacity: 0; }
-  .guided-interview-dance.is-dancing img:first-child { opacity: 1; }
 }
 
 /* Saved job analysis: one compact, consistent reading order for every job. */

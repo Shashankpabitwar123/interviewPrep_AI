@@ -5148,6 +5148,20 @@ function InterviewDayPanel({ plan, allDone, allTasks }) {
   const totalTasks = allTasks.length;
   const planComplete = totalTasks > 0 && allDone === totalTasks;
   const interviewSchedule = formatInterviewSchedule(plan);
+  const [danceFrame, setDanceFrame] = useState(0);
+
+  useEffect(() => {
+    const shouldReduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!planComplete || shouldReduceMotion) {
+      setDanceFrame(0);
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setDanceFrame((currentFrame) => (currentFrame + 1) % INTERVIEW_DANCE_FRAMES.length);
+    }, 150);
+    return () => window.clearInterval(intervalId);
+  }, [planComplete]);
 
   return (
     <div className={`guided-interview-day-panel ${planComplete ? "is-complete" : ""}`}>
@@ -5186,8 +5200,8 @@ function InterviewDayPanel({ plan, allDone, allTasks }) {
       </div>
 
       <figure className="guided-interview-mascot-stage" aria-label="Smiling PrepInterview AI student celebrating interview day with a briefcase">
-        <div className={`guided-interview-dance ${planComplete ? "is-dancing" : ""}`} aria-hidden="true">
-          {INTERVIEW_DANCE_FRAMES.map((src) => <img key={src} src={src} alt="" />)}
+        <div className="guided-interview-dance" aria-hidden="true">
+          <img src={INTERVIEW_DANCE_FRAMES[danceFrame]} alt="" />
         </div>
         <figcaption>{planComplete ? "You did the work. Now go show it." : "Your plan is almost complete."}</figcaption>
       </figure>
