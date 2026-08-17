@@ -72,6 +72,32 @@ const EXTENSION_RESPONSE_SOURCE = "interviewprep-ai-extension";
 const JOB_BRIEF_CACHE_KEY = "interviewprep_job_briefs";
 const JOB_BRIEF_CACHE_VERSION = 2;
 const JOB_BRIEF_QA_CACHE_KEY = "interviewprep_job_brief_questions";
+const INTERVIEW_DANCE_FRAMES = Array.from(
+  { length: 12 },
+  (_, index) => `/interview-day-dance/frame-${String(index + 1).padStart(2, "0")}.png`,
+);
+const INTERVIEW_CELEBRATION_CONFETTI = [
+  ["5%", "0ms", "1700ms", "18deg", "-18px", "var(--approved-coral)"],
+  ["12%", "110ms", "2050ms", "-34deg", "16px", "var(--approved-mint)"],
+  ["18%", "260ms", "1800ms", "62deg", "-10px", "var(--approved-coral)"],
+  ["27%", "70ms", "2200ms", "-72deg", "24px", "var(--approved-mint)"],
+  ["34%", "330ms", "1950ms", "36deg", "-14px", "var(--approved-coral)"],
+  ["41%", "160ms", "2150ms", "-44deg", "18px", "var(--approved-mint)"],
+  ["49%", "40ms", "1850ms", "80deg", "-22px", "var(--approved-coral)"],
+  ["56%", "280ms", "2080ms", "-58deg", "12px", "var(--approved-mint)"],
+  ["63%", "120ms", "1770ms", "28deg", "-12px", "var(--approved-coral)"],
+  ["70%", "360ms", "2250ms", "-88deg", "26px", "var(--approved-mint)"],
+  ["78%", "80ms", "1900ms", "48deg", "-16px", "var(--approved-coral)"],
+  ["86%", "230ms", "2100ms", "-26deg", "17px", "var(--approved-mint)"],
+  ["93%", "20ms", "1800ms", "70deg", "-20px", "var(--approved-coral)"],
+  ["9%", "470ms", "1940ms", "-50deg", "12px", "var(--approved-mint)"],
+  ["23%", "520ms", "1780ms", "38deg", "-14px", "var(--approved-coral)"],
+  ["38%", "410ms", "2180ms", "-68deg", "22px", "var(--approved-mint)"],
+  ["52%", "560ms", "1880ms", "74deg", "-18px", "var(--approved-coral)"],
+  ["67%", "450ms", "2120ms", "-42deg", "15px", "var(--approved-mint)"],
+  ["82%", "500ms", "1820ms", "54deg", "-11px", "var(--approved-coral)"],
+  ["97%", "430ms", "2240ms", "-78deg", "20px", "var(--approved-mint)"],
+];
 const WORKSPACE_STORAGE_KEYS = [
   "interviewprep_job_markers",
   "interviewprep_deleted_jobs",
@@ -5124,7 +5150,24 @@ function InterviewDayPanel({ plan, allDone, allTasks }) {
   const interviewSchedule = formatInterviewSchedule(plan);
 
   return (
-    <div className="guided-interview-day-panel">
+    <div className={`guided-interview-day-panel ${planComplete ? "is-complete" : ""}`}>
+      {planComplete && (
+        <div className="guided-celebration-confetti" aria-hidden="true">
+          {INTERVIEW_CELEBRATION_CONFETTI.map(([left, delay, duration, rotation, drift, color], index) => (
+            <i
+              key={`${left}-${index}`}
+              style={{
+                "--confetti-left": left,
+                "--confetti-delay": delay,
+                "--confetti-duration": duration,
+                "--confetti-rotation": rotation,
+                "--confetti-drift": drift,
+                "--confetti-color": color,
+              }}
+            />
+          ))}
+        </div>
+      )}
       <div className="guided-interview-day-copy">
         <span>INTERVIEW DAY</span>
         <h2>{planComplete ? "You’re ready. Best of luck." : "Your interview day is here."}</h2>
@@ -5142,13 +5185,11 @@ function InterviewDayPanel({ plan, allDone, allTasks }) {
         </div>
       </div>
 
-      <figure className="guided-interview-mascot-stage" aria-label="Celebrating PrepInterview AI student mascot">
-        <i className="confetti-one" aria-hidden="true" />
-        <i className="confetti-two" aria-hidden="true" />
-        <i className="confetti-three" aria-hidden="true" />
-        <i className="confetti-four" aria-hidden="true" />
-        <img src="/interview-day-mascot.png" alt="Smiling PrepInterview AI student celebrating interview day with a briefcase" />
-        <figcaption>One focused step at a time got you here.</figcaption>
+      <figure className="guided-interview-mascot-stage" aria-label="Smiling PrepInterview AI student celebrating interview day with a briefcase">
+        <div className={`guided-interview-dance ${planComplete ? "is-dancing" : ""}`} aria-hidden="true">
+          {INTERVIEW_DANCE_FRAMES.map((src) => <img key={src} src={src} alt="" />)}
+        </div>
+        <figcaption>{planComplete ? "You did the work. Now go show it." : "Your plan is almost complete."}</figcaption>
       </figure>
     </div>
   );
