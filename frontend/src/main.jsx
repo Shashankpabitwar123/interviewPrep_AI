@@ -3232,21 +3232,34 @@ function GuidedTodayView({
     <section className="guided-approved-today" data-tour-page="dashboard">
       <div className="guided-today-layout">
         <section className="guided-today-main">
-          <article className="guided-next-step-card" data-tour="today-next-step">
+          <article className={`guided-next-step-card ${selectedDayComplete ? "day-complete" : ""}`} data-tour="today-next-step">
             <div className="guided-next-step-eyebrow">
-              <span>{selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} · Task {Math.min(currentTaskIndex + 1, visibleTasks.length)} of {visibleTasks.length}</span>
-              <button onClick={() => setWhyOpen((current) => !current)}><Info size={18} />Why this task?</button>
+              <span>
+                {selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} · {selectedDayComplete
+                  ? `${completedForSelectedDay} of ${visibleTasks.length} complete`
+                  : `Task ${Math.min(currentTaskIndex + 1, visibleTasks.length)} of ${visibleTasks.length}`}
+              </span>
+              {!selectedDayComplete && <button onClick={() => setWhyOpen((current) => !current)}><Info size={18} />Why this task?</button>}
             </div>
           {currentTask ? (
-            <>
+            selectedDayComplete ? (
+              <div className="guided-complete-summary">
+                <span className="guided-complete-summary-icon"><Check size={19} /></span>
+                <div>
+                  <h3>{selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} is complete</h3>
+                  <p>All scheduled tasks are done. Choose another day to preview what comes next.</p>
+                </div>
+                <button className="guided-secondary-button" onClick={onOpenLearn}><ClipboardList size={17} />View full plan</button>
+              </div>
+            ) : <>
               <div className="guided-task-type-line"><span>{guidedTaskTypeLabel(currentTask)}</span><i />{guidedTaskDuration(currentTask)} min</div>
-              <h3>{selectedDayComplete ? `${selectedDay?.relativeLabel || `Day ${selectedPlanDay}`} is complete` : currentTask.title}</h3>
-              <p>{selectedDayComplete ? "You finished every scheduled task for this preparation day. Select another day in Interview progress to preview what is coming." : currentTask.instructions || `Focus on ${(currentTask.topics || []).join(", ") || "the next role-specific topic"} before moving to practice.`}</p>
+              <h3>{currentTask.title}</h3>
+              <p>{currentTask.instructions || `Focus on ${(currentTask.topics || []).join(", ") || "the next role-specific topic"} before moving to practice.`}</p>
               {whyOpen && <div className="guided-why-task"><BrainCircuit size={19} /><span><strong>Why this comes next:</strong> Your plan orders each activity so it builds on the work immediately before it and improves your readiness for {company}.</span></div>}
               <div className="guided-hero-actions">
-                <button className="guided-primary-button" onClick={() => onStartTask(currentTask)} disabled={selectedDayComplete || isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId)}>
+                <button className="guided-primary-button" onClick={() => onStartTask(currentTask)} disabled={isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId)}>
                   {isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId) ? <Loader2 className="spin" size={17} /> : <Play size={18} fill="currentColor" />}
-                  {selectedDayComplete ? "Day complete" : isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId) ? "Preparing..." : isStudyNoteGenerated(currentTask) ? "Open task" : "Start task"}
+                  {isTaskGenerating(currentTask, loadingStudyTaskId, loadingExamTaskId) ? "Preparing..." : isStudyNoteGenerated(currentTask) ? "Open task" : "Start task"}
                 </button>
                 <button className="guided-secondary-button" onClick={onOpenLearn}><ClipboardList size={18} />View full plan</button>
               </div>

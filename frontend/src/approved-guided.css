@@ -1543,6 +1543,11 @@
   padding: 24px 28px;
 }
 
+.guided-next-step-card.day-complete {
+  min-height: 0;
+  padding: 18px 22px;
+}
+
 .guided-next-step-eyebrow {
   display: flex;
   align-items: center;
@@ -1585,6 +1590,45 @@
   color: var(--approved-soft);
   font-size: 14px;
   line-height: 1.55;
+}
+
+.guided-complete-summary {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+}
+
+.guided-complete-summary-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--approved-mint) 58%, var(--approved-line));
+  border-radius: 50%;
+  color: #071a12;
+  background: var(--approved-mint);
+}
+
+.guided-complete-summary h3 {
+  margin: 0 0 3px;
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+
+.guided-complete-summary p {
+  margin: 0;
+  color: var(--approved-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.guided-complete-summary .guided-secondary-button {
+  min-height: 38px;
+  padding: 0 13px;
+  gap: 7px;
+  font-size: 12px;
 }
 
 .guided-task-type-line {
@@ -1643,7 +1687,8 @@
 }
 
 .guided-daily-plan-card {
-  padding: 19px 22px;
+  min-height: 286px;
+  padding: 22px 24px 24px;
   border: 1px solid var(--approved-line);
   border-radius: 9px;
   background: var(--approved-surface);
@@ -1672,7 +1717,8 @@
 .guided-daily-plan-card h2 {
   margin: 0;
   color: var(--approved-text);
-  font-size: 18px;
+  font-size: 20px;
+  letter-spacing: -0.02em;
 }
 
 .guided-daily-plan-card > header > strong {
@@ -1682,8 +1728,8 @@
 
 .guided-daily-plan-card > progress {
   width: 100%;
-  height: 4px;
-  margin: 13px 0 12px;
+  height: 3px;
+  margin: 16px 0 14px;
   appearance: none;
 }
 
@@ -1699,29 +1745,37 @@
 
 .guided-daily-task-list {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .guided-daily-task-row {
-  min-height: 56px;
-  padding: 8px 11px;
+  min-height: 68px;
+  padding: 10px 14px;
   display: grid;
-  grid-template-columns: 28px 34px minmax(0, 1fr) auto 26px;
+  grid-template-columns: 30px 36px minmax(0, 1fr) auto 28px;
   align-items: center;
-  gap: 9px;
+  gap: 11px;
   border: 1px solid var(--approved-line-soft);
   border-radius: 7px;
   color: var(--approved-text);
-  background: color-mix(in srgb, var(--approved-surface-2) 40%, transparent);
+  background: color-mix(in srgb, var(--approved-surface-2) 34%, transparent);
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
 }
 
 .guided-daily-task-row.active {
-  border-color: var(--approved-coral);
-  background: var(--approved-coral-soft);
+  border-color: var(--approved-line);
+  background: color-mix(in srgb, var(--approved-surface-2) 44%, transparent);
+  box-shadow: inset 3px 0 0 var(--approved-coral);
 }
 
 .guided-daily-task-row.complete {
-  border-color: color-mix(in srgb, var(--approved-mint) 68%, var(--approved-line));
+  border-color: var(--approved-line-soft);
+  background: color-mix(in srgb, var(--approved-surface-2) 34%, transparent);
+}
+
+.guided-daily-task-row:hover {
+  border-color: var(--approved-line);
+  background: color-mix(in srgb, var(--approved-surface-2) 58%, transparent);
 }
 
 .guided-daily-task-check,
@@ -1732,8 +1786,8 @@
 }
 
 .guided-daily-task-check {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   font-size: 11px;
   border: 1px solid var(--approved-line);
   border-radius: 50%;
@@ -1754,8 +1808,8 @@
 }
 
 .guided-daily-task-icon {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border: 1px solid var(--approved-line);
   border-radius: 6px;
   color: var(--approved-soft);
@@ -1771,35 +1825,43 @@
 
 .guided-daily-task-copy strong {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .guided-daily-task-copy small {
   color: var(--approved-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .guided-daily-task-row em {
-  padding: 4px 7px;
-  border: 1px solid var(--approved-line);
-  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
   color: var(--approved-muted);
-  font-size: 9px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 700;
   white-space: nowrap;
 }
 
+.guided-daily-task-row em::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .guided-daily-task-row.active em {
   color: var(--approved-coral);
-  border-color: var(--approved-coral);
 }
 
 .guided-daily-task-row.complete em {
   color: var(--approved-mint);
-  border-color: var(--approved-mint);
 }
 
 .guided-daily-task-open {
@@ -3082,6 +3144,19 @@
   .guided-next-step-card {
     min-height: 0;
     padding: 24px 20px;
+  }
+
+  .guided-next-step-card.day-complete {
+    padding: 16px;
+  }
+
+  .guided-complete-summary {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .guided-complete-summary .guided-secondary-button {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .guided-next-step-eyebrow button {
