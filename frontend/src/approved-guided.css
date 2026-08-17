@@ -3432,6 +3432,8 @@
 
 .guided-job-detail-panel {
   min-height: 570px;
+  display: flex;
+  flex-direction: column;
 }
 
 .guided-job-detail-header {
@@ -3475,12 +3477,19 @@
 
 .guided-job-overview,
 .guided-job-analysis-view {
-  padding: 20px 20px 22px;
+  min-height: 0;
+  padding: 22px 22px 24px;
+  flex: 1;
+}
+
+.guided-job-overview {
+  display: flex;
+  flex-direction: column;
 }
 
 .guided-job-plan-status {
-  min-height: 60px;
-  padding: 12px 14px;
+  min-height: 68px;
+  padding: 14px 16px;
   gap: 10px;
   border-color: var(--approved-line-soft);
   border-radius: 7px;
@@ -3517,7 +3526,7 @@
 }
 
 .guided-job-metrics {
-  margin: 14px 0;
+  margin: 16px 0;
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--approved-line-soft);
@@ -3526,8 +3535,8 @@
 }
 
 .guided-job-metrics article {
-  min-height: 94px;
-  padding: 15px 17px;
+  min-height: 106px;
+  padding: 18px 19px;
   gap: 4px;
   border: 0;
   border-right: 1px solid var(--approved-line-soft);
@@ -3541,58 +3550,63 @@
 
 .guided-job-metrics span,
 .guided-job-metrics small {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .guided-job-metrics strong {
-  font-size: 19px;
+  font-size: 21px;
 }
 
 .guided-job-source-panel {
-  padding: 17px;
+  min-height: 158px;
+  padding: 20px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: space-between;
   border-color: var(--approved-line-soft);
   border-radius: 7px;
   background: transparent;
 }
 
 .guided-job-source-panel h3 {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .guided-job-source-panel header button,
 .guided-job-source-link {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .guided-job-source-panel > p,
 .guided-job-source-link {
-  margin: 10px 0;
+  margin: 13px 0;
 }
 
 .guided-job-source-panel > p {
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .guided-job-focus {
-  padding-top: 10px;
+  padding-top: 13px;
   border-top: 1px solid var(--approved-line-soft);
 }
 
 .guided-job-focus > small {
   display: block;
-  margin-bottom: 7px;
+  margin-bottom: 9px;
   color: var(--approved-muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .guided-job-tags {
-  gap: 5px;
+  gap: 7px;
 }
 
 .guided-job-tags span {
-  padding: 5px 8px;
-  font-size: 10px;
+  padding: 6px 9px;
+  font-size: 11px;
 }
 
 .guided-app-main--jobs .guided-footer {
@@ -3602,32 +3616,45 @@
 
 .guided-job-analysis-view > section,
 .guided-job-analysis-grid > section {
-  padding: 15px;
+  padding: 19px;
   border-color: var(--approved-line-soft);
   border-radius: 7px;
   background: transparent;
 }
 
+.guided-job-analysis-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.guided-job-analysis-view > section {
+  min-height: 112px;
+}
+
 .guided-job-analysis-view h3,
 .guided-job-analysis-grid h3 {
-  margin-bottom: 7px;
-  font-size: 13px;
+  margin-bottom: 9px;
+  font-size: 14px;
 }
 
 .guided-job-analysis-view p,
 .guided-job-analysis-grid li {
-  font-size: 11px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .guided-job-analysis-grid {
-  margin-top: 10px;
-  gap: 10px;
+  min-height: 184px;
+  margin-top: 12px;
+  display: grid;
+  flex: 1;
+  gap: 12px;
 }
 
 .guided-ask-job-ai {
-  margin-top: 10px;
-  padding: 11px 13px;
+  min-height: 58px;
+  margin-top: 12px;
+  padding: 13px 15px;
   gap: 9px;
   border-color: color-mix(in srgb, var(--approved-coral) 58%, var(--approved-line));
   border-radius: 7px;
@@ -3635,11 +3662,11 @@
 }
 
 .guided-ask-job-ai strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .guided-ask-job-ai small {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 @media (max-width: 1040px) {
