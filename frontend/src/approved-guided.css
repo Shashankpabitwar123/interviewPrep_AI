@@ -1473,6 +1473,358 @@
 
 }
 
+/* Saved job analysis: one compact, consistent reading order for every job. */
+.guided-job-analysis-direct {
+  display: grid;
+  gap: 12px;
+}
+
+.guided-job-analysis-direct > section,
+.guided-job-analysis-direct > div > section {
+  min-height: 0;
+}
+
+.guided-job-analysis-direct header > div,
+.guided-job-analysis-direct header {
+  min-width: 0;
+}
+
+.guided-job-analysis-direct header > span,
+.guided-job-analysis-direct header span {
+  display: block;
+  color: var(--approved-coral);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.guided-analysis-summary {
+  padding: 18px 20px;
+  border: 1px solid var(--approved-line-soft);
+  border-left: 3px solid var(--approved-coral);
+  border-radius: 7px;
+  background: transparent;
+}
+
+.guided-analysis-summary p {
+  max-width: 920px;
+  margin: 8px 0 0;
+  color: var(--approved-text);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.guided-analysis-priorities,
+.guided-analysis-topics,
+.guided-analysis-columns > section {
+  padding: 18px 20px;
+  border: 1px solid var(--approved-line-soft);
+  border-radius: 7px;
+  background: transparent;
+}
+
+.guided-analysis-priorities > header,
+.guided-analysis-topics > header,
+.guided-analysis-columns > section > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.guided-job-analysis-direct h3 {
+  margin: 5px 0 0;
+  color: var(--approved-text);
+  font-size: 15px;
+}
+
+.guided-job-analysis-direct header > small {
+  max-width: 240px;
+  color: var(--approved-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.guided-analysis-priority-list {
+  margin-top: 13px;
+  display: grid;
+  gap: 0;
+}
+
+.guided-analysis-priority-list article,
+.guided-analysis-topics article {
+  padding: 12px 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border-top: 1px solid var(--approved-line-soft);
+}
+
+.guided-analysis-priority-list article:first-child,
+.guided-analysis-topics article:first-child {
+  border-top: 0;
+}
+
+.guided-analysis-priority-list strong,
+.guided-analysis-topics strong {
+  display: block;
+  color: var(--approved-text);
+  font-size: 12px;
+}
+
+.guided-analysis-priority-list p,
+.guided-analysis-topics p {
+  margin: 4px 0 0;
+  color: var(--approved-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.guided-analysis-priority-list b,
+.guided-analysis-topics b {
+  min-width: 60px;
+  padding: 4px 6px;
+  border: 1px solid var(--approved-line-soft);
+  border-radius: 999px;
+  color: var(--approved-soft);
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+}
+
+.guided-analysis-priority-list b.priority-critical,
+.guided-analysis-topics b.priority-critical {
+  border-color: color-mix(in srgb, var(--approved-coral) 70%, var(--approved-line));
+  color: var(--approved-coral);
+}
+
+.guided-analysis-priority-list b.priority-supporting,
+.guided-analysis-topics b.priority-supporting {
+  color: var(--approved-muted);
+}
+
+.guided-analysis-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.guided-analysis-columns > section > ul,
+.guided-analysis-requirement-group ul {
+  margin: 10px 0 0;
+  padding-left: 17px;
+}
+
+.guided-analysis-columns li,
+.guided-analysis-requirement-group li {
+  margin: 5px 0;
+  color: var(--approved-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.guided-analysis-requirement-group {
+  margin-top: 14px;
+}
+
+.guided-analysis-requirement-group > strong {
+  color: var(--approved-text);
+  font-size: 11px;
+}
+
+.guided-analysis-requirement-group.subtle > strong,
+.guided-analysis-columns ul.subtle li,
+.guided-analysis-empty-copy.subtle {
+  color: var(--approved-muted);
+}
+
+.guided-analysis-topics > div {
+  margin-top: 13px;
+}
+
+.guided-analysis-topics article {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.guided-analysis-topics article > span {
+  padding-top: 3px;
+  color: var(--approved-muted);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.guided-analysis-empty-copy {
+  margin: 10px 0 0;
+  color: var(--approved-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.guided-analysis-ask {
+  padding: 18px 20px;
+  border: 1px solid color-mix(in srgb, var(--approved-coral) 54%, var(--approved-line));
+  border-radius: 7px;
+  background: var(--approved-coral-soft);
+}
+
+.guided-analysis-ask > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.guided-analysis-ask > header > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--approved-coral);
+}
+
+.guided-analysis-ask h3 {
+  margin: 0;
+}
+
+.guided-analysis-ask header p {
+  margin: 4px 0 0;
+  color: var(--approved-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.guided-analysis-ask form {
+  margin-top: 13px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.guided-analysis-ask input {
+  min-width: 0;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--approved-line);
+  border-radius: 6px;
+  outline: 0;
+  color: var(--approved-text);
+  background: var(--approved-surface-2);
+  font: inherit;
+  font-size: 12px;
+}
+
+.guided-analysis-ask input:focus {
+  border-color: var(--approved-coral);
+}
+
+.guided-analysis-ask .guided-primary-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.guided-analysis-answers {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.guided-analysis-answers article {
+  padding: 11px;
+  border: 1px solid var(--approved-line-soft);
+  border-radius: 6px;
+  background: var(--approved-surface-2);
+}
+
+.guided-analysis-answers strong {
+  color: var(--approved-text);
+  font-size: 11px;
+}
+
+.guided-analysis-answers p {
+  margin: 6px 0;
+  color: var(--approved-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.guided-analysis-answers small {
+  color: var(--approved-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.guided-analysis-answers small b {
+  color: var(--approved-mint);
+}
+
+.guided-job-analysis-empty {
+  min-height: 190px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--approved-soft);
+}
+
+.guided-job-analysis-empty > svg {
+  color: var(--approved-coral);
+}
+
+.guided-job-analysis-empty strong {
+  display: block;
+  color: var(--approved-text);
+  font-size: 13px;
+}
+
+.guided-job-analysis-empty p {
+  margin: 4px 0 0;
+  color: var(--approved-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .guided-analysis-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .guided-analysis-priorities > header,
+  .guided-analysis-topics > header {
+    display: block;
+  }
+
+  .guided-job-analysis-direct header > small {
+    max-width: none;
+    margin-top: 5px;
+    text-align: left;
+  }
+}
+
+@media (max-width: 520px) {
+  .guided-analysis-priorities,
+  .guided-analysis-topics,
+  .guided-analysis-columns > section,
+  .guided-analysis-summary,
+  .guided-analysis-ask {
+    padding: 15px;
+  }
+
+  .guided-analysis-ask form,
+  .guided-job-analysis-empty {
+    grid-template-columns: 1fr;
+  }
+
+  .guided-analysis-topics article {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .guided-analysis-topics article > span {
+    grid-column: 2;
+    padding-top: 0;
+  }
+}
+
 .guided-add-job-button {
   min-width: 160px;
 }

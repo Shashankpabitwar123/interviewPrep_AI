@@ -83,7 +83,12 @@ class JobPost(TimestampMixin, Base):
 
 
 class JobAnalysis(TimestampMixin, Base):
-    """Structured skills and interview signals extracted from a job post."""
+    """Structured skills and interview signals extracted from a job post.
+
+    ``structured_brief`` is the canonical, versioned job-analysis contract
+    shown in the workspace. The older compact fields remain because the prep
+    planner and existing saved workspaces still use them.
+    """
 
     __tablename__ = "job_analyses"
 
@@ -95,6 +100,9 @@ class JobAnalysis(TimestampMixin, Base):
     coding_difficulty: Mapped[str] = mapped_column(String(40))
     behavioral_themes: Mapped[list[str]] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(40))
+    structured_brief: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    structured_brief_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    structured_brief_description_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     job_post: Mapped["JobPost"] = relationship(back_populates="analysis")
 

@@ -6,10 +6,18 @@ from app.database import get_db
 from app.models import User
 from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepPlanSummary, PrepTaskStatusUpdate
 from app.services.auth_service import get_request_user
-from app.services.job_analyzer import identify_job
+from app.services.job_analyzer import analysis_from_job_brief, build_job_description_brief
 from app.services.job_source import resolve_job_description
 from app.services.planner import generate_prep_plan
-from app.services.persistence import delete_prep_plan, get_job_detail, get_prep_plan_detail, list_prep_plans, save_prep_plan
+from app.services.persistence import (
+    delete_prep_plan,
+    get_job_detail,
+    get_prep_plan_detail,
+    get_saved_job_brief,
+    list_prep_plans,
+    save_job_brief,
+    save_prep_plan,
+)
 from app.models import PrepTask
 from app.services.usage_service import record_usage_event
 
@@ -30,7 +38,16 @@ def create_prep_plan(
     source_url = request.source_url or (existing_job.source_url if existing_job else None)
     requested_title = request.job_title if request.job_title != "Auto-detect role" else (existing_job.title if existing_job else request.job_title)
     requested_company = request.company if request.company != "Auto-detect company" else (existing_job.company if existing_job else request.company)
-    inferred_title, inferred_company = identify_job(requested_title, requested_company, description, source_url, settings)
+    # A new plan always receives the fixed job analysis in this same request.
+    # Existing current analysis is reused, so "generate plan" does not spend
+    # time or provider calls rebuilding information the user already has.
+    brief = get_saved_job_brief(db, request.job_post_id, current_user) if request.job_post_id else None
+    if brief is None:
+        brief = build_job_description_brief(requested_title, description, source_url, settings)
+    title_is_auto = request.job_title.strip().lower() in {"auto-detect role", "auto detect role"}
+    company_is_auto = (request.company or "").strip().lower() in {"", "auto-detect company", "auto detect company"}
+    inferred_title = brief.role_title if title_is_auto and brief.role_title else requested_title
+    inferred_company = brief.company if company_is_auto and brief.company else (requested_company or "")
     plan_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description, "source_url": source_url})
     plan = generate_prep_plan(plan_request, settings)
     saved_plan = save_prep_plan(
@@ -45,6 +62,15 @@ def create_prep_plan(
         hours_per_day=request.hours_per_day,
         job_post_id=request.job_post_id,
     )
+    stored_brief = save_job_brief(
+        db,
+        saved_plan.job_post_id,
+        brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+        analysis_from_job_brief(brief).model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+        current_user,
+    )
+    if stored_brief is None:
+        raise HTTPException(status_code=404, detail="Job not found")
     record_usage_event(
         db,
         current_user,

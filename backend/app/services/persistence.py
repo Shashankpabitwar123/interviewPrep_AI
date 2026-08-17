@@ -1,10 +1,11 @@
 from datetime import datetime
+from hashlib import sha256
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.models import JobAnalysis, JobPost, PrepPlan, PrepTask, User
-from app.schemas.job_analysis import JobAnalysisResponse, JobPostDetail, JobPostSummary
+from app.schemas.job_analysis import JobAnalysisResponse, JobDescriptionBrief, JobPostDetail, JobPostSummary
 from app.schemas.prep_plan import PrepPlanResponse, PrepPlanSummary, SkillSignal
 
 
@@ -18,6 +19,7 @@ def save_job_analysis(
     user: Optional[User] = None,
     interview_at: Optional[datetime] = None,
     hours_per_day: Optional[float] = None,
+    structured_brief: Optional[JobDescriptionBrief] = None,
 ) -> JobAnalysisResponse:
     """Save one analyzed job and return the same response with database IDs."""
 
@@ -41,6 +43,9 @@ def save_job_analysis(
         coding_difficulty=analysis.coding_difficulty,
         behavioral_themes=analysis.behavioral_themes,
         source=analysis.source,
+        structured_brief=structured_brief.model_dump() if structured_brief else None,
+        structured_brief_version=structured_brief.analysis_version if structured_brief else None,
+        structured_brief_description_hash=_description_hash(description) if structured_brief else None,
     )
     db.add(db_analysis)
     db.commit()
@@ -188,13 +193,22 @@ def update_job_description(
     description: str,
     user: Optional[User] = None,
 ) -> Optional[JobPostDetail]:
-    """Update the original saved job text without changing its plan or analysis."""
+    """Update the saved job text and mark its analysis stale.
+
+    The previous plan remains available, but the next plan-generation request
+    or an explicit refresh will rebuild the structured analysis from the new
+    source text.
+    """
 
     job = db.get(JobPost, job_post_id)
     if job is None or not _owns_job(job, user):
         return None
 
     job.description = description.strip()
+    if job.analysis:
+        job.analysis.structured_brief = None
+        job.analysis.structured_brief_version = None
+        job.analysis.structured_brief_description_hash = None
     db.commit()
     db.refresh(job)
     return get_job_detail(db, job_post_id, user)
@@ -207,6 +221,63 @@ def delete_job(db: Session, job_post_id: int, user: Optional[User] = None) -> bo
     db.delete(job)
     db.commit()
     return True
+
+
+def get_saved_job_brief(
+    db: Session,
+    job_post_id: int,
+    user: Optional[User] = None,
+) -> Optional[JobDescriptionBrief]:
+    """Return the canonical analysis only when it matches the current job text."""
+
+    job = db.get(JobPost, job_post_id)
+    if job is None or not _owns_job(job, user) or not job.analysis:
+        return None
+    analysis = job.analysis
+    if (
+        not analysis.structured_brief
+        or analysis.structured_brief_version != "v2"
+        or analysis.structured_brief_description_hash != _description_hash(job.description)
+    ):
+        return None
+    try:
+        return JobDescriptionBrief.model_validate(analysis.structured_brief)
+    except Exception:
+        # A malformed legacy cache should never prevent a fresh structured
+        # analysis from being generated.
+        return None
+
+
+def save_job_brief(
+    db: Session,
+    job_post_id: int,
+    brief: JobDescriptionBrief,
+    legacy_analysis: JobAnalysisResponse,
+    user: Optional[User] = None,
+) -> Optional[JobDescriptionBrief]:
+    """Persist one canonical analysis and keep the compact planner fields in sync."""
+
+    job = db.get(JobPost, job_post_id)
+    if job is None or not _owns_job(job, user):
+        return None
+
+    analysis = job.analysis
+    if analysis is None:
+        analysis = JobAnalysis(job_post_id=job.id)
+        db.add(analysis)
+
+    analysis.seniority = legacy_analysis.seniority
+    analysis.required_skills = legacy_analysis.required_skills
+    analysis.interview_focus = [focus.model_dump() for focus in legacy_analysis.interview_focus]
+    analysis.coding_difficulty = legacy_analysis.coding_difficulty
+    analysis.behavioral_themes = legacy_analysis.behavioral_themes
+    analysis.source = brief.source
+    analysis.structured_brief = brief.model_dump()
+    analysis.structured_brief_version = brief.analysis_version
+    analysis.structured_brief_description_hash = _description_hash(job.description)
+    db.commit()
+    db.refresh(analysis)
+    return JobDescriptionBrief.model_validate(analysis.structured_brief)
 
 
 def list_prep_plans(db: Session, user: Optional[User] = None) -> list[PrepPlanSummary]:
@@ -274,6 +345,11 @@ def delete_prep_plan(db: Session, prep_plan_id: int, user: Optional[User] = None
 
 def _preview(text: str, limit: int = 120) -> str:
     return text if len(text) <= limit else f"{text[:limit].rstrip()}..."
+
+
+def _description_hash(description: str) -> str:
+    normalized = " ".join((description or "").split())
+    return sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _topics_from_tasks(tasks: list[PrepTask]) -> list[str]:

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -64,21 +64,47 @@ class JobDescriptionUpdateRequest(BaseModel):
     description: str = Field(min_length=20, max_length=8000)
 
 
+class JobAnalysisPriority(BaseModel):
+    """One employer signal, ranked so the user knows what to prepare first."""
+
+    title: str
+    why_it_matters: str
+    priority: Literal["critical", "important", "supporting"] = "important"
+
+
+class JobAnalysisRequirements(BaseModel):
+    """Requirements are separated so a user can distinguish must-haves from bonuses."""
+
+    must_have: list[str] = Field(default_factory=list)
+    preferred: list[str] = Field(default_factory=list)
+    experience_and_education: list[str] = Field(default_factory=list)
+    eligibility_constraints: list[str] = Field(default_factory=list)
+
+
+class JobInterviewTopic(BaseModel):
+    """A concrete topic to study, with an explicit reason and priority."""
+
+    topic: str
+    why_it_matters: str
+    priority: Literal["critical", "important", "supporting"] = "important"
+    category: Literal["technical", "domain", "behavioral", "case", "system", "other"] = "other"
+
+
 class JobDescriptionBrief(BaseModel):
+    """The fixed, persisted job-analysis contract used by every workspace surface."""
+
+    analysis_version: str = "v2"
     company: str = ""
     role_title: str
-    overview: str
-    requirements: list[str] = Field(default_factory=list)
+    role_summary: str
+    what_matters_most: list[JobAnalysisPriority] = Field(default_factory=list)
+    requirements: JobAnalysisRequirements = Field(default_factory=JobAnalysisRequirements)
     responsibilities: list[str] = Field(default_factory=list)
-    looking_for: list[str] = Field(default_factory=list)
-    interview_signals: list[str] = Field(default_factory=list)
-    must_prepare: list[str] = Field(default_factory=list)
-    resume_keywords: list[str] = Field(default_factory=list)
-    candidate_positioning: list[str] = Field(default_factory=list)
-    possible_interview_questions: list[str] = Field(default_factory=list)
-    red_flags_to_avoid: list[str] = Field(default_factory=list)
-    company_context: list[str] = Field(default_factory=list)
-    prep_advice: list[str] = Field(default_factory=list)
+    interview_topics: list[JobInterviewTopic] = Field(default_factory=list)
+    behavioral_story_prompts: list[str] = Field(default_factory=list)
+    positioning_prompts: list[str] = Field(default_factory=list)
+    questions_to_ask: list[str] = Field(default_factory=list)
+    unknowns_to_verify: list[str] = Field(default_factory=list)
     source: str = "openai"
 
 

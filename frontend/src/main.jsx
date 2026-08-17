@@ -1164,6 +1164,22 @@ function App() {
     };
   }
 
+  async function loadSavedJobAnalysis(job) {
+    const response = await apiFetch(`/jobs/${job.id}/brief`);
+    if (!response.ok) throw new Error(await readApiError(response, "Job analysis"));
+    return response.json();
+  }
+
+  async function askSavedJobAnalysisQuestion(jobId, question) {
+    const response = await apiFetch(`/jobs/${jobId}/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    if (!response.ok) throw new Error(await readApiError(response, "Job question"));
+    return response.json();
+  }
+
   async function updateSavedJobDescription(jobId, description) {
     const response = await apiFetch(`/jobs/${jobId}/description`, {
       method: "PATCH",
@@ -2377,8 +2393,9 @@ function App() {
             jobs={jobs}
             onSelectJob={useSavedJob}
             onLoadJobDetail={loadSavedJobDetail}
+            onLoadJobAnalysis={loadSavedJobAnalysis}
+            onAskJobAnalysisQuestion={askSavedJobAnalysisQuestion}
             onUpdateDescription={updateSavedJobDescription}
-            onOpenDescription={openJobDescription}
             onAddJob={openAddJobModal}
             onManageDeleted={() => setSettingsOpen(true)}
             menuId={jobActionMenuId}
@@ -4400,8 +4417,9 @@ function JobsView({
   jobs,
   onSelectJob,
   onLoadJobDetail,
+  onLoadJobAnalysis,
+  onAskJobAnalysisQuestion,
   onUpdateDescription,
-  onOpenDescription,
   onAddJob,
   onManageDeleted,
   menuId,
@@ -4432,6 +4450,12 @@ function JobsView({
   const [savingRawDescription, setSavingRawDescription] = useState(false);
   const [rawDescriptionError, setRawDescriptionError] = useState("");
   const [copiedValue, setCopiedValue] = useState("");
+  const [savedAnalyses, setSavedAnalyses] = useState({});
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [analysisQuestion, setAnalysisQuestion] = useState("");
+  const [analysisAnswers, setAnalysisAnswers] = useState([]);
+  const [askingAnalysisQuestion, setAskingAnalysisQuestion] = useState(false);
 
   const filteredJobs = jobs.filter((job) => `${job.title} ${job.company || ""} ${job.description_preview || ""}`.toLowerCase().includes(searchText.trim().toLowerCase()));
   const selectedJob = jobs.find((job) => String(job.id) === String(selectedJobId)) || jobs[0] || null;
@@ -4482,6 +4506,28 @@ function JobsView({
   }, [selectedJob?.id]);
 
   useEffect(() => {
+    if (!selectedJob) return undefined;
+    setAnalysisQuestion("");
+    setAnalysisAnswers(loadJobBriefAnswers(selectedJob.id));
+    if (activeTab !== "analysis" || savedAnalyses[String(selectedJob.id)]) return undefined;
+
+    let cancelled = false;
+    setAnalysisLoading(true);
+    setAnalysisError("");
+    onLoadJobAnalysis(selectedJob)
+      .then((analysis) => {
+        if (!cancelled) setSavedAnalyses((current) => ({ ...current, [String(selectedJob.id)]: analysis }));
+      })
+      .catch((error) => {
+        if (!cancelled) setAnalysisError(error.message || "Could not load the saved job analysis.");
+      })
+      .finally(() => {
+        if (!cancelled) setAnalysisLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedJob?.id, savedAnalyses]);
+
+  useEffect(() => {
     if (deleteMode && deleteRequested && selectedJobIds.length === 0) {
       setDeleteMode(false);
       setDeleteRequested(false);
@@ -4501,6 +4547,7 @@ function JobsView({
     }
     setSelectedJobId(job.id);
     setActiveTab("overview");
+    setAnalysisError("");
     onToggleMenu(null);
   }
 
@@ -4555,6 +4602,40 @@ function JobsView({
     await navigator.clipboard.writeText(value);
     setCopiedValue(key);
     window.setTimeout(() => setCopiedValue(""), 1800);
+  }
+
+  async function submitJobAnalysisQuestion() {
+    const question = analysisQuestion.trim();
+    if (!selectedJob?.id || !question || askingAnalysisQuestion) return;
+    setAskingAnalysisQuestion(true);
+    try {
+      const answer = await onAskJobAnalysisQuestion(selectedJob.id, question);
+      setAnalysisAnswers((current) => {
+        const next = [{
+          id: crypto.randomUUID?.() || `${Date.now()}`,
+          question,
+          ...answer,
+        }, ...current];
+        saveJobBriefAnswers(selectedJob.id, next);
+        return next;
+      });
+      setAnalysisQuestion("");
+    } catch (error) {
+      setAnalysisAnswers((current) => {
+        const next = [{
+          id: crypto.randomUUID?.() || `${Date.now()}`,
+          question,
+          answer: error.message || "Could not answer this question right now.",
+          interview_use: "Try again after checking the backend connection.",
+          next_steps: [],
+          source: "error",
+        }, ...current];
+        saveJobBriefAnswers(selectedJob.id, next);
+        return next;
+      });
+    } finally {
+      setAskingAnalysisQuestion(false);
+    }
   }
 
   return (
@@ -4641,18 +4722,21 @@ function JobsView({
                   </article>
                 </div>
               ) : (
-                <div className="guided-job-analysis-view">
-                  {detailLoading ? <div className="guided-job-analysis-loading"><Loader2 className="spin" size={20} />Loading job analysis...</div> : (
-                    <>
-                      <section><h3>What they are really looking for</h3><p>{lookingFor}</p></section>
-                      <div className="guided-job-analysis-grid">
-                        <section><h3>Must prepare</h3>{requiredSkills.length ? <ul>{requiredSkills.slice(0, 8).map((skill) => <li key={skill}>{skill}</li>)}</ul> : <p>No explicit skill requirements were detected.</p>}</section>
-                        <section><h3>Likely interview focus</h3>{interviewFocus.length ? <ul>{interviewFocus.map((focus) => <li key={focus}>{focus}</li>)}</ul> : <p>Open the AI analysis to identify detailed interview signals.</p>}</section>
-                      </div>
-                    </>
-                  )}
-                  <button className="guided-ask-job-ai" onClick={() => onOpenDescription(selectedJob)}><BrainCircuit size={21} /><span><strong>Ask AI about this job</strong><small>Your questions and answers stay with this role.</small></span><ChevronRight size={18} /></button>
-                </div>
+                <JobAnalysisTab
+                  analysis={savedAnalyses[String(selectedJob.id)]}
+                  loading={analysisLoading}
+                  error={analysisError}
+                  onRetry={() => setSavedAnalyses((current) => {
+                    const next = { ...current };
+                    delete next[String(selectedJob.id)];
+                    return next;
+                  })}
+                  question={analysisQuestion}
+                  setQuestion={setAnalysisQuestion}
+                  answers={analysisAnswers}
+                  asking={askingAnalysisQuestion}
+                  onAsk={submitJobAnalysisQuestion}
+                />
               )}
             </>
           ) : <EmptyState text="Add a job to start building your interview workspace." />}
@@ -4677,6 +4761,133 @@ function JobsView({
 
 function GuidedJobMetric({ label, value, detail }) {
   return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
+}
+
+function JobAnalysisTab({ analysis, loading, error, onRetry, question, setQuestion, answers, asking, onAsk }) {
+  if (loading && !analysis) {
+    return <div className="guided-job-analysis-view guided-job-analysis-loading"><Loader2 className="spin" size={18} />Loading saved job analysis...</div>;
+  }
+
+  if (error && !analysis) {
+    return (
+      <div className="guided-job-analysis-view guided-job-analysis-empty">
+        <BrainCircuit size={20} />
+        <div><strong>Job analysis is not available yet</strong><p>{error}</p></div>
+        <button className="guided-secondary-button" onClick={onRetry}>Try again</button>
+      </div>
+    );
+  }
+
+  if (!analysis) return null;
+
+  const requirements = analysis.requirements || {};
+  const interviewTopics = Array.isArray(analysis.interview_topics) ? analysis.interview_topics : [];
+  const priorities = Array.isArray(analysis.what_matters_most) ? analysis.what_matters_most : [];
+  const responsibilities = Array.isArray(analysis.responsibilities) ? analysis.responsibilities : [];
+  const behavioralStories = Array.isArray(analysis.behavioral_story_prompts) ? analysis.behavioral_story_prompts : [];
+  const positioningPrompts = Array.isArray(analysis.positioning_prompts) ? analysis.positioning_prompts : [];
+  const questionsToAsk = Array.isArray(analysis.questions_to_ask) ? analysis.questions_to_ask : [];
+  const unknowns = Array.isArray(analysis.unknowns_to_verify) ? analysis.unknowns_to_verify : [];
+
+  return (
+    <div className="guided-job-analysis-view guided-job-analysis-direct">
+      <section className="guided-analysis-summary">
+        <span>Role summary</span>
+        <p>{analysis.role_summary || "Review this posting and connect your strongest examples to the role."}</p>
+      </section>
+
+      {priorities.length > 0 && (
+        <section className="guided-analysis-priorities">
+          <header><div><span>Prepare first</span><h3>What matters most</h3></div><small>Ranked from the job posting</small></header>
+          <div className="guided-analysis-priority-list">
+            {priorities.map((item, index) => (
+              <article key={`${item.title}-${index}`}>
+                <b className={`priority-${item.priority || "important"}`}>{priorityLabel(item.priority)}</b>
+                <div><strong>{item.title}</strong><p>{item.why_it_matters}</p></div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="guided-analysis-columns">
+        <section>
+          <header><span>Role match</span><h3>Requirements</h3></header>
+          <AnalysisRequirementGroup title="Must have" items={requirements.must_have} />
+          <AnalysisRequirementGroup title="Nice to have" items={requirements.preferred} />
+          <AnalysisRequirementGroup title="Experience or education" items={requirements.experience_and_education} />
+          <AnalysisRequirementGroup title="Eligibility mentioned" items={requirements.eligibility_constraints} subtle />
+        </section>
+        <section>
+          <header><span>Day-to-day</span><h3>Responsibilities</h3></header>
+          <AnalysisBulletList items={responsibilities} emptyText="No specific responsibilities were identified in the saved posting." />
+        </section>
+      </div>
+
+      <section className="guided-analysis-topics">
+        <header><div><span>Interview preparation</span><h3>Topics to focus on</h3></div><small>Use the highest-priority topics in your plan first.</small></header>
+        <div>
+          {interviewTopics.map((topic, index) => (
+            <article key={`${topic.topic}-${index}`}>
+              <b className={`priority-${topic.priority || "important"}`}>{priorityLabel(topic.priority)}</b>
+              <span>{topic.category || "other"}</span>
+              <div><strong>{topic.topic}</strong><p>{topic.why_it_matters}</p></div>
+            </article>
+          ))}
+          {!interviewTopics.length && <p className="guided-analysis-empty-copy">No interview topics were identified yet.</p>}
+        </div>
+      </section>
+
+      <div className="guided-analysis-columns guided-analysis-prep-columns">
+        <section>
+          <header><span>Your examples</span><h3>Stories to prepare</h3></header>
+          <AnalysisBulletList items={behavioralStories} emptyText="Prepare concise examples that show the skills and responsibilities above." />
+        </section>
+        <section>
+          <header><span>Your positioning</span><h3>How to connect your experience</h3></header>
+          <AnalysisBulletList items={positioningPrompts} emptyText="Connect relevant projects, coursework, and experience to the top priorities above." />
+        </section>
+      </div>
+
+      {(questionsToAsk.length > 0 || unknowns.length > 0) && (
+        <div className="guided-analysis-columns guided-analysis-prep-columns">
+          <section>
+            <header><span>Interview close</span><h3>Questions worth asking</h3></header>
+            <AnalysisBulletList items={questionsToAsk} emptyText="Ask about success measures, collaboration, and the team’s current priorities." />
+          </section>
+          <section>
+            <header><span>Before you rely on it</span><h3>Verify</h3></header>
+            <AnalysisBulletList items={unknowns} emptyText="Confirm details that were not clearly stated in the posting." subtle />
+          </section>
+        </div>
+      )}
+
+      <section className="guided-analysis-ask">
+        <header><BrainCircuit size={18} /><div><h3>Ask about this job</h3><p>Get a role-specific explanation, example, or interview-ready answer.</p></div></header>
+        <form onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
+          <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask anything about this role..." disabled={asking} />
+          <button className="guided-primary-button" disabled={!question.trim() || asking}>{asking ? "Asking..." : "Ask"}</button>
+        </form>
+        {answers.length > 0 && <div className="guided-analysis-answers">{answers.slice(0, 3).map((answer) => <article key={answer.id}><strong>{answer.question}</strong><p>{answer.answer}</p>{answer.interview_use && <small><b>Use in an interview:</b> {answer.interview_use}</small>}</article>)}</div>}
+      </section>
+    </div>
+  );
+}
+
+function AnalysisRequirementGroup({ title, items, subtle = false }) {
+  if (!Array.isArray(items) || !items.length) return null;
+  return <div className={`guided-analysis-requirement-group ${subtle ? "subtle" : ""}`}><strong>{title}</strong><AnalysisBulletList items={items} /></div>;
+}
+
+function AnalysisBulletList({ items, emptyText, subtle = false }) {
+  if (!Array.isArray(items) || !items.length) return emptyText ? <p className={subtle ? "guided-analysis-empty-copy subtle" : "guided-analysis-empty-copy"}>{emptyText}</p> : null;
+  return <ul className={subtle ? "subtle" : ""}>{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul>;
+}
+
+function priorityLabel(priority) {
+  if (priority === "critical") return "Critical";
+  if (priority === "supporting") return "Supporting";
+  return "Important";
 }
 
 function shortJobFocusLabel(value) {

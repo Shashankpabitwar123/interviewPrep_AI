@@ -59,6 +59,13 @@ def _apply_lightweight_migrations() -> None:
     if "job_posts" not in table_names:
         return
 
+    if "job_analyses" in table_names:
+        _add_missing_columns("job_analyses", {
+            "structured_brief": "JSON",
+            "structured_brief_version": "VARCHAR(32)",
+            "structured_brief_description_hash": "VARCHAR(64)",
+        })
+
     columns = {column["name"] for column in inspector.get_columns("job_posts")}
     if "user_id" not in columns and settings.database_url.startswith("sqlite"):
         with engine.begin() as connection:

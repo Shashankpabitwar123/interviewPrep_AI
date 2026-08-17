@@ -9,8 +9,11 @@ from app.schemas.job_analysis import (
     InterviewFocus,
     JobAnalysisRequest,
     JobAnalysisResponse,
+    JobAnalysisPriority,
+    JobAnalysisRequirements,
     JobDescriptionAskResponse,
     JobDescriptionBrief,
+    JobInterviewTopic,
 )
 from app.services.gemini_service import generate_gemini_json
 from app.services.planner import SKILL_KEYWORDS
@@ -209,6 +212,32 @@ def build_job_description_brief(title: str, description: str, source_url: str | 
     return _heuristic_brief(title, description, source_url, source="heuristic_fallback")
 
 
+def analysis_from_job_brief(brief: JobDescriptionBrief) -> JobAnalysisResponse:
+    """Keep the legacy plan/exam analysis fields aligned with the canonical job brief.
+
+    The planner still consumes the compact analysis shape. Mapping it from the
+    persisted brief prevents a second model call and keeps all job surfaces
+    grounded in the same extracted role signals.
+    """
+
+    required_skills = _brief_skill_labels(brief)
+    grouped_topics: dict[str, list[str]] = {}
+    for topic in brief.interview_topics:
+        grouped_topics.setdefault(topic.category, []).append(topic.topic)
+    if not grouped_topics:
+        grouped_topics["technical"] = required_skills[:5] or ["Role fundamentals"]
+    return JobAnalysisResponse(
+        role_title=brief.role_title,
+        company=brief.company,
+        seniority=_detect_seniority(f"{brief.role_title} {' '.join(brief.requirements.experience_and_education)}"),
+        required_skills=required_skills,
+        interview_focus=[InterviewFocus(category=category, topics=topics[:5]) for category, topics in grouped_topics.items()],
+        coding_difficulty=_detect_difficulty(" ".join(required_skills + [topic.topic for topic in brief.interview_topics])),
+        behavioral_themes=brief.behavioral_story_prompts[:6] or ["teamwork", "communication"],
+        source=brief.source,
+    )
+
+
 def answer_job_description_question(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
     if settings.openai_enabled:
         try:
@@ -400,6 +429,145 @@ def _json_list(value: Any, limit: int = 8) -> list[str]:
     return cleaned
 
 
+def _clean_summary(value: Any) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    return " ".join(sentences[:2])[:520]
+
+
+def _normalize_priority(value: Any) -> str:
+    clean = str(value or "").strip().lower()
+    return clean if clean in {"critical", "important", "supporting"} else "important"
+
+
+def _normalize_topic_category(value: Any) -> str:
+    clean = str(value or "").strip().lower()
+    return clean if clean in {"technical", "domain", "behavioral", "case", "system", "other"} else "other"
+
+
+def _priority_items_from_ai_data(value: Any, fallback: list[JobAnalysisPriority]) -> list[JobAnalysisPriority]:
+    items: list[JobAnalysisPriority] = []
+    if isinstance(value, list):
+        for raw in value:
+            if not isinstance(raw, dict):
+                continue
+            title = _clean_summary(raw.get("title"))
+            reason = _clean_summary(raw.get("why_it_matters"))
+            if title and reason:
+                items.append(JobAnalysisPriority(title=title[:120], why_it_matters=reason[:260], priority=_normalize_priority(raw.get("priority"))))
+            if len(items) >= 3:
+                break
+    return items or fallback[:3]
+
+
+def _requirements_from_ai_data(value: Any, fallback: JobAnalysisRequirements) -> JobAnalysisRequirements:
+    raw = value if isinstance(value, dict) else {}
+    return JobAnalysisRequirements(
+        must_have=_json_list(raw.get("must_have"), 6) or fallback.must_have,
+        preferred=_json_list(raw.get("preferred"), 5) or fallback.preferred,
+        experience_and_education=_json_list(raw.get("experience_and_education"), 4) or fallback.experience_and_education,
+        eligibility_constraints=_json_list(raw.get("eligibility_constraints"), 4) or fallback.eligibility_constraints,
+    )
+
+
+def _interview_topics_from_ai_data(value: Any, fallback: list[JobInterviewTopic]) -> list[JobInterviewTopic]:
+    items: list[JobInterviewTopic] = []
+    if isinstance(value, list):
+        for raw in value:
+            if not isinstance(raw, dict):
+                continue
+            topic = _clean_summary(raw.get("topic"))
+            reason = _clean_summary(raw.get("why_it_matters"))
+            if topic and reason:
+                items.append(JobInterviewTopic(
+                    topic=topic[:140],
+                    why_it_matters=reason[:260],
+                    priority=_normalize_priority(raw.get("priority")),
+                    category=_normalize_topic_category(raw.get("category")),
+                ))
+            if len(items) >= 6:
+                break
+    return items or fallback[:6]
+
+
+def _heuristic_requirement_groups(requirements: list[str], lower: str) -> tuple[list[str], list[str], list[str], list[str]]:
+    must_have: list[str] = []
+    preferred: list[str] = []
+    experience: list[str] = []
+    eligibility: list[str] = []
+    for item in requirements:
+        lowered = item.lower()
+        if any(marker in lowered for marker in ["citizen", "citizenship", "work authorization", "security clearance", "visa"]):
+            eligibility.append(item)
+        elif any(marker in lowered for marker in ["degree", "years", "experience", "education", "bachelor", "master"]):
+            experience.append(item)
+        elif any(marker in lowered for marker in ["preferred", "plus", "nice to have", "bonus"]):
+            preferred.append(item)
+        else:
+            must_have.append(item)
+    if not must_have:
+        must_have = _keyword_summary(lower)[:4]
+    return must_have[:6], preferred[:5], experience[:4], eligibility[:4]
+
+
+def _heuristic_priorities(looking_for: list[str], responsibilities: list[str], keywords: list[str]) -> list[JobAnalysisPriority]:
+    candidates = looking_for[:3] or responsibilities[:3] or keywords[:3]
+    priorities: list[JobAnalysisPriority] = []
+    for index, item in enumerate(candidates):
+        priorities.append(JobAnalysisPriority(
+            title=item[:120],
+            why_it_matters="It appears repeatedly in the role description or is central to the day-to-day work.",
+            priority="critical" if index == 0 else "important",
+        ))
+    return priorities or [
+        JobAnalysisPriority(title="Role fundamentals", why_it_matters="Start with the core work described in the posting before practicing interview answers.", priority="critical"),
+        JobAnalysisPriority(title="Concrete examples", why_it_matters="Interviewers need evidence that connects your experience to the role.", priority="important"),
+        JobAnalysisPriority(title="Communication", why_it_matters="Clear explanations help connect your technical or domain work to a business outcome.", priority="supporting"),
+    ]
+
+
+def _heuristic_interview_topics(keywords: list[str], responsibilities: list[str]) -> list[JobInterviewTopic]:
+    topics = [
+        JobInterviewTopic(topic=keyword, why_it_matters="The posting names this capability or the work depends on it.", priority="critical" if index == 0 else "important", category="technical")
+        for index, keyword in enumerate(keywords[:3])
+    ]
+    if responsibilities:
+        topics.append(JobInterviewTopic(
+            topic="Explain your approach to the role's main responsibility",
+            why_it_matters="You should be able to describe how you would plan, execute, and validate work like the posting describes.",
+            priority="important",
+            category="behavioral",
+        ))
+    return topics[:6] or [
+        JobInterviewTopic(topic="Role fundamentals", why_it_matters="Start with the concepts and workflow named in the posting.", priority="critical", category="domain"),
+        JobInterviewTopic(topic="Project examples", why_it_matters="Prepare concrete examples that show how you deliver, learn, and communicate.", priority="important", category="behavioral"),
+    ]
+
+
+def _brief_skill_labels(brief: JobDescriptionBrief) -> list[str]:
+    candidates = [
+        *brief.requirements.must_have,
+        *brief.requirements.preferred,
+        *(topic.topic for topic in brief.interview_topics if topic.category in {"technical", "domain", "system"}),
+    ]
+    labels: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = re.sub(r"\s+", " ", str(candidate or "")).strip(" .:-")
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(text[:120])
+        if len(labels) >= 8:
+            break
+    return labels or ["Role fundamentals", "Communication", "Problem solving"]
+
+
 def _fallback_profile(lower: str, requirements: list[str], responsibilities: list[str]) -> list[str]:
     themes: list[str] = []
     if any(term in lower for term in ["software", "developer", ".net", "sql", "angular", "api", "c#"]):
@@ -429,13 +597,17 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
             {
                 "role": "system",
                 "content": (
-                    "You turn job descriptions into structured interview-prep briefs. "
-                    "Think like a senior interview coach: identify what the candidate must understand, "
-                    "what the employer is truly testing, how to position their background, likely screening "
-                    "and interview questions, and what mistakes would weaken the interview. Use concise but specific bullets. "
-                    "Detect company from job-board headers if present. Every list field must be an array of "
-                    "complete phrases or sentences. Never return one long string for a list field, and never "
-                    "return single-letter bullets."
+                    "You turn job descriptions into a fixed, minimal interview-preparation analysis. "
+                    "Use only the supplied posting. Do not invent company facts, sponsorship, eligibility, "
+                    "or interview-process claims. Separate explicit requirements from preferences. Put an "
+                    "eligibility constraint only when the posting explicitly states it. Rank the work that "
+                    "matters most, then rank interview topics by critical, important, or supporting. Each item "
+                    "must be concise, specific to the posting, and useful for a candidate preparing now or "
+                    "building skills for a future interview. Detect company from job-board headers if present. "
+                    "Keep role_summary to two sentences maximum. Use 3 items for what_matters_most, 3-6 "
+                    "interview_topics, 2-4 behavioral_story_prompts, 2-4 positioning_prompts, and 2-4 "
+                    "questions_to_ask. Unknowns should be things the candidate should verify, not warnings "
+                    "you invented."
                 ),
             },
             {
@@ -451,12 +623,11 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
 
 def _brief_with_gemini(title: str, description: str, source_url: str | None, settings: Settings) -> JobDescriptionBrief:
     prompt = (
-        "Create a structured interview-prep brief as JSON only.\n"
-        "Return keys: company, role_title, overview, requirements, responsibilities, looking_for, "
-        "interview_signals, must_prepare, resume_keywords, candidate_positioning, "
-        "possible_interview_questions, red_flags_to_avoid, company_context, prep_advice.\n"
-        "Every list field must be an array of complete phrases or sentences, not a single string "
-        "and not single-letter bullets. Be specific to the job description.\n\n"
+        "Create a fixed job-analysis JSON object for interview preparation. Use only the supplied posting.\n"
+        "Return keys: analysis_version, company, role_title, role_summary, what_matters_most, requirements, "
+        "responsibilities, interview_topics, behavioral_story_prompts, positioning_prompts, questions_to_ask, "
+        "unknowns_to_verify. Keep it minimal and specific. Never invent company facts, sponsorship, or eligibility. "
+        "Only include eligibility constraints explicitly stated in the posting.\n\n"
         f"Role title hint: {title}\n"
         f"Source URL: {source_url or ''}\n\n"
         f"Job description:\n{description[:9000]}"
@@ -467,34 +638,26 @@ def _brief_with_gemini(title: str, description: str, source_url: str | None, set
 
 def _brief_from_ai_data(data: dict, title: str, description: str, source_url: str | None, source: str) -> JobDescriptionBrief:
     fallback = _heuristic_brief(title, description, source_url, source="heuristic_fallback")
-    requirements = _json_list(data.get("requirements"), 8) or fallback.requirements
-    responsibilities = _json_list(data.get("responsibilities"), 8) or fallback.responsibilities
-    lower = description.lower()
-    looking_for = _json_list(data.get("looking_for"), 6) or _fallback_profile(lower, requirements, responsibilities)
-    interview_signals = _json_list(data.get("interview_signals"), 6) or fallback.interview_signals
-    must_prepare = _json_list(data.get("must_prepare"), 10) or fallback.must_prepare
-    resume_keywords = _json_list(data.get("resume_keywords"), 12) or fallback.resume_keywords
-    candidate_positioning = _json_list(data.get("candidate_positioning"), 8) or fallback.candidate_positioning
-    possible_interview_questions = _json_list(data.get("possible_interview_questions"), 10) or fallback.possible_interview_questions
-    red_flags_to_avoid = _json_list(data.get("red_flags_to_avoid"), 8) or fallback.red_flags_to_avoid
-    company_context = _json_list(data.get("company_context"), 8) or fallback.company_context
-    prep_advice = _json_list(data.get("prep_advice"), 6) or fallback.prep_advice
+    requirements = _requirements_from_ai_data(data.get("requirements"), fallback.requirements)
+    responsibilities = _json_list(data.get("responsibilities"), 5) or fallback.responsibilities
+    priorities = _priority_items_from_ai_data(data.get("what_matters_most"), fallback.what_matters_most)
+    topics = _interview_topics_from_ai_data(data.get("interview_topics"), fallback.interview_topics)
+    summary = _clean_summary(data.get("role_summary")) or fallback.role_summary
 
+    raw_role_title = _clean_summary(data.get("role_title"))
     return JobDescriptionBrief(
-        company=data.get("company") or infer_company_name("", description, source_url),
-        role_title=data.get("role_title") or title,
-        overview=data.get("overview") or f"Preparation brief for {title}.",
+        analysis_version="v2",
+        company=_clean_company_candidate(str(data.get("company") or "")) or fallback.company,
+        role_title=_clean_role_title(raw_role_title) if raw_role_title else fallback.role_title,
+        role_summary=summary,
+        what_matters_most=priorities,
         requirements=requirements,
         responsibilities=responsibilities,
-        looking_for=looking_for,
-        interview_signals=interview_signals,
-        must_prepare=must_prepare,
-        resume_keywords=resume_keywords,
-        candidate_positioning=candidate_positioning,
-        possible_interview_questions=possible_interview_questions,
-        red_flags_to_avoid=red_flags_to_avoid,
-        company_context=company_context,
-        prep_advice=prep_advice,
+        interview_topics=topics,
+        behavioral_story_prompts=_json_list(data.get("behavioral_story_prompts"), 4) or fallback.behavioral_story_prompts,
+        positioning_prompts=_json_list(data.get("positioning_prompts"), 4) or fallback.positioning_prompts,
+        questions_to_ask=_json_list(data.get("questions_to_ask"), 4) or fallback.questions_to_ask,
+        unknowns_to_verify=_json_list(data.get("unknowns_to_verify"), 4) or fallback.unknowns_to_verify,
         source=source,
     )
 
@@ -561,39 +724,64 @@ def _job_description_ask_schema() -> dict[str, Any]:
 
 def _job_brief_schema() -> dict[str, Any]:
     list_field = {"type": "array", "items": {"type": "string"}}
+    priority_field = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "why_it_matters": {"type": "string"},
+            "priority": {"type": "string", "enum": ["critical", "important", "supporting"]},
+        },
+        "required": ["title", "why_it_matters", "priority"],
+    }
+    requirement_field = {
+        "type": "object",
+        "properties": {
+            "must_have": list_field,
+            "preferred": list_field,
+            "experience_and_education": list_field,
+            "eligibility_constraints": list_field,
+        },
+        "required": ["must_have", "preferred", "experience_and_education", "eligibility_constraints"],
+    }
+    topic_field = {
+        "type": "object",
+        "properties": {
+            "topic": {"type": "string"},
+            "why_it_matters": {"type": "string"},
+            "priority": {"type": "string", "enum": ["critical", "important", "supporting"]},
+            "category": {"type": "string", "enum": ["technical", "domain", "behavioral", "case", "system", "other"]},
+        },
+        "required": ["topic", "why_it_matters", "priority", "category"],
+    }
     return {
         "type": "object",
         "properties": {
+            "analysis_version": {"type": "string"},
             "company": {"type": "string"},
             "role_title": {"type": "string"},
-            "overview": {"type": "string"},
-            "requirements": list_field,
+            "role_summary": {"type": "string"},
+            "what_matters_most": {"type": "array", "items": priority_field},
+            "requirements": requirement_field,
             "responsibilities": list_field,
-            "looking_for": list_field,
-            "interview_signals": list_field,
-            "must_prepare": list_field,
-            "resume_keywords": list_field,
-            "candidate_positioning": list_field,
-            "possible_interview_questions": list_field,
-            "red_flags_to_avoid": list_field,
-            "company_context": list_field,
-            "prep_advice": list_field,
+            "interview_topics": {"type": "array", "items": topic_field},
+            "behavioral_story_prompts": list_field,
+            "positioning_prompts": list_field,
+            "questions_to_ask": list_field,
+            "unknowns_to_verify": list_field,
         },
         "required": [
+            "analysis_version",
             "company",
             "role_title",
-            "overview",
+            "role_summary",
+            "what_matters_most",
             "requirements",
             "responsibilities",
-            "looking_for",
-            "interview_signals",
-            "must_prepare",
-            "resume_keywords",
-            "candidate_positioning",
-            "possible_interview_questions",
-            "red_flags_to_avoid",
-            "company_context",
-            "prep_advice",
+            "interview_topics",
+            "behavioral_story_prompts",
+            "positioning_prompts",
+            "questions_to_ask",
+            "unknowns_to_verify",
         ],
     }
 
@@ -612,48 +800,40 @@ def _heuristic_brief(title: str, description: str, source_url: str | None, sourc
         responsibilities = [line for line in lines if re.search(r"(?i)^(assist|create|develop|prepare|coordinate|support|collaborate|produce|manage)\b", line)][:6]
     if not looking_for:
         looking_for = _fallback_profile(lower, requirements, responsibilities)
-    signals = [
-        "Prepare concrete examples that prove you can do the listed responsibilities.",
-        "Expect questions about tools, workflow, communication, prioritization, and project ownership.",
-        "Connect every answer back to the company context and the role outcomes.",
-    ]
     keywords = _keyword_summary(lower)
-    possible_questions = [
-        f"Why are you interested in the {role} role?",
-        f"Which past project or experience best proves you can handle {requirements[0] if requirements else 'the core responsibilities'}?",
-        "Tell me about a time you learned a new tool quickly and used it on real work.",
-        "How would you prioritize when design, technical, and communication tasks compete for time?",
-        "What would you do in your first month to become useful to this team?",
-    ]
+    must_have, preferred, experience, eligibility = _heuristic_requirement_groups(requirements, lower)
+    priorities = _heuristic_priorities(looking_for, responsibilities, keywords)
+    topics = _heuristic_interview_topics(keywords, responsibilities)
     return JobDescriptionBrief(
         company=company,
         role_title=role,
-        overview=f"{company + ' is hiring ' if company else 'This posting is for '}{role}. The role emphasizes {', '.join(_keyword_summary(lower)[:4]) or 'role-specific skills'} and interview preparation should connect examples to the posted responsibilities.",
-        requirements=requirements[:8],
-        responsibilities=responsibilities[:8],
-        looking_for=looking_for[:6],
-        interview_signals=signals,
-        must_prepare=[
-            *(requirements[:4] or keywords[:4]),
-            "A concise story that connects your experience to the most repeated responsibility in the posting.",
-            "One thoughtful question about how success is measured in this role.",
-        ][:8],
-        resume_keywords=[f"Mirror {keyword} only where you can support it with a real example." for keyword in keywords[:8]],
-        candidate_positioning=_fallback_profile(lower, requirements, responsibilities),
-        possible_interview_questions=possible_questions,
-        red_flags_to_avoid=[
-            "Do not answer with generic enthusiasm without naming the actual responsibilities in the job post.",
-            "Do not claim tool expertise unless you can describe a project, class, or task where you used it.",
-            "Do not ignore communication and ownership signals if the role involves cross-functional work.",
+        role_summary=(
+            f"{company + ' is hiring ' if company else 'This posting is for '}{role}. "
+            f"The work emphasizes {', '.join(keywords[:3]) or 'role-specific fundamentals'} and clear examples tied to the posted responsibilities."
+        ),
+        what_matters_most=priorities,
+        requirements=JobAnalysisRequirements(
+            must_have=must_have,
+            preferred=preferred,
+            experience_and_education=experience,
+            eligibility_constraints=eligibility,
+        ),
+        responsibilities=responsibilities[:5],
+        interview_topics=topics,
+        behavioral_story_prompts=[
+            "Prepare a story showing how you learned a relevant tool or concept quickly.",
+            "Prepare a story about collaborating, communicating progress, or resolving a tradeoff.",
+            "Prepare a story that proves ownership of a result related to the role's main responsibility.",
         ],
-        company_context=[
-            f"Verify {company}'s product, customers, and recent work before the interview." if company else "Verify company context from the source page or company website.",
-            "Prepare a question about mentorship, team workflow, and what strong performance looks like.",
+        positioning_prompts=_fallback_profile(lower, requirements, responsibilities)[:4],
+        questions_to_ask=[
+            "How is success measured for this role in the first 90 days?",
+            "Which responsibilities will this person own most often at the start?",
+            "How does the team collaborate when a technical or business tradeoff needs a decision?",
         ],
-        prep_advice=[
-            "Create one story for each major responsibility.",
-            "Review the listed tools and be ready to explain when and why you used them.",
-            "Prepare two thoughtful questions about team workflow, mentorship, and success metrics.",
+        unknowns_to_verify=[
+            f"Verify {company}'s product, customers, and current team priorities before an interview." if company else "Verify the company's product, customers, and current team priorities before an interview.",
+            "Confirm the interview stages, team structure, and evaluation criteria because the posting may not include them.",
         ],
         source=source,
     )
@@ -671,6 +851,13 @@ def _lines_after_headings(lines: list[str], headings: list[str], limit: int) -> 
 
 
 def _keyword_summary(text: str) -> list[str]:
+    # Prefer precise job skills over a broad category such as "technical
+    # tools". These labels are reused by the prep-plan generator and job
+    # overview, so they should be immediately actionable for the candidate.
+    detected_skills = _detect_skills(text)
+    if detected_skills:
+        return detected_skills[:6]
+
     topics = []
     for label, keywords in {
         "technical tools": ["python", "rhino", "twinmotion", "sql", "docker", "api", "adobe", "illustrator"],

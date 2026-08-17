@@ -30,7 +30,22 @@ def test_job_analysis_endpoint_saves_and_reads_job() -> None:
 
     detail = client.get(f"/jobs/{body['job_post_id']}").json()
     assert detail["title"] == "Backend Software Engineer Intern"
-    assert detail["analysis"]["source"] == "heuristic"
+    assert detail["analysis"]["source"] in {"heuristic", "heuristic_fallback"}
+
+    # The fixed v2 analysis is created and persisted during this same upload.
+    # Reading the Jobs tab contract later should only return the saved result.
+    brief_response = client.get(f"/jobs/{body['job_post_id']}/brief")
+    brief = brief_response.json()
+    assert brief_response.status_code == 200
+    assert brief["analysis_version"] == "v2"
+    assert brief["role_title"] == "Backend Software Engineer Intern"
+    assert brief["role_summary"]
+    assert brief["requirements"]["must_have"]
+    assert brief["interview_topics"]
+
+    second_read = client.get(f"/jobs/{body['job_post_id']}/brief")
+    assert second_read.status_code == 200
+    assert second_read.json() == brief
 
 
 def test_logged_in_users_only_see_their_own_jobs() -> None:
@@ -175,6 +190,12 @@ def test_prep_plan_endpoint_saves_and_reads_plan() -> None:
     assert len(detail["tasks"]) == len(body["tasks"])
     assert detail["hours_per_day"] == 2
     assert detail["interview_at"] is not None
+
+    # A plan created directly (without a prior saved-job upload) also leaves a
+    # canonical job analysis behind in the same creation request.
+    brief_response = client.get(f"/jobs/{body['job_post_id']}/brief")
+    assert brief_response.status_code == 200
+    assert brief_response.json()["analysis_version"] == "v2"
 
 
 def test_saved_job_metadata_and_existing_job_plan_stay_connected() -> None:

@@ -15,13 +15,20 @@ from app.schemas.job_analysis import (
     JobPostSummary,
 )
 from app.services.job_analyzer import (
-    analyze_job_description,
+    analysis_from_job_brief,
     answer_job_description_question,
     build_job_description_brief,
-    identify_job,
 )
 from app.services.job_source import resolve_job_description
-from app.services.persistence import delete_job, get_job_detail, list_jobs, save_job_analysis, update_job_description
+from app.services.persistence import (
+    delete_job,
+    get_job_detail,
+    get_saved_job_brief,
+    list_jobs,
+    save_job_analysis,
+    save_job_brief,
+    update_job_description,
+)
 from app.services.auth_service import get_request_user
 from app.services.usage_service import record_usage_event
 
@@ -39,9 +46,16 @@ def analyze_job(
         description = f"Saved URL bookmark. Open the source URL to view the job description. URL: {request.source_url}"
     else:
         description = resolve_job_description(request.job_description, request.source_url)
-    inferred_title, inferred_company = identify_job(request.job_title, request.company, description, request.source_url, settings)
+    # Generate one canonical analysis during upload. It detects missing role
+    # details and feeds the compact planner fields, so new jobs never need a
+    # separate title/company or analysis generation request.
+    brief = build_job_description_brief(request.job_title, description, request.source_url, settings)
+    title_is_auto = request.job_title.strip().lower() in {"auto-detect role", "auto detect role"}
+    company_is_auto = (request.company or "").strip().lower() in {"", "auto-detect company", "auto detect company"}
+    inferred_title = brief.role_title if title_is_auto and brief.role_title else request.job_title
+    inferred_company = brief.company if company_is_auto and brief.company else (request.company or "")
     analysis_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description})
-    analysis = analyze_job_description(analysis_request, settings)
+    analysis = analysis_from_job_brief(brief).model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company})
     saved_job = save_job_analysis(
         db,
         inferred_title,
@@ -52,6 +66,7 @@ def analyze_job(
         user=current_user,
         interview_at=request.interview_at,
         hours_per_day=request.hours_per_day,
+        structured_brief=brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
     )
     record_usage_event(
         db,
@@ -120,7 +135,17 @@ def get_job_brief(
     job = get_job_detail(db, job_post_id, current_user)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    brief = get_saved_job_brief(db, job_post_id, current_user)
+    if brief is not None:
+        return brief
+
+    # This route only repairs old/stale saved jobs. New jobs receive their
+    # analysis in the upload/plan-generation request, so opening the tab is a
+    # read and never triggers a second generation.
     brief = build_job_description_brief(job.title, job.description, job.source_url, settings)
+    stored = save_job_brief(db, job_post_id, brief, analysis_from_job_brief(brief), current_user)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Job not found")
     record_usage_event(
         db,
         current_user,
@@ -128,10 +153,10 @@ def get_job_brief(
         "jobs",
         settings=settings,
         input_value=job.description,
-        output_value=brief.model_dump(),
+        output_value=stored.model_dump(),
         detail={"job_post_id": job_post_id, "title": job.title},
     )
-    return brief
+    return stored
 
 
 @router.post("/{job_post_id}/ask", response_model=JobDescriptionAskResponse)
