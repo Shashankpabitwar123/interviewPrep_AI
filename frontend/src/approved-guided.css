@@ -1587,11 +1587,11 @@
   display: grid;
   place-items: center;
   align-content: center;
-  flex: 0 0 66px;
-  width: 66px;
+  flex: 0 0 56px;
+  width: 56px;
   aspect-ratio: 1;
   gap: 2px;
-  padding: 7px;
+  padding: 6px;
   border: 1px solid var(--approved-line);
   border-radius: 50%;
   color: var(--approved-muted);
@@ -1608,12 +1608,12 @@
 
 .guided-plan-date strong {
   color: var(--approved-soft);
-  font-size: 17px;
+  font-size: 15px;
   line-height: 1;
 }
 
 .guided-plan-date span {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
 }
 
@@ -1665,11 +1665,11 @@
   display: grid;
   place-items: center;
   align-content: center;
-  flex: 0 0 66px;
-  width: 66px;
+  flex: 0 0 56px;
+  width: 56px;
   aspect-ratio: 1;
   gap: 1px;
-  padding: 7px;
+  padding: 6px;
   border: 1px solid var(--approved-coral);
   border-radius: 50%;
   color: var(--approved-coral);
@@ -1681,9 +1681,9 @@
 }
 
 .guided-plan-interview-tile:hover { transform: translateY(-1px); }
-.guided-plan-interview-tile svg { width: 14px; height: 14px; }
-.guided-plan-interview-tile span { font-size: 9px; font-weight: 700; }
-.guided-plan-interview-tile strong { color: var(--approved-text); font-size: 16px; line-height: 1; }
+.guided-plan-interview-tile svg { width: 13px; height: 13px; }
+.guided-plan-interview-tile span { font-size: 8px; font-weight: 700; }
+.guided-plan-interview-tile strong { color: var(--approved-text); font-size: 15px; line-height: 1; }
 .guided-plan-interview-tile.selected {
   border: 2px solid var(--approved-coral);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--approved-coral) 86%, white), 0 0 0 3px var(--approved-surface-2), 0 0 0 5px color-mix(in srgb, var(--approved-coral) 52%, transparent), 0 0 20px color-mix(in srgb, var(--approved-coral) 42%, transparent);
@@ -2018,7 +2018,8 @@
   .guided-plan-task { grid-template-columns: 27px 29px minmax(0, 1fr); }
   .guided-plan-task-action { grid-column: 3; justify-self: start; }
   .guided-plan-task-copy strong { white-space: normal; }
-  .guided-plan-interview-tile { flex-basis: 58px; width: 58px; }
+  .guided-plan-date,
+  .guided-plan-interview-tile { flex-basis: 52px; width: 52px; }
   .guided-interview-day-panel { grid-template-columns: 1fr; min-height: 0; }
   .guided-interview-mascot-stage { min-height: 205px; }
   .guided-interview-day-copy h2 { font-size: 27px; }
