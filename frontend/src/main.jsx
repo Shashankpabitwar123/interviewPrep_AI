@@ -1359,7 +1359,7 @@ function App() {
         questionTypes: effectiveSettings.questionTypes.includes("auto") ? ["AI selected"] : effectiveSettings.questionTypes,
         focusTopics,
         scope: generatedExam.scope || scope,
-        scopeLabel: examScopeLabel(generatedExam.scope || scope, day),
+      scopeLabel: options.scopeLabel || examScopeLabel(generatedExam.scope || scope, day),
         jobColor: colorForPlan(sourcePlan, jobMarkers),
         status: "ready",
         createdAt: new Date().toISOString(),
@@ -1384,24 +1384,32 @@ function App() {
     }
   }
 
-  function scheduleMockInterviewAttempt() {
-    if (!plan?.prep_plan_id) return;
+  function scheduleMockInterviewAttempt(options = {}) {
+    const sourcePlan = options.planOverride || plan;
+    if (!sourcePlan?.prep_plan_id) return;
+    const difficulty = options.difficulty || mockDifficulty;
+    const questionTypes = options.questionTypes || mockQuestionTypes;
+    const questionCount = Number(options.questionCount || { easy: 4, medium: 6, hard: 8 }[difficulty] || 6);
     const attempt = {
       id: crypto.randomUUID(),
-      jobTitle: plan.job_title,
-      prepPlanId: plan.prep_plan_id,
-      jobPostId: plan.job_post_id,
-      jobColor: colorForPlan(plan, jobMarkers),
-      difficulty: mockDifficulty,
-      questionTypes: mockQuestionTypes,
-      questionCount: { easy: 4, medium: 6, hard: 8 }[mockDifficulty] || 6,
+      jobTitle: sourcePlan.job_title,
+      prepPlanId: sourcePlan.prep_plan_id,
+      jobPostId: sourcePlan.job_post_id,
+      jobColor: colorForPlan(sourcePlan, jobMarkers),
+      difficulty,
+      questionTypes,
+      questionCount,
+      day: options.day || selectedPlanDay,
+      focusTopics: options.focusTopics || [],
+      scope: options.scope || "full_plan",
+      scopeLabel: options.scopeLabel || mockScopeLabel(options.scope || "full_plan", options.day || selectedPlanDay),
       status: "ready",
       createdAt: new Date().toISOString(),
     };
     const nextAttempts = [attempt, ...mockAttempts];
     setMockAttempts(nextAttempts);
     saveLocalList("interviewprep_mock_attempts", nextAttempts);
-    addActivity({ type: "mock", title: "Mock interview set up", detail: `${plan.job_title} • ${attempt.difficulty}`, badge: `${attempt.questionCount} Qs`, target: "exams" });
+    addActivity({ type: "mock", title: "Mock interview set up", detail: `${sourcePlan.job_title} • ${attempt.difficulty}`, badge: `${attempt.questionCount} Qs`, target: "exams" });
     setStatus("Mock Interview Ready");
     setActiveView("exams");
   }
@@ -1445,6 +1453,10 @@ function App() {
       difficulty: attempt.difficulty,
       questionTypes: attempt.questionTypes,
       questionCount: attempt.questionCount,
+      focusTopics: attempt.focusTopics,
+      topic: attempt.focusTopics?.[0],
+      scope: attempt.scope,
+      day: attempt.day,
     });
     if (!interview) return;
     const nextAttempts = attemptsSource.map((item) => item.id === attempt.id ? {
@@ -1547,12 +1559,15 @@ function App() {
           difficulty: options.difficulty || mockDifficulty,
           question_count: options.questionCount,
           question_types: options.questionTypes || mockQuestionTypes,
+          scope: options.scope || "full_plan",
+          focus_topics: options.focusTopics || [],
+          topic: options.topic,
         }),
       });
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const interview = await response.json();
       setMockInterview(interview);
-      addGeneratedCalendarEvent(`Mock interview: ${plan.job_title}`, "mock", colorForPlan(plan, jobMarkers), selectedPlanDay);
+      addGeneratedCalendarEvent(`Mock interview: ${plan.job_title}`, "mock", colorForPlan(plan, jobMarkers), options.day || selectedPlanDay);
       setStatus("Mock Interview Started");
       markStudyActivity("mock-started");
       addActivity({ type: "mock", title: "Mock interview started", detail: plan?.job_title || "Interview practice", badge: "", target: "exams" });
@@ -2414,7 +2429,7 @@ function App() {
         )}
 
         {activeView === "prep" && <GuidedSectionTabs title="Plan" description="Follow your day-by-day preparation plan for the selected job." tabs={[]} active={activeView} onChange={setActiveView} />}
-        {["exams", "data"].includes(activeView) && <GuidedSectionTabs title="Practice" description="Test your knowledge, rehearse answers aloud, and review interview evidence." tabs={[{ id: "exams", label: "Exams & mocks" }, { id: "data", label: "Interview insights" }]} active={activeView} onChange={setActiveView} />}
+        {["exams", "data"].includes(activeView) && <GuidedSectionTabs title="Practice" description="Test your knowledge, rehearse answers aloud, and review your results for this role." tabs={[{ id: "exams", label: "Exams & mocks" }, { id: "data", label: "Results" }]} active={activeView} onChange={setActiveView} />}
         {["progress", "analytics"].includes(activeView) && <GuidedSectionTabs title="Readiness" description="See what is improving, what needs work, and the next best action." tabs={[{ id: "progress", label: "Overview" }, { id: "analytics", label: "Trends" }]} active={activeView} onChange={setActiveView} />}
 
         {activeView === "jobs" && (
@@ -2477,19 +2492,11 @@ function App() {
           <div data-tour-page="exams">
           <ExamsView
             plan={plan}
-            savedPlans={savedPlans}
-            planSearch={planSearch}
-            setPlanSearch={setPlanSearch}
-            loadPrepPlan={loadPrepPlan}
-            exam={exam}
             examAttempts={examAttempts}
             mockAttempts={mockAttempts}
             examSettings={examSettings}
             setExamSettings={setExamSettings}
             selectedPlanDay={selectedPlanDay}
-            examAnswers={examAnswers}
-            setExamAnswers={setExamAnswers}
-            examResult={examResult}
             generateExam={generateExam}
             scheduleMockInterviewAttempt={scheduleMockInterviewAttempt}
             startExamAttempt={startExamAttempt}
@@ -2497,9 +2504,7 @@ function App() {
             openExamReview={setExamReview}
             openMockReview={setMockReview}
             requestDeleteAttempt={setConfirmDeleteAttempt}
-            submitExamAnswers={submitExamAnswers}
             loading={loading}
-            jobMarkers={jobMarkers}
           />
           </div>
         )}
@@ -2575,24 +2580,13 @@ function App() {
 
         {activeView === "data" && (
           <div data-tour-page="data">
-          <InterviewDataView
-            jobs={jobs}
-            savedPlans={savedPlans}
+          <PracticeResultsView
             plan={plan}
-            completedTasks={completedTasks}
             examAttempts={examAttempts}
             mockAttempts={mockAttempts}
-            notes={notes}
-            generatedStudyNotes={generatedStudyNotes}
-            calendarEvents={calendarEvents}
-            recentActivity={activity}
-            apiFetch={apiFetch}
-            onOpenPlan={async (prepPlanId) => {
-              await loadPrepPlan(prepPlanId);
-              setActiveView("prep");
-            }}
-            onOpenExams={() => setActiveView("exams")}
-            onOpenNotes={() => setActiveView("notes")}
+            openExamReview={setExamReview}
+            openMockReview={setMockReview}
+            onOpenPractice={() => setActiveView("exams")}
           />
           </div>
         )}
@@ -5209,7 +5203,225 @@ function InterviewDayPanel({ plan, allDone, allTasks }) {
   );
 }
 
-function ExamsView({ plan, savedPlans, planSearch, setPlanSearch, loadPrepPlan, examAttempts, mockAttempts, examSettings, setExamSettings, selectedPlanDay, examResult, generateExam, scheduleMockInterviewAttempt, startExamAttempt, startMockAttempt, openExamReview, openMockReview, requestDeleteAttempt, loading, jobMarkers }) {
+function ExamsView({ plan, examAttempts, mockAttempts, examSettings, setExamSettings, selectedPlanDay, generateExam, scheduleMockInterviewAttempt, startExamAttempt, startMockAttempt, openExamReview, openMockReview, requestDeleteAttempt, loading }) {
+  const [mode, setMode] = useState("exam");
+  const [scopeKey, setScopeKey] = useState("today");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [mockSettings, setMockSettings] = useState({
+    difficulty: "medium",
+    questionCount: 6,
+    questionTypes: ["technical", "behavioral"],
+  });
+
+  const activeDay = Math.max(1, Number(selectedPlanDay) || 1);
+  const scopeOptions = useMemo(() => {
+    const currentTopics = topicsForStudyDay(plan, activeDay);
+    return [
+      {
+        id: "today",
+        label: "Today",
+        detail: "Only today's planned material",
+        scope: "selected_day",
+        scopeLabel: `Day ${activeDay} only`,
+        topics: currentTopics,
+      },
+      {
+        id: "covered",
+        label: "Covered so far",
+        detail: `Everything through Day ${activeDay}`,
+        scope: "through_selected_day",
+        scopeLabel: `Topics through Day ${activeDay}`,
+        topics: topicsThroughPlanDay(plan, activeDay),
+      },
+      {
+        id: "full",
+        label: "Full interview prep",
+        detail: "All topics in this preparation plan",
+        scope: "full_plan",
+        scopeLabel: "Full interview prep",
+        topics: topicsForWholePlan(plan),
+      },
+    ];
+  }, [plan, activeDay]);
+  const selectedScope = scopeOptions.find((option) => option.id === scopeKey) || scopeOptions[0];
+  const selectedPlanId = String(plan?.prep_plan_id || "");
+  const belongsToSelectedPlan = (attempt) => String(attempt.prepPlanId || attempt.prep_plan_id || "") === selectedPlanId;
+  const attempts = [
+    ...examAttempts.filter(belongsToSelectedPlan).map((attempt) => ({ ...attempt, kind: "exam" })),
+    ...mockAttempts.filter(belongsToSelectedPlan).map((attempt) => ({ ...attempt, kind: "mock" })),
+  ];
+  const readyAttempts = attempts.filter((attempt) => attempt.status !== "complete");
+  const completedAttempts = attempts.filter((attempt) => attempt.status === "complete");
+
+  function chooseExamDifficulty(difficulty) {
+    setExamSettings(settingsForDifficulty(difficulty));
+  }
+
+  function toggleMockQuestionType(questionType) {
+    setMockSettings((current) => ({
+      ...current,
+      questionTypes: current.questionTypes.includes(questionType)
+        ? (current.questionTypes.length === 1 ? current.questionTypes : current.questionTypes.filter((item) => item !== questionType))
+        : [...current.questionTypes, questionType],
+    }));
+  }
+
+  function createPracticeAttempt() {
+    if (!plan?.prep_plan_id || loading) return;
+    if (mode === "exam") {
+      generateExam(activeDay, {
+        scope: selectedScope.id === "full" ? "custom_topics" : selectedScope.scope,
+        scopeLabel: selectedScope.scopeLabel,
+        focusTopics: selectedScope.topics,
+        settingsOverride: examSettings,
+      });
+      return;
+    }
+    scheduleMockInterviewAttempt({
+      day: activeDay,
+      scope: selectedScope.scope,
+      scopeLabel: selectedScope.scopeLabel,
+      focusTopics: selectedScope.topics,
+      difficulty: mockSettings.difficulty,
+      questionCount: mockSettings.questionCount,
+      questionTypes: mockSettings.questionTypes,
+    });
+  }
+
+  if (!plan?.prep_plan_id) {
+    return (
+      <section className="page-stack practice-page">
+        <section className="panel page-panel practice-empty-state">
+          <FileQuestion size={22} />
+          <div>
+            <h2>Choose a job to practice for</h2>
+            <p>Exams, mock interviews, and results stay connected to one selected role.</p>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <section className="page-stack practice-page">
+      <section className="practice-context">
+        <div>
+          <span className="eyebrow">PRACTICE FOR</span>
+          <h2>{plan.job_title}</h2>
+          <p>{formatInterviewSchedule(plan)} · Day {activeDay} selected</p>
+        </div>
+        <div className="practice-context-status"><Target size={17} />Only this role&apos;s attempts</div>
+      </section>
+
+      <section className="panel page-panel practice-setup-panel">
+        <div className="practice-section-heading">
+          <div>
+            <span className="eyebrow">CREATE PRACTICE</span>
+            <h3>{mode === "exam" ? "Practice exam" : "Mock interview"}</h3>
+            <p>{mode === "exam" ? "Check what you know before the interview." : "Rehearse role-specific answers aloud."}</p>
+          </div>
+        </div>
+
+        <div className="practice-mode-switch" role="tablist" aria-label="Practice mode">
+          <button type="button" role="tab" aria-selected={mode === "exam"} className={mode === "exam" ? "active" : ""} onClick={() => setMode("exam")}><FileQuestion size={17} />Practice exam</button>
+          <button type="button" role="tab" aria-selected={mode === "mock"} className={mode === "mock" ? "active" : ""} onClick={() => setMode("mock")}><MessageSquareText size={17} />Mock interview</button>
+        </div>
+
+        <div className="practice-setup-grid">
+          <div className="practice-control-group">
+            <span className="practice-control-label">What should it cover?</span>
+            <div className="practice-scope-options">
+              {scopeOptions.map((option) => (
+                <button type="button" key={option.id} className={`practice-scope-option ${scopeKey === option.id ? "active" : ""}`} onClick={() => setScopeKey(option.id)}>
+                  <strong>{option.label}</strong>
+                  <span>{option.detail}</span>
+                </button>
+              ))}
+            </div>
+            <p className="practice-topics-preview">Focus: {selectedScope.topics.length ? selectedScope.topics.slice(0, 4).join(" · ") : "Role-specific topics from your plan"}</p>
+          </div>
+
+          <div className="practice-control-group">
+            <span className="practice-control-label">Difficulty</span>
+            <div className="practice-segmented" role="group" aria-label="Difficulty">
+              {["easy", "medium", "hard"].map((difficulty) => {
+                const selected = mode === "exam" ? examSettings.difficulty === difficulty : mockSettings.difficulty === difficulty;
+                return <button type="button" key={difficulty} className={selected ? "active" : ""} onClick={() => mode === "exam" ? chooseExamDifficulty(difficulty) : setMockSettings((current) => ({ ...current, difficulty }))}>{capitalize(difficulty)}</button>;
+              })}
+            </div>
+            <p className="practice-setting-summary">{mode === "exam" ? `${examSettings.questionCount} questions · ${examSettings.timeLimit} min` : `${mockSettings.questionCount} questions · conversational feedback`}</p>
+          </div>
+        </div>
+
+        <button type="button" className="practice-advanced-toggle" onClick={() => setShowAdvanced((current) => !current)}>{showAdvanced ? "Hide settings" : "Adjust question settings"}<ChevronDown size={16} className={showAdvanced ? "rotated" : ""} /></button>
+        {showAdvanced && (
+          <div className="practice-advanced-settings">
+            <label>Question count
+              <input type="number" min="3" max={mode === "exam" ? 40 : 12} value={mode === "exam" ? examSettings.questionCount : mockSettings.questionCount} onChange={(event) => mode === "exam" ? setExamSettings((current) => ({ ...current, questionCount: Number(event.target.value) || 3 })) : setMockSettings((current) => ({ ...current, questionCount: Math.min(12, Number(event.target.value) || 3) }))} />
+            </label>
+            {mode === "exam" && <label>Time limit (minutes)
+              <input type="number" min="3" max="90" value={examSettings.timeLimit} onChange={(event) => setExamSettings((current) => ({ ...current, timeLimit: Number(event.target.value) || 3 }))} />
+            </label>}
+            <div className="practice-type-options">
+              <span>Question types</span>
+              {(mode === "exam" ? ["auto", "multiple_choice", "short_answer", "coding"] : ["technical", "behavioral", "role_specific", "team_problem_solving"]).map((questionType) => {
+                const selected = mode === "exam" ? examSettings.questionTypes.includes(questionType) : mockSettings.questionTypes.includes(questionType);
+                const label = questionType === "auto" ? "AI selected" : questionType.replaceAll("_", " ");
+                return <button type="button" key={questionType} className={selected ? "active" : ""} onClick={() => {
+                  if (mode === "exam") setExamSettings((current) => ({ ...current, questionTypes: current.questionTypes.includes(questionType) ? current.questionTypes.filter((item) => item !== questionType) : [...current.questionTypes, questionType] }));
+                  else toggleMockQuestionType(questionType);
+                }}>{label}</button>;
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="practice-action-row">
+          <p>{mode === "exam" ? "Your exam will be generated from the selected scope." : "Your mock will use the same scope and stay with this job."}</p>
+          <button type="button" className="primary-action" disabled={loading} onClick={createPracticeAttempt}>{mode === "exam" ? <FileQuestion size={18} /> : <MessageSquareText size={18} />}{loading ? "Preparing…" : mode === "exam" ? "Generate practice exam" : "Create mock interview"}</button>
+        </div>
+      </section>
+
+      <section className="panel page-panel practice-attempts-panel">
+        <div className="practice-section-heading practice-attempts-heading">
+          <div>
+            <span className="eyebrow">YOUR ATTEMPTS</span>
+            <h3>For {plan.job_title}</h3>
+            <p>Only exams and mock interviews made for this role appear here.</p>
+          </div>
+          <span className="attempt-count">{attempts.length} total</span>
+        </div>
+        {!attempts.length ? <div className="practice-empty-list">Create a practice exam or mock interview to begin.</div> : <>
+          {readyAttempts.length > 0 && <div className="practice-attempt-group"><h4>Ready to start</h4>{readyAttempts.map((attempt) => <PracticeAttemptRow key={`${attempt.kind}-${attempt.id}`} attempt={attempt} onStart={attempt.kind === "exam" ? startExamAttempt : startMockAttempt} onReview={attempt.kind === "exam" ? openExamReview : openMockReview} onDelete={requestDeleteAttempt} loading={loading} />)}</div>}
+          {completedAttempts.length > 0 && <div className="practice-attempt-group"><h4>Completed</h4>{completedAttempts.map((attempt) => <PracticeAttemptRow key={`${attempt.kind}-${attempt.id}`} attempt={attempt} onStart={attempt.kind === "exam" ? startExamAttempt : startMockAttempt} onReview={attempt.kind === "exam" ? openExamReview : openMockReview} onDelete={requestDeleteAttempt} loading={loading} />)}</div>}
+        </>}
+      </section>
+    </section>
+  );
+}
+
+function PracticeAttemptRow({ attempt, onStart, onReview, onDelete, loading }) {
+  const Icon = attempt.kind === "exam" ? FileQuestion : MessageSquareText;
+  const questionCount = attempt.kind === "exam" ? (attempt.exam?.questions?.length || 0) : (attempt.questionCount || 0);
+  const isComplete = attempt.status === "complete";
+  const canReview = attempt.kind === "exam" ? Boolean(attempt.review) : Boolean(attempt.interview);
+  const title = attempt.kind === "exam" ? (attempt.exam?.title || "Practice exam") : "Mock interview";
+  const scopeLabel = attempt.scopeLabel || (attempt.kind === "exam" ? examScopeLabel(attempt.scope, attempt.day) : mockScopeLabel(attempt.scope, attempt.day));
+  return (
+    <article className={`practice-attempt-row ${isComplete ? "complete" : ""}`}>
+      <div className="practice-attempt-icon"><Icon size={18} /></div>
+      <div className="practice-attempt-copy">
+        <strong>{title}</strong>
+        <span>{scopeLabel} · {capitalize(attempt.difficulty || "medium")} · {questionCount} questions</span>
+      </div>
+      <span className={`attempt-status ${isComplete ? "complete" : "ready"}`}>{isComplete ? "Completed" : attempt.status === "active" ? "In progress" : "Ready"}</span>
+      {isComplete ? <button type="button" className="outline-action compact-action" disabled={!canReview} onClick={() => onReview(attempt)}><BookOpen size={16} />Review</button> : <button type="button" className="primary-action compact-action" disabled={loading} onClick={() => onStart(attempt)}>{attempt.status === "active" ? "Resume" : "Start"}</button>}
+      <button type="button" className="icon-button compact-icon-button" aria-label={`Delete ${title}`} onClick={() => onDelete({ kind: attempt.kind, id: attempt.id })}><Trash2 size={17} /></button>
+    </article>
+  );
+}
+
+function LegacyExamsView({ plan, savedPlans, planSearch, setPlanSearch, loadPrepPlan, examAttempts, mockAttempts, examSettings, setExamSettings, selectedPlanDay, examResult, generateExam, scheduleMockInterviewAttempt, startExamAttempt, startMockAttempt, openExamReview, openMockReview, requestDeleteAttempt, loading, jobMarkers }) {
   const [showExamAdvanced, setShowExamAdvanced] = useState(false);
   const matches = savedPlans.filter((savedPlan) => savedPlan.job_title.toLowerCase().includes(planSearch.toLowerCase()));
   function chooseDifficulty(difficulty) {
@@ -5878,6 +6090,47 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             </section>
           )}
         </article>
+      </section>
+    </section>
+  );
+}
+
+function PracticeResultsView({ plan, examAttempts, mockAttempts, openExamReview, openMockReview, onOpenPractice }) {
+  const selectedPlanId = String(plan?.prep_plan_id || "");
+  const belongsToSelectedPlan = (attempt) => String(attempt.prepPlanId || attempt.prep_plan_id || "") === selectedPlanId;
+  const completedAttempts = [
+    ...examAttempts.filter((attempt) => belongsToSelectedPlan(attempt) && attempt.status === "complete").map((attempt) => ({ ...attempt, kind: "exam" })),
+    ...mockAttempts.filter((attempt) => belongsToSelectedPlan(attempt) && attempt.status === "complete").map((attempt) => ({ ...attempt, kind: "mock" })),
+  ];
+  const scores = completedAttempts.map((attempt) => Number(attempt.review?.average_score ?? attempt.interview?.average_score ?? attempt.interview?.overall_score)).filter((score) => Number.isFinite(score));
+  const averageScore = scores.length ? Math.round((scores.reduce((total, score) => total + score, 0) / scores.length) * 100) : null;
+
+  if (!plan?.prep_plan_id) {
+    return <section className="page-stack practice-page"><section className="panel page-panel practice-empty-state"><Gauge size={22} /><div><h2>Choose a job to view results</h2><p>Results are separated by the role you are preparing for.</p></div></section></section>;
+  }
+
+  return (
+    <section className="page-stack practice-page">
+      <section className="practice-context">
+        <div>
+          <span className="eyebrow">PRACTICE RESULTS</span>
+          <h2>{plan.job_title}</h2>
+          <p>Completed exams and mock interviews for this role only.</p>
+        </div>
+        <div className="practice-context-status"><Gauge size={17} />{averageScore === null ? "No scored attempts yet" : `${averageScore}% average score`}</div>
+      </section>
+      <section className="panel page-panel practice-results-panel">
+        <div className="practice-section-heading practice-attempts-heading">
+          <div><span className="eyebrow">COMPLETED WORK</span><h3>Review your interview evidence</h3><p>Use each review to understand what to improve before the interview.</p></div>
+          <span className="attempt-count">{completedAttempts.length} completed</span>
+        </div>
+        {completedAttempts.length ? <div className="practice-results-list">{completedAttempts.map((attempt) => {
+          const Icon = attempt.kind === "exam" ? FileQuestion : MessageSquareText;
+          const score = Number(attempt.review?.average_score ?? attempt.interview?.average_score ?? attempt.interview?.overall_score);
+          const scoreText = Number.isFinite(score) ? `${Math.round(score * 100)}%` : "Review available";
+          const title = attempt.kind === "exam" ? (attempt.exam?.title || "Practice exam") : "Mock interview";
+          return <article key={`${attempt.kind}-${attempt.id}`} className="practice-result-row"><div className="practice-attempt-icon"><Icon size={18} /></div><div className="practice-attempt-copy"><strong>{title}</strong><span>{attempt.scopeLabel || (attempt.kind === "exam" ? examScopeLabel(attempt.scope, attempt.day) : mockScopeLabel(attempt.scope, attempt.day))} · {capitalize(attempt.difficulty || "medium")}</span></div><span className="result-score">{scoreText}</span><button type="button" className="outline-action compact-action" onClick={() => attempt.kind === "exam" ? openExamReview(attempt) : openMockReview(attempt)}><BookOpen size={16} />Review</button></article>;
+        })}</div> : <div className="practice-empty-list"><p>No completed attempts for this job yet.</p><button type="button" className="primary-action compact-action" onClick={onOpenPractice}>Create practice</button></div>}
       </section>
     </section>
   );
@@ -8099,6 +8352,17 @@ function examScopeLabel(scope, day) {
   if (scope === "through_selected_day") return `Syllabus through Day ${day}`;
   if (scope === "custom_topics") return "Custom focus";
   return `Day ${day} only`;
+}
+
+function mockScopeLabel(scope, day) {
+  if (scope === "through_selected_day") return `Topics through Day ${day}`;
+  if (scope === "full_plan" || scope === "custom_topics") return "Full interview prep";
+  return `Day ${day} topics`;
+}
+
+function capitalize(value) {
+  const text = String(value || "");
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
 }
 
 function generateStudyNote(plan, task) {

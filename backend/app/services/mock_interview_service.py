@@ -39,11 +39,11 @@ def start_mock_interview(
     if plan is None or not _owns_plan(plan, user):
         return None
 
-    topic = request.topic or _first_topic(plan)
+    config = _mock_config(request)
+    topic = request.topic or (config["focus_topics"][0] if config["focus_topics"] else _first_topic(plan))
     interview = MockInterview(prep_plan_id=plan.id, current_topic=topic, status="active")
     db.add(interview)
     db.flush()
-    config = _mock_config(request)
     db.add(MockMessage(mock_interview_id=interview.id, role="meta", content=json.dumps(config)))
     question_type = config["question_types"][0]
     ai_question = _question_with_ai(plan, topic, question_type, config, settings)
@@ -121,10 +121,17 @@ def _mock_config(request: MockInterviewStartRequest) -> dict:
         difficulty = "medium"
     question_count = request.question_count or QUESTION_COUNT_BY_DIFFICULTY[difficulty]
     question_types = [item for item in request.question_types if item in QUESTION_TYPES]
+    focus_topics: list[str] = []
+    for topic in request.focus_topics:
+        clean_topic = topic.strip()
+        if clean_topic and clean_topic not in focus_topics:
+            focus_topics.append(clean_topic)
     return {
         "difficulty": difficulty,
         "question_count": min(12, max(1, question_count)),
         "question_types": question_types or ["technical", "multiple_choice", "coding", "behavioral"],
+        "scope": request.scope,
+        "focus_topics": focus_topics,
     }
 
 
@@ -132,10 +139,22 @@ def _config_for_interview(interview: MockInterview) -> dict:
     for message in interview.messages:
         if message.role == "meta":
             try:
-                return json.loads(message.content)
+                config = json.loads(message.content)
+                config.setdefault("difficulty", "medium")
+                config.setdefault("question_count", 6)
+                config.setdefault("question_types", ["technical", "multiple_choice", "coding", "behavioral"])
+                config.setdefault("scope", "full_plan")
+                config.setdefault("focus_topics", [])
+                return config
             except json.JSONDecodeError:
                 break
-    return {"difficulty": "medium", "question_count": 6, "question_types": ["technical", "multiple_choice", "coding", "behavioral"]}
+    return {
+        "difficulty": "medium",
+        "question_count": 6,
+        "question_types": ["technical", "multiple_choice", "coding", "behavioral"],
+        "scope": "full_plan",
+        "focus_topics": [],
+    }
 
 
 def _answered_count(interview: MockInterview) -> int:
@@ -210,6 +229,12 @@ def _question_with_ai(
 
 
 def _question_prompt(plan: PrepPlan, topic: str, question_type: str, config: dict) -> str:
+    scope_labels = {
+        "selected_day": "the selected preparation day only",
+        "through_selected_day": "all material covered through the selected preparation day",
+        "full_plan": "the complete preparation plan",
+    }
+    focus_topics = ", ".join(config.get("focus_topics") or [])
     return (
         "Create one realistic mock interview question as JSON only. "
         "Return exactly one question. Match the requested question type and difficulty. "
@@ -220,6 +245,8 @@ def _question_prompt(plan: PrepPlan, topic: str, question_type: str, config: dic
         "For team_problem_solving ask about collaboration, disagreement, tradeoffs, ownership, and communication.\n\n"
         f"Role: {plan.job_post.title}\n"
         f"Prep plan summary: {plan.summary}\n"
+        f"Practice scope: {scope_labels.get(config.get('scope'), 'the complete preparation plan')}\n"
+        f"Selected focus topics: {focus_topics or 'Use the relevant plan topics.'}\n"
         f"Topic: {topic}\n"
         f"Difficulty: {config['difficulty']}\n"
         f"Question type: {question_type}"
@@ -263,6 +290,8 @@ def _mock_feedback_with_ai(
         "Return a score from 0 to 1, actionable feedback, and one follow-up interviewer question. "
         "Make the follow-up match the requested difficulty and interview style.\n\n"
         f"Topic: {interview.current_topic}\n"
+        f"Practice scope: {config.get('scope', 'full_plan')}\n"
+        f"Selected focus topics: {', '.join(config.get('focus_topics') or []) or 'Use the active interview topic.'}\n"
         f"Difficulty: {config['difficulty']}\n"
         f"Question types available: {', '.join(config['question_types'])}\n"
         f"Question: {previous_question}\n"
@@ -328,6 +357,8 @@ def _to_response(interview: MockInterview) -> MockInterviewResponse:
         status=interview.status,
         difficulty=config["difficulty"],
         question_count=config["question_count"],
+        scope=config["scope"],
+        focus_topics=config["focus_topics"],
         answered_questions=_answered_count(interview),
         average_score=interview.average_score,
         messages=[

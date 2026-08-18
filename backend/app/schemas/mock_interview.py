@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 class MockInterviewStartRequest(BaseModel):
     prep_plan_id: int
     topic: Optional[str] = None
+    scope: Literal["selected_day", "through_selected_day", "full_plan"] = "full_plan"
+    focus_topics: list[str] = Field(default_factory=list, max_length=12)
     difficulty: str = Field(default="medium", examples=["easy", "medium", "hard"])
     question_count: Optional[int] = Field(default=None, ge=1, le=12)
     question_types: list[str] = Field(
@@ -32,6 +34,8 @@ class MockInterviewResponse(BaseModel):
     status: str
     difficulty: str = "medium"
     question_count: int = 6
+    scope: str = "full_plan"
+    focus_topics: list[str] = Field(default_factory=list)
     answered_questions: int = 0
     average_score: Optional[float] = None
     messages: list[MockMessageResponse]

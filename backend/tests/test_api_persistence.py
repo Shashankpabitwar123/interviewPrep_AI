@@ -655,11 +655,21 @@ def test_mock_interview_flow() -> None:
     )
     prep_plan_id = plan_response.json()["prep_plan_id"]
 
-    start_response = client.post("/mock-interviews/start", json={"prep_plan_id": prep_plan_id})
+    start_response = client.post(
+        "/mock-interviews/start",
+        json={
+            "prep_plan_id": prep_plan_id,
+            "scope": "through_selected_day",
+            "focus_topics": ["SQL joins", "Python", "SQL joins"],
+        },
+    )
     started = start_response.json()
 
     assert start_response.status_code == 200
     assert started["messages"][0]["role"] == "interviewer"
+    assert started["scope"] == "through_selected_day"
+    assert started["focus_topics"] == ["SQL joins", "Python"]
+    assert started["current_topic"] == "SQL joins"
 
     answer_response = client.post(
         f"/mock-interviews/{started['id']}/answer",
