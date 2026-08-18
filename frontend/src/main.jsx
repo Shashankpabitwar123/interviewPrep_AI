@@ -2429,7 +2429,7 @@ function App() {
         )}
 
         {activeView === "prep" && <GuidedSectionTabs title="Plan" description="Follow your day-by-day preparation plan for the selected job." tabs={[]} active={activeView} onChange={setActiveView} />}
-        {["exams", "data"].includes(activeView) && <GuidedSectionTabs title="Practice" description="Test your knowledge, rehearse answers aloud, and review your results for this role." tabs={[{ id: "exams", label: "Exams & mocks" }, { id: "data", label: "Results" }]} active={activeView} onChange={setActiveView} />}
+        {activeView === "exams" && <GuidedSectionTabs title="Practice" description="Create job-specific exams and mock interviews, then review completed attempts." tabs={[]} active={activeView} onChange={setActiveView} />}
         {["progress", "analytics"].includes(activeView) && <GuidedSectionTabs title="Readiness" description="See what is improving, what needs work, and the next best action." tabs={[{ id: "progress", label: "Overview" }, { id: "analytics", label: "Trends" }]} active={activeView} onChange={setActiveView} />}
 
         {activeView === "jobs" && (
@@ -2574,19 +2574,6 @@ function App() {
               await loadPrepPlan(prepPlanId);
               setActiveView("prep");
             }}
-          />
-          </div>
-        )}
-
-        {activeView === "data" && (
-          <div data-tour-page="data">
-          <PracticeResultsView
-            plan={plan}
-            examAttempts={examAttempts}
-            mockAttempts={mockAttempts}
-            openExamReview={setExamReview}
-            openMockReview={setMockReview}
-            onOpenPractice={() => setActiveView("exams")}
           />
           </div>
         )}
@@ -3113,7 +3100,7 @@ function GuidedTopNavigation({ activeView, generationInProgress, onNavigate, use
     ["jobs", "Jobs", BriefcaseBusiness, ["jobs"]],
     ["prep", "Plan", ClipboardList, ["prep"]],
     ["notes", "Notes", NotebookText, ["notes"]],
-    ["exams", "Practice", MessageSquareText, ["exams", "data"]],
+    ["exams", "Practice", MessageSquareText, ["exams"]],
   ];
 
   return (
@@ -5252,6 +5239,19 @@ function ExamsView({ plan, examAttempts, mockAttempts, examSettings, setExamSett
   ];
   const readyAttempts = attempts.filter((attempt) => attempt.status !== "complete");
   const completedAttempts = attempts.filter((attempt) => attempt.status === "complete");
+  const completedExamAttempts = completedAttempts.filter((attempt) => attempt.kind === "exam");
+  const completedMockAttempts = completedAttempts.filter((attempt) => attempt.kind === "mock");
+  const scorePercentage = (attempt) => {
+    const rawScore = Number(attempt.review?.average_score ?? attempt.interview?.average_score ?? attempt.interview?.overall_score);
+    if (!Number.isFinite(rawScore)) return null;
+    return Math.max(0, Math.min(100, Math.round(rawScore <= 1 ? rawScore * 100 : rawScore)));
+  };
+  const averageScore = (collection) => {
+    const scores = collection.map(scorePercentage).filter((score) => score !== null);
+    return scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : null;
+  };
+  const examAverage = averageScore(completedExamAttempts);
+  const mockAverage = averageScore(completedMockAttempts);
 
   function chooseExamDifficulty(difficulty) {
     setExamSettings(settingsForDifficulty(difficulty));
@@ -5295,7 +5295,7 @@ function ExamsView({ plan, examAttempts, mockAttempts, examSettings, setExamSett
           <FileQuestion size={22} />
           <div>
             <h2>Choose a job to practice for</h2>
-            <p>Exams, mock interviews, and results stay connected to one selected role.</p>
+            <p>Exams and mock interviews stay connected to one selected role.</p>
           </div>
         </section>
       </section>
@@ -5304,21 +5304,12 @@ function ExamsView({ plan, examAttempts, mockAttempts, examSettings, setExamSett
 
   return (
     <section className="page-stack practice-page">
-      <section className="practice-context">
-        <div>
-          <span className="eyebrow">PRACTICE FOR</span>
-          <h2>{plan.job_title}</h2>
-          <p>{formatInterviewSchedule(plan)} · Day {activeDay} selected</p>
-        </div>
-        <div className="practice-context-status"><Target size={17} />Only this role&apos;s attempts</div>
-      </section>
-
       <section className="panel page-panel practice-setup-panel">
         <div className="practice-section-heading">
           <div>
-            <span className="eyebrow">CREATE PRACTICE</span>
+            <span className="eyebrow">CREATE PRACTICE · DAY {activeDay}</span>
             <h3>{mode === "exam" ? "Practice exam" : "Mock interview"}</h3>
-            <p>{mode === "exam" ? "Check what you know before the interview." : "Rehearse role-specific answers aloud."}</p>
+            <p>{mode === "exam" ? "Check what you know before the interview." : "Rehearse role-specific answers aloud."} Every attempt stays with the selected job.</p>
           </div>
         </div>
 
@@ -5389,7 +5380,12 @@ function ExamsView({ plan, examAttempts, mockAttempts, examSettings, setExamSett
             <h3>For {plan.job_title}</h3>
             <p>Only exams and mock interviews made for this role appear here.</p>
           </div>
-          <span className="attempt-count">{attempts.length} total</span>
+          <div className="practice-attempts-metrics" aria-label="Attempt summary">
+            <span className="attempt-count">{attempts.length} total</span>
+            <span className="attempt-count attempt-count-complete">{completedAttempts.length} completed</span>
+            {examAverage !== null && <span className="attempt-count attempt-count-score">Exams {examAverage}%</span>}
+            {mockAverage !== null && <span className="attempt-count attempt-count-score">Mocks {mockAverage}%</span>}
+          </div>
         </div>
         {!attempts.length ? <div className="practice-empty-list">Create a practice exam or mock interview to begin.</div> : <>
           {readyAttempts.length > 0 && <div className="practice-attempt-group"><h4>Ready to start</h4>{readyAttempts.map((attempt) => <PracticeAttemptRow key={`${attempt.kind}-${attempt.id}`} attempt={attempt} onStart={attempt.kind === "exam" ? startExamAttempt : startMockAttempt} onReview={attempt.kind === "exam" ? openExamReview : openMockReview} onDelete={requestDeleteAttempt} loading={loading} />)}</div>}
@@ -6090,47 +6086,6 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             </section>
           )}
         </article>
-      </section>
-    </section>
-  );
-}
-
-function PracticeResultsView({ plan, examAttempts, mockAttempts, openExamReview, openMockReview, onOpenPractice }) {
-  const selectedPlanId = String(plan?.prep_plan_id || "");
-  const belongsToSelectedPlan = (attempt) => String(attempt.prepPlanId || attempt.prep_plan_id || "") === selectedPlanId;
-  const completedAttempts = [
-    ...examAttempts.filter((attempt) => belongsToSelectedPlan(attempt) && attempt.status === "complete").map((attempt) => ({ ...attempt, kind: "exam" })),
-    ...mockAttempts.filter((attempt) => belongsToSelectedPlan(attempt) && attempt.status === "complete").map((attempt) => ({ ...attempt, kind: "mock" })),
-  ];
-  const scores = completedAttempts.map((attempt) => Number(attempt.review?.average_score ?? attempt.interview?.average_score ?? attempt.interview?.overall_score)).filter((score) => Number.isFinite(score));
-  const averageScore = scores.length ? Math.round((scores.reduce((total, score) => total + score, 0) / scores.length) * 100) : null;
-
-  if (!plan?.prep_plan_id) {
-    return <section className="page-stack practice-page"><section className="panel page-panel practice-empty-state"><Gauge size={22} /><div><h2>Choose a job to view results</h2><p>Results are separated by the role you are preparing for.</p></div></section></section>;
-  }
-
-  return (
-    <section className="page-stack practice-page">
-      <section className="practice-context">
-        <div>
-          <span className="eyebrow">PRACTICE RESULTS</span>
-          <h2>{plan.job_title}</h2>
-          <p>Completed exams and mock interviews for this role only.</p>
-        </div>
-        <div className="practice-context-status"><Gauge size={17} />{averageScore === null ? "No scored attempts yet" : `${averageScore}% average score`}</div>
-      </section>
-      <section className="panel page-panel practice-results-panel">
-        <div className="practice-section-heading practice-attempts-heading">
-          <div><span className="eyebrow">COMPLETED WORK</span><h3>Review your interview evidence</h3><p>Use each review to understand what to improve before the interview.</p></div>
-          <span className="attempt-count">{completedAttempts.length} completed</span>
-        </div>
-        {completedAttempts.length ? <div className="practice-results-list">{completedAttempts.map((attempt) => {
-          const Icon = attempt.kind === "exam" ? FileQuestion : MessageSquareText;
-          const score = Number(attempt.review?.average_score ?? attempt.interview?.average_score ?? attempt.interview?.overall_score);
-          const scoreText = Number.isFinite(score) ? `${Math.round(score * 100)}%` : "Review available";
-          const title = attempt.kind === "exam" ? (attempt.exam?.title || "Practice exam") : "Mock interview";
-          return <article key={`${attempt.kind}-${attempt.id}`} className="practice-result-row"><div className="practice-attempt-icon"><Icon size={18} /></div><div className="practice-attempt-copy"><strong>{title}</strong><span>{attempt.scopeLabel || (attempt.kind === "exam" ? examScopeLabel(attempt.scope, attempt.day) : mockScopeLabel(attempt.scope, attempt.day))} · {capitalize(attempt.difficulty || "medium")}</span></div><span className="result-score">{scoreText}</span><button type="button" className="outline-action compact-action" onClick={() => attempt.kind === "exam" ? openExamReview(attempt) : openMockReview(attempt)}><BookOpen size={16} />Review</button></article>;
-        })}</div> : <div className="practice-empty-list"><p>No completed attempts for this job yet.</p><button type="button" className="primary-action compact-action" onClick={onOpenPractice}>Create practice</button></div>}
       </section>
     </section>
   );
