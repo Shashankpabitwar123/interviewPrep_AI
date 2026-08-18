@@ -4471,7 +4471,7 @@ function JobsView({
 }) {
   const [searchText, setSearchText] = useState("");
   const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || null);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("analysis");
   const [deleteMode, setDeleteMode] = useState(false);
   const [deleteRequested, setDeleteRequested] = useState(false);
   const [jobDetails, setJobDetails] = useState({});
@@ -4580,7 +4580,7 @@ function JobsView({
       return;
     }
     setSelectedJobId(job.id);
-    setActiveTab("overview");
+    setActiveTab("analysis");
     setAnalysisError("");
     onToggleMenu(null);
   }
@@ -4726,7 +4726,7 @@ function JobsView({
                   {menuId === selectedJob.id && <div className="job-action-menu"><button onClick={() => onRequestDelete(selectedJob)}>Delete saved job</button></div>}
                 </div>
               </header>
-              <div className="guided-job-tabs"><button className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Overview</button><button className={activeTab === "analysis" ? "active" : ""} onClick={() => setActiveTab("analysis")}>Job analysis</button></div>
+              <div className="guided-job-tabs"><button className={activeTab === "analysis" ? "active" : ""} onClick={() => setActiveTab("analysis")}>Job analysis</button><button className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Overview</button></div>
 
               {activeTab === "overview" ? (
                 <div className="guided-job-overview">
