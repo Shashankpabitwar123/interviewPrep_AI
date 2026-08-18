@@ -2267,10 +2267,6 @@
   background: var(--approved-surface-2);
 }
 
-.guided-plan-task.complete {
-  border-color: color-mix(in srgb, var(--approved-mint) 62%, var(--approved-line));
-}
-
 .guided-plan-task-check,
 .guided-plan-task-icon {
   display: grid;
