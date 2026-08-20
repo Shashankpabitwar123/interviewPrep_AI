@@ -14,7 +14,7 @@
 
 <p align="center">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white">
-  <img alt="Vite 6" src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white">
+  <img alt="Vite 7" src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white">
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-Python-009688?logo=fastapi&logoColor=white">
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&logoColor=white">
   <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-AI_Workflows-412991?logo=openai&logoColor=white">
@@ -49,7 +49,7 @@ InterviewPrep AI is a deployed full-stack SaaS-style product that turns a target
 ## System Architecture
 
 ```text
-React 19 + Vite 6 frontend (Vercel)
+React 19 + Vite 7 frontend (Vercel)
                   |
                   | HTTPS / REST / JWT
                   v
@@ -67,7 +67,7 @@ The backend owns authentication, user-scoped persistence, job analysis, plan gen
 
 | Layer | Technology | Responsibility |
 | --- | --- | --- |
-| Frontend | React 19, Vite 6, JavaScript, CSS | Responsive dashboard, forms, notes, exams, interviews, calendar, analytics, and settings |
+| Frontend | React 19, Vite 7, JavaScript, CSS | Responsive dashboard, forms, notes, exams, interviews, calendar, analytics, and settings |
 | Backend | Python, FastAPI, Pydantic, SQLAlchemy, Alembic | REST APIs, business logic, validation, persistence, migrations, and AI orchestration |
 | Database | PostgreSQL on Neon | Authenticated, per-user jobs, plans, notes, attempts, progress, and application records |
 | AI and research | OpenAI APIs, Tavily | Job analysis, preparation plans, teaching content, questions, feedback, and research enrichment |

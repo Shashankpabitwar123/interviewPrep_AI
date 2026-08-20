@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -38,4 +39,5 @@ class MockInterviewResponse(BaseModel):
     focus_topics: list[str] = Field(default_factory=list)
     answered_questions: int = 0
     average_score: Optional[float] = None
+    created_at: datetime
     messages: list[MockMessageResponse]

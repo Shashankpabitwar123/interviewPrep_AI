@@ -6,10 +6,19 @@ from app.database import get_db
 from app.models import User
 from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest
 from app.services.auth_service import get_request_user
-from app.services.mock_interview_service import answer_mock_question, get_mock_interview, start_mock_interview
+from app.services.mock_interview_service import answer_mock_question, complete_mock_interview, delete_mock_interview, get_mock_interview, list_mock_interviews, start_mock_interview
 from app.services.usage_service import record_usage_event
 
 router = APIRouter(prefix="/mock-interviews", tags=["mock interviews"])
+
+
+@router.get("", response_model=list[MockInterviewResponse])
+def list_interviews(
+    prep_plan_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> list[MockInterviewResponse]:
+    return list_mock_interviews(db, current_user, prep_plan_id)
 
 
 @router.post("/start", response_model=MockInterviewResponse)
@@ -42,6 +51,28 @@ def get_interview(
     current_user: User | None = Depends(get_request_user),
 ) -> MockInterviewResponse:
     interview = get_mock_interview(db, mock_interview_id, current_user)
+    if interview is None:
+        raise HTTPException(status_code=404, detail="Mock interview not found")
+    return interview
+
+
+@router.delete("/{mock_interview_id}", status_code=204)
+def remove_interview(
+    mock_interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> None:
+    if not delete_mock_interview(db, mock_interview_id, current_user):
+        raise HTTPException(status_code=404, detail="Mock interview not found")
+
+
+@router.post("/{mock_interview_id}/complete", response_model=MockInterviewResponse)
+def complete_interview(
+    mock_interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> MockInterviewResponse:
+    interview = complete_mock_interview(db, mock_interview_id, current_user)
     if interview is None:
         raise HTTPException(status_code=404, detail="Mock interview not found")
     return interview

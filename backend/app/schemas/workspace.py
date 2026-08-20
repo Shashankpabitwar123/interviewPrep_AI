@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 class WorkspaceStateUpdate(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
+    expected_updated_at: Optional[datetime] = None
+    expected_revision: Optional[int] = Field(default=None, ge=0)
 
 
 class WorkspaceStateResponse(BaseModel):

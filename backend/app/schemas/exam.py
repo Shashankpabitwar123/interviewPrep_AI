@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -64,3 +65,12 @@ class ExamSubmissionResponse(BaseModel):
     exam_id: int
     average_score: float
     results: list[AnswerResult]
+
+
+class ExamStoredAttemptResponse(BaseModel):
+    exam: ExamResponse
+    status: Literal["ready", "complete"]
+    average_score: Optional[float] = None
+    results: list[AnswerResult] = Field(default_factory=list)
+    answers: dict[int, str] = Field(default_factory=dict)
+    created_at: datetime

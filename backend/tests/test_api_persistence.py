@@ -262,6 +262,17 @@ def test_workspace_sync_and_readiness_use_real_plan_state() -> None:
     )
     assert sync.status_code == 200
     assert sync.json()["data"]["notes"][0]["title"] == "Python"
+    revision = sync.json()["data"]["_revision"]
+    current_write = client.put(
+        "/workspace",
+        json={"data": sync.json()["data"], "expected_revision": revision},
+    )
+    assert current_write.status_code == 200
+    stale_write = client.put(
+        "/workspace",
+        json={"data": sync.json()["data"], "expected_revision": revision},
+    )
+    assert stale_write.status_code == 409
 
     readiness = client.get(f"/workspace/readiness?prep_plan_id={plan['prep_plan_id']}")
     assert readiness.status_code == 200
@@ -269,6 +280,52 @@ def test_workspace_sync_and_readiness_use_real_plan_state() -> None:
     assert report["formula"] == "30% plan + 20% learning + 25% exams + 20% mock interviews + 5% consistency"
     assert report["score"] > 0
     assert {component["key"] for component in report["components"]} == {"plan", "learning", "exams", "mocks", "consistency"}
+
+
+def test_readiness_ignores_other_plan_activity_and_archived_default_plan() -> None:
+    client = _client_with_memory_db()
+    first = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Data Analyst",
+            "job_description": "SQL Python dashboards and stakeholder communication.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=5)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    second = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Backend Engineer",
+            "job_description": "Python APIs databases and distributed systems.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    sync = client.put(
+        "/workspace",
+        json={
+            "data": {
+                "archivedJobIds": [str(second["job_post_id"])],
+                "recentActivity": [{
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                    "type": "study",
+                    "prepPlanId": second["prep_plan_id"],
+                    "jobPostId": second["job_post_id"],
+                }],
+            }
+        },
+    )
+    assert sync.status_code == 200
+
+    first_report = client.get(f"/workspace/readiness?prep_plan_id={first['prep_plan_id']}").json()
+    consistency = next(item for item in first_report["components"] if item["key"] == "consistency")
+    assert consistency["score"] == 0
+    default_report = client.get("/workspace/readiness")
+    assert default_report.status_code == 200
+    assert default_report.json()["prep_plan_id"] == first["prep_plan_id"]
 
 
 def test_exam_generation_and_submission_flow() -> None:
@@ -307,6 +364,12 @@ def test_exam_generation_and_submission_flow() -> None:
 
     assert submission.status_code == 200
     assert submission.json()["average_score"] > 0.5
+    stored = client.get(f"/exams?prep_plan_id={prep_plan_id}")
+    assert stored.status_code == 200
+    assert stored.json()[0]["exam"]["id"] == exam["id"]
+    assert stored.json()[0]["status"] == "complete"
+    assert stored.json()[0]["average_score"] == submission.json()["average_score"]
+    assert len(stored.json()[0]["answers"]) == len(exam["questions"])
 
 
 def test_exam_submission_counts_unanswered_questions_as_zero() -> None:
@@ -345,6 +408,31 @@ def test_exam_submission_counts_unanswered_questions_as_zero() -> None:
     assert len(body["results"]) == len(exam["questions"])
     assert body["average_score"] < 1
     assert any(result["score"] == 0 and result["feedback"].startswith("Not answered") for result in body["results"])
+
+
+def test_exam_delete_removes_backend_attempt_and_respects_ownership() -> None:
+    client = _client_with_memory_db()
+    first = _register(client, {"name": "First User", "email": "exam-delete-first@example.com", "password": "Password1!"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "exam-delete-second@example.com", "password": "Password1!"}).json()["access_token"]
+    plan = client.post(
+        "/prep-plans",
+        headers={"Authorization": f"Bearer {first}"},
+        json={
+            "job_title": "Backend Software Engineer",
+            "job_description": "Python SQL REST APIs Docker testing and system design.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+        },
+    ).json()
+    exam = client.post(
+        "/exams/generate",
+        headers={"Authorization": f"Bearer {first}"},
+        json={"prep_plan_id": plan["prep_plan_id"], "day": 1, "question_count": 3, "difficulty": "medium"},
+    ).json()
+
+    assert client.delete(f"/exams/{exam['id']}", headers={"Authorization": f"Bearer {second}"}).status_code == 404
+    assert client.delete(f"/exams/{exam['id']}", headers={"Authorization": f"Bearer {first}"}).status_code == 204
+    assert client.get(f"/exams/{exam['id']}", headers={"Authorization": f"Bearer {first}"}).status_code == 404
 
 
 def test_exam_generation_can_focus_on_day_note_topics() -> None:
@@ -682,6 +770,47 @@ def test_mock_interview_flow() -> None:
     assert answer_response.status_code == 200
     assert answered["average_score"] > 0
     assert any(message["role"] == "feedback" for message in answered["messages"])
+    listed = client.get(f"/mock-interviews?prep_plan_id={prep_plan_id}")
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == started["id"]
+    assert listed.json()[0]["created_at"]
+
+    completed_response = client.post(f"/mock-interviews/{started['id']}/complete")
+    assert completed_response.status_code == 200
+    assert completed_response.json()["status"] == "complete"
+
+
+def test_mock_interview_complete_and_delete_respect_ownership() -> None:
+    client = _client_with_memory_db()
+    first = _register(client, {"name": "First User", "email": "mock-first@example.com", "password": "Password1!"}).json()["access_token"]
+    second = _register(client, {"name": "Second User", "email": "mock-second@example.com", "password": "Password1!"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {first}"}
+    plan = client.post(
+        "/prep-plans",
+        headers=headers,
+        json={
+            "job_title": "Backend Engineer",
+            "job_description": "Python SQL REST APIs Docker testing and system design.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    started = client.post(
+        "/mock-interviews/start",
+        headers=headers,
+        json={"prep_plan_id": plan["prep_plan_id"]},
+    ).json()
+
+    other_headers = {"Authorization": f"Bearer {second}"}
+    assert client.post(f"/mock-interviews/{started['id']}/complete", headers=other_headers).status_code == 404
+    assert client.delete(f"/mock-interviews/{started['id']}", headers=other_headers).status_code == 404
+    completed = client.post(f"/mock-interviews/{started['id']}/complete", headers=headers)
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "complete"
+    assert completed.json()["average_score"] == 0
+    assert client.delete(f"/mock-interviews/{started['id']}", headers=headers).status_code == 204
+    assert client.get(f"/mock-interviews/{started['id']}", headers=headers).status_code == 404
 
 
 def _request_otp(client: TestClient, email: str) -> str:

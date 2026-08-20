@@ -8,7 +8,7 @@ from app.models import User
 from app.schemas.workspace import ReadinessResponse, WorkspaceStateResponse, WorkspaceStateUpdate
 from app.services.auth_service import get_request_user
 from app.services.usage_service import record_usage_event
-from app.services.workspace_service import calculate_readiness, get_workspace_state, save_workspace_state
+from app.services.workspace_service import WorkspaceConflictError, calculate_readiness, get_workspace_state, save_workspace_state
 
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
@@ -28,7 +28,10 @@ def update_workspace(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_request_user),
 ) -> WorkspaceStateResponse:
-    result = save_workspace_state(db, current_user, request.data)
+    try:
+        result = save_workspace_state(db, current_user, request.data, request.expected_updated_at, request.expected_revision)
+    except WorkspaceConflictError as error:
+        raise HTTPException(status_code=409, detail="Workspace changed in another session. Refresh before saving again.") from error
     record_usage_event(db, current_user, "workspace_synced", "workspace", provider="system")
     return result
 

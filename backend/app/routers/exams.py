@@ -4,12 +4,21 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import User
-from app.schemas.exam import ExamGenerateRequest, ExamResponse, ExamSubmissionRequest, ExamSubmissionResponse
+from app.schemas.exam import ExamGenerateRequest, ExamResponse, ExamStoredAttemptResponse, ExamSubmissionRequest, ExamSubmissionResponse
 from app.services.auth_service import get_request_user
-from app.services.exam_service import generate_exam_for_plan, get_exam_detail, submit_exam_answers
+from app.services.exam_service import delete_exam, generate_exam_for_plan, get_exam_detail, list_exam_attempts, submit_exam_answers
 from app.services.usage_service import record_usage_event
 
 router = APIRouter(prefix="/exams", tags=["exams"])
+
+
+@router.get("", response_model=list[ExamStoredAttemptResponse])
+def list_exams(
+    prep_plan_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> list[ExamStoredAttemptResponse]:
+    return list_exam_attempts(db, current_user, prep_plan_id)
 
 
 @router.post("/generate", response_model=ExamResponse)
@@ -45,6 +54,16 @@ def get_exam(
     if exam is None:
         raise HTTPException(status_code=404, detail="Exam not found")
     return exam
+
+
+@router.delete("/{exam_id}", status_code=204)
+def remove_exam(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> None:
+    if not delete_exam(db, exam_id, current_user):
+        raise HTTPException(status_code=404, detail="Exam not found")
 
 
 @router.post("/{exam_id}/submit", response_model=ExamSubmissionResponse)

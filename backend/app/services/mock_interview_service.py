@@ -65,6 +65,35 @@ def get_mock_interview(db: Session, mock_interview_id: int, user: Optional[User]
     return _to_response(interview)
 
 
+def list_mock_interviews(db: Session, user: Optional[User] = None, prep_plan_id: Optional[int] = None) -> list[MockInterviewResponse]:
+    query = db.query(MockInterview).join(MockInterview.prep_plan).join(PrepPlan.job_post)
+    query = query.filter(PrepPlan.job_post.has(user_id=user.id)) if user else query.filter(PrepPlan.job_post.has(user_id=None))
+    if prep_plan_id is not None:
+        query = query.filter(MockInterview.prep_plan_id == prep_plan_id)
+    return [_to_response(interview) for interview in query.order_by(MockInterview.created_at.desc(), MockInterview.id.desc()).all()]
+
+
+def delete_mock_interview(db: Session, mock_interview_id: int, user: Optional[User] = None) -> bool:
+    interview = db.get(MockInterview, mock_interview_id)
+    if interview is None or not _owns_plan(interview.prep_plan, user):
+        return False
+    db.delete(interview)
+    db.commit()
+    return True
+
+
+def complete_mock_interview(db: Session, mock_interview_id: int, user: Optional[User] = None) -> Optional[MockInterviewResponse]:
+    interview = db.get(MockInterview, mock_interview_id)
+    if interview is None or not _owns_plan(interview.prep_plan, user):
+        return None
+    interview.status = "complete"
+    scores = [float(message.score) for message in interview.messages if message.score is not None]
+    interview.average_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+    db.commit()
+    db.refresh(interview)
+    return _to_response(interview)
+
+
 def answer_mock_question(
     db: Session,
     mock_interview_id: int,
@@ -361,6 +390,7 @@ def _to_response(interview: MockInterview) -> MockInterviewResponse:
         focus_topics=config["focus_topics"],
         answered_questions=_answered_count(interview),
         average_score=interview.average_score,
+        created_at=interview.created_at,
         messages=[
             {
                 "id": message.id,

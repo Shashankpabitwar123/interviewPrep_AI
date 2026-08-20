@@ -10,21 +10,45 @@ from app.schemas.workspace import ReadinessComponent, ReadinessResponse, Workspa
 READINESS_FORMULA = "30% plan + 20% learning + 25% exams + 20% mock interviews + 5% consistency"
 
 
+class WorkspaceConflictError(Exception):
+    pass
+
+
 def get_workspace_state(db: Session, user: Optional[User]) -> WorkspaceStateResponse:
     state = _workspace_record(db, user)
     return WorkspaceStateResponse(data=state.data if state else {}, updated_at=state.updated_at if state else None)
 
 
-def save_workspace_state(db: Session, user: Optional[User], data: dict[str, Any]) -> WorkspaceStateResponse:
+def save_workspace_state(
+    db: Session,
+    user: Optional[User],
+    data: dict[str, Any],
+    expected_updated_at: Optional[datetime] = None,
+    expected_revision: Optional[int] = None,
+) -> WorkspaceStateResponse:
     state = _workspace_record(db, user)
     if state is None:
-        state = WorkspaceState(user_id=user.id if user else None, data=data)
+        if expected_updated_at is not None or expected_revision not in {None, 0}:
+            raise WorkspaceConflictError
+        next_data = {**data, "_revision": 1}
+        state = WorkspaceState(user_id=user.id if user else None, data=next_data)
         db.add(state)
     else:
-        state.data = data
+        current_revision = int((state.data or {}).get("_revision") or 0)
+        if expected_revision is not None and expected_revision != current_revision:
+            raise WorkspaceConflictError
+        if expected_updated_at is not None and _as_utc(state.updated_at) != _as_utc(expected_updated_at):
+            raise WorkspaceConflictError
+        state.data = {**data, "_revision": current_revision + 1}
     db.commit()
     db.refresh(state)
     return WorkspaceStateResponse(data=state.data or {}, updated_at=state.updated_at)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def calculate_readiness(
@@ -32,16 +56,20 @@ def calculate_readiness(
     user: Optional[User],
     prep_plan_id: Optional[int] = None,
 ) -> Optional[ReadinessResponse]:
+    workspace = _workspace_record(db, user)
+    state = (workspace.data or {}) if workspace else {}
     query = db.query(PrepPlan).join(PrepPlan.job_post)
     query = query.filter(PrepPlan.job_post.has(user_id=user.id)) if user else query.filter(PrepPlan.job_post.has(user_id=None))
     if prep_plan_id is not None:
         query = query.filter(PrepPlan.id == prep_plan_id)
+    else:
+        archived_ids = _integer_ids(state.get("archivedJobIds") or state.get("archived_job_ids") or [])
+        if archived_ids:
+            query = query.filter(~PrepPlan.job_post_id.in_(archived_ids))
     plan = query.order_by(PrepPlan.created_at.desc()).first()
     if plan is None:
         return None
 
-    workspace = _workspace_record(db, user)
-    state = (workspace.data or {}) if workspace else {}
     completed_task_keys = state.get("completedTasks") or state.get("completed_tasks") or {}
     tasks = list(plan.tasks)
     completed_tasks = [task for task in tasks if _task_is_complete(task.id, task.status, completed_task_keys)]
@@ -116,6 +144,16 @@ def _consistency_score(state: dict[str, Any], completed_tasks: list, plan: PrepP
     cutoff = today - timedelta(days=6)
     active_days: set = set()
     for item in state.get("recentActivity") or state.get("recent_activity") or []:
+        activity_plan_id = item.get("prepPlanId") or item.get("prep_plan_id")
+        activity_job_id = item.get("jobPostId") or item.get("job_post_id")
+        if activity_plan_id is not None:
+            if str(activity_plan_id) != str(plan.id):
+                continue
+        elif activity_job_id is not None:
+            if str(activity_job_id) != str(plan.job_post_id):
+                continue
+        else:
+            continue
         raw = item.get("createdAt") or item.get("created_at")
         parsed = _parse_datetime(raw)
         if parsed and cutoff <= parsed.date() <= today:
@@ -130,6 +168,16 @@ def _consistency_score(state: dict[str, Any], completed_tasks: list, plan: PrepP
                 if attempt.created_at and cutoff <= attempt.created_at.date() <= today:
                     active_days.add(attempt.created_at.date())
     return min(100, round((len(active_days) / 7) * 100))
+
+
+def _integer_ids(values: list[Any]) -> list[int]:
+    result = []
+    for value in values:
+        try:
+            result.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return result
 
 
 def _parse_datetime(value: Any) -> Optional[datetime]:

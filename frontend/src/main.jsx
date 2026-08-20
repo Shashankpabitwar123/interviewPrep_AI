@@ -1,6 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import MarketingLanding from "./MarketingLanding.jsx";
+import {
+  READINESS_FORMULA,
+  activityBelongsToPlan,
+  combineReadinessReports,
+  emptyReadinessReport,
+  eventBelongsToPlan,
+  filterArchived,
+  isTaskCompleteForPlan,
+  normalizeCalendarEvent,
+  normalizeReadinessReport,
+  prepDateForPlanDay,
+  reconcileExamAttempts,
+  reconcileMockAttempts,
+  resolveActiveJob,
+  scorePercent,
+  taskCompletionKey,
+} from "./workspace-utils.js";
 import "@fontsource/public-sans/400.css";
 import "@fontsource/public-sans/500.css";
 import "@fontsource/public-sans/600.css";
@@ -110,6 +127,7 @@ const WORKSPACE_STORAGE_KEYS = [
   "interviewprep_calendar_events",
   "interviewprep_recent_activity",
   "interviewprep_completed_tasks",
+  "interviewprep_active_job_id",
   JOB_BRIEF_CACHE_KEY,
   JOB_BRIEF_QA_CACHE_KEY,
 ];
@@ -285,8 +303,12 @@ function App() {
   const [soundVolume, setSoundVolume] = useState(() => loadSoundVolume());
   const [allowLocalFallback, setAllowLocalFallback] = useState(() => loadAllowLocalFallback());
   const [activeView, setActiveView] = useState("dashboard");
-  const [selectedJobId, setSelectedJobId] = useState("");
+  const [selectedJobId, setSelectedJobId] = useState(() => loadLocalValue("interviewprep_active_job_id"));
+  const activeJobIdRef = useRef(selectedJobId);
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+  const workspaceUpdatedAtRef = useRef(null);
+  const workspaceRevisionRef = useRef(0);
+  const workspaceSyncChainRef = useRef(Promise.resolve());
   const [readinessReport, setReadinessReport] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -312,6 +334,12 @@ function App() {
     error: "",
   });
   const isAdmin = user?.is_admin || user?.role === "admin";
+
+  function updateSelectedJobId(value) {
+    const normalized = value || "";
+    activeJobIdRef.current = normalized;
+    setSelectedJobId(normalized);
+  }
   const onboardingUserKey = user?.email || "guest";
   const [onboarding, setOnboarding] = useState(() => loadOnboardingState(onboardingUserKey));
   const [onboardingMode, setOnboardingMode] = useState("");
@@ -322,8 +350,6 @@ function App() {
     setInterviewDate(defaultInterviewDate());
     if (authToken) {
       reloadLocalWorkspaceState();
-      refreshJobs();
-      refreshSavedPlans();
     } else {
       clearVisibleWorkspaceState();
     }
@@ -401,6 +427,7 @@ function App() {
     setCalendarEvents(loadLocalList("interviewprep_calendar_events"));
     setRecentActivity(loadLocalList("interviewprep_recent_activity"));
     setCompletedTasks(loadCompletedTasks());
+    updateSelectedJobId(loadLocalValue("interviewprep_active_job_id"));
   }
 
   function saveOnboardingUpdate(nextState) {
@@ -463,7 +490,12 @@ function App() {
   function clearLocalWorkspaceStorage() {
     WORKSPACE_STORAGE_KEYS.forEach((key) => {
       const scopedKey = scopedStorageKey(key);
-      if (scopedKey) localStorage.removeItem(scopedKey);
+      if (!scopedKey) return;
+      try {
+        localStorage.removeItem(scopedKey);
+      } catch {
+        // Account deletion still proceeds when browser storage is unavailable.
+      }
     });
   }
 
@@ -477,7 +509,29 @@ function App() {
     if (token) headers.Authorization = `Bearer ${token}`;
     const requestOptions = { ...options, headers };
     delete requestOptions.authTokenOverride;
-    return fetch(`${API_URL}${path}`, requestOptions);
+    const method = (requestOptions.method || "GET").toUpperCase();
+    const retryable = method === "GET" || path.endsWith("/otp");
+    const attempts = retryable ? 2 : 1;
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const response = await fetch(`${API_URL}${path}`, requestOptions);
+        if (attempt + 1 < attempts && [502, 503, 504].includes(response.status)) {
+          await wait(900);
+          continue;
+        }
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (attempt + 1 < attempts) {
+          await wait(900);
+          continue;
+        }
+      }
+    }
+    throw new Error(lastError?.message === "Failed to fetch"
+      ? "Unable to reach the PrepInterview AI backend. Please wait a moment and try again."
+      : lastError?.message || "Unable to reach the PrepInterview AI backend.");
   }
 
   async function readApiError(response, label = "API") {
@@ -502,12 +556,32 @@ function App() {
       if (!response.ok) throw new Error(await readApiError(response, "Workspace"));
       const payload = await response.json();
       const data = payload.data || {};
+      workspaceUpdatedAtRef.current = payload.updated_at || null;
+      workspaceRevisionRef.current = Number(data._revision || 0);
+      const hydratedMarkers = data.jobMarkers && typeof data.jobMarkers === "object" ? data.jobMarkers : jobMarkers;
+      const hydratedArchivedIds = Array.isArray(data.archivedJobIds) ? data.archivedJobIds : archivedJobIds;
+      const preferredJobId = data.activeJobId || loadLocalValue("interviewprep_active_job_id");
+      const hydratedExamAttempts = Array.isArray(data.examAttempts) ? data.examAttempts : examAttempts;
+      const hydratedMockAttempts = Array.isArray(data.mockAttempts) ? data.mockAttempts : mockAttempts;
       if (Object.keys(data).length) {
         applyWorkspaceCollection(data, "completedTasks", setCompletedTasks, saveCompletedTasks);
         applyWorkspaceCollection(data, "notes", setNotes, (value) => saveLocalList("interviewprep_notes", value));
-        applyWorkspaceCollection(data, "generatedStudyNotes", setGeneratedStudyNotes, (value) => saveLocalMap("interviewprep_generated_study_notes", value));
+        if (Object.prototype.hasOwnProperty.call(data, "generatedStudyNotes")) {
+          const normalizedGeneratedNotes = Object.fromEntries(Object.entries(data.generatedStudyNotes || {}).map(([key, value]) => [
+            key,
+            { ...value, planId: value?.planId || String(key).split(":")[0] },
+          ]));
+          applyWorkspaceCollection({ generatedStudyNotes: normalizedGeneratedNotes }, "generatedStudyNotes", setGeneratedStudyNotes, (value) => saveLocalMap("interviewprep_generated_study_notes", value));
+        }
         applyWorkspaceCollection(data, "noteFolders", setNoteFolders, (value) => saveLocalList("interviewprep_note_folders", value));
-        applyWorkspaceCollection(data, "calendarEvents", setCalendarEvents, (value) => saveLocalList("interviewprep_calendar_events", value));
+        if (Object.prototype.hasOwnProperty.call(data, "calendarEvents")) {
+          applyWorkspaceCollection(
+            { calendarEvents: (data.calendarEvents || []).map((event) => normalizeCalendarEvent(event)) },
+            "calendarEvents",
+            setCalendarEvents,
+            (value) => saveLocalList("interviewprep_calendar_events", value),
+          );
+        }
         applyWorkspaceCollection(data, "recentActivity", setRecentActivity, (value) => saveLocalList("interviewprep_recent_activity", value));
         applyWorkspaceCollection(data, "examAttempts", setExamAttempts, (value) => saveLocalList("interviewprep_exam_attempts", value));
         applyWorkspaceCollection(data, "mockAttempts", setMockAttempts, (value) => saveLocalList("interviewprep_mock_attempts", value));
@@ -515,15 +589,76 @@ function App() {
         applyWorkspaceCollection(data, "deletedJobs", setDeletedJobs, (value) => saveLocalList("interviewprep_deleted_jobs", value));
         applyWorkspaceCollection(data, "archivedJobIds", setArchivedJobIds, (value) => saveLocalList("interviewprep_archived_job_ids", value));
       }
+      const [visibleJobs, visiblePlans] = await Promise.all([
+        refreshJobs(hydratedMarkers, hydratedArchivedIds, tokenOverride),
+        refreshSavedPlans(hydratedArchivedIds, tokenOverride),
+      ]);
+      const [examListResult, mockListResult] = await Promise.allSettled([
+        apiFetch("/exams", { authTokenOverride: tokenOverride }),
+        apiFetch("/mock-interviews", { authTokenOverride: tokenOverride }),
+      ]);
+      const examListResponse = examListResult.status === "fulfilled" ? examListResult.value : null;
+      const mockListResponse = mockListResult.status === "fulfilled" ? mockListResult.value : null;
+      if (examListResponse?.ok) {
+        const reconciled = reconcileExamAttempts(hydratedExamAttempts, await examListResponse.json(), visiblePlans);
+        setExamAttempts(reconciled);
+        saveLocalList("interviewprep_exam_attempts", reconciled);
+      }
+      if (mockListResponse?.ok) {
+        const reconciled = reconcileMockAttempts(hydratedMockAttempts, await mockListResponse.json(), visiblePlans);
+        setMockAttempts(reconciled);
+        saveLocalList("interviewprep_mock_attempts", reconciled);
+      }
+      const activeJob = visibleJobs.find((job) => String(job.id) === String(preferredJobId)) || visibleJobs[0] || null;
+      const matchingPlan = activeJob
+        ? visiblePlans.find((savedPlan) => String(savedPlan.job_post_id) === String(activeJob.id))
+        : null;
+      updateSelectedJobId(activeJob?.id || "");
+      saveLocalValue("interviewprep_active_job_id", activeJob?.id || "");
+      if (matchingPlan) {
+        const planResponse = await apiFetch(`/prep-plans/${matchingPlan.id}`, { authTokenOverride: tokenOverride });
+        if (planResponse.ok) {
+          const planDetail = await planResponse.json();
+          setPlan({ ...planDetail, job_color: colorForJobId(planDetail.job_post_id, hydratedMarkers, planDetail.job_title) });
+          await refreshReadiness(tokenOverride, planDetail.prep_plan_id);
+        } else {
+          setPlan(null);
+          setReadinessReport(null);
+        }
+      } else {
+        setPlan(null);
+        setReadinessReport(null);
+      }
       setWorkspaceHydrated(true);
-      await refreshReadiness(tokenOverride);
     } catch (error) {
+      const [visibleJobs, visiblePlans] = await Promise.all([
+        refreshJobs(jobMarkers, archivedJobIds, tokenOverride),
+        refreshSavedPlans(archivedJobIds, tokenOverride),
+      ]);
+      const preferredJobId = loadLocalValue("interviewprep_active_job_id");
+      const activeJob = visibleJobs.find((job) => String(job.id) === String(preferredJobId)) || visibleJobs[0] || null;
+      const matchingPlan = activeJob
+        ? visiblePlans.find((savedPlan) => String(savedPlan.job_post_id) === String(activeJob.id))
+        : null;
+      updateSelectedJobId(activeJob?.id || "");
+      if (matchingPlan) {
+        try {
+          const planResponse = await apiFetch(`/prep-plans/${matchingPlan.id}`, { authTokenOverride: tokenOverride });
+          if (planResponse.ok) {
+            const detail = await planResponse.json();
+            setPlan({ ...detail, job_color: colorForJobId(detail.job_post_id, jobMarkers, detail.job_title) });
+            await refreshReadiness(tokenOverride, detail.prep_plan_id);
+          }
+        } catch {
+          // Jobs remain usable even if the selected plan could not be restored.
+        }
+      }
       setWorkspaceHydrated(true);
       setStatus(error.message || "Workspace sync unavailable");
     }
   }
 
-  async function syncWorkspace() {
+  function syncWorkspace() {
     const data = {
       completedTasks,
       notes,
@@ -536,23 +671,35 @@ function App() {
       jobMarkers,
       deletedJobs,
       archivedJobIds,
+      activeJobId: selectedJobId || "",
     };
-    try {
-      const response = await apiFetch("/workspace", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data }),
-      });
-      if (!response.ok) throw new Error(await readApiError(response, "Workspace sync"));
-      await refreshReadiness();
-    } catch {
-      // Local storage remains an offline cache and the next state change retries.
-    }
+    const persist = async () => {
+      try {
+        const response = await apiFetch("/workspace", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            data,
+            expected_updated_at: workspaceUpdatedAtRef.current,
+            expected_revision: workspaceRevisionRef.current,
+          }),
+        });
+        if (!response.ok) throw new Error(await readApiError(response, "Workspace sync"));
+        const payload = await response.json();
+        workspaceUpdatedAtRef.current = payload.updated_at || null;
+        workspaceRevisionRef.current = Number(payload.data?._revision || workspaceRevisionRef.current + 1);
+        await refreshReadiness();
+      } catch (error) {
+        setStatus(error.message || "Workspace sync failed. Your local copy is still safe.");
+      }
+    };
+    workspaceSyncChainRef.current = workspaceSyncChainRef.current.catch(() => {}).then(persist);
+    return workspaceSyncChainRef.current;
   }
 
-  async function refreshReadiness(tokenOverride = authToken) {
+  async function refreshReadiness(tokenOverride = authToken, prepPlanIdOverride = plan?.prep_plan_id) {
     if (!tokenOverride) return;
-    const query = plan?.prep_plan_id ? `?prep_plan_id=${plan.prep_plan_id}` : "";
+    const query = prepPlanIdOverride ? `?prep_plan_id=${prepPlanIdOverride}` : "";
     try {
       const response = await apiFetch(`/workspace/readiness${query}`, { authTokenOverride: tokenOverride });
       if (response.status === 404) {
@@ -560,7 +707,9 @@ function App() {
         return;
       }
       if (!response.ok) return;
-      setReadinessReport(await response.json());
+      const report = normalizeReadinessReport(await response.json());
+      if (activeJobIdRef.current && report?.job_post_id && !idsMatch(activeJobIdRef.current, report.job_post_id)) return;
+      setReadinessReport(report);
     } catch {
       // Readiness will refresh after the next successful workspace sync.
     }
@@ -725,7 +874,7 @@ function App() {
     if (!authToken || !workspaceHydrated) return undefined;
     const timer = window.setTimeout(() => syncWorkspace(), 700);
     return () => window.clearTimeout(timer);
-  }, [authToken, workspaceHydrated, completedTasks, notes, generatedStudyNotes, noteFolders, calendarEvents, recentActivity, examAttempts, mockAttempts, jobMarkers, deletedJobs, archivedJobIds]);
+  }, [authToken, workspaceHydrated, completedTasks, notes, generatedStudyNotes, noteFolders, calendarEvents, recentActivity, examAttempts, mockAttempts, jobMarkers, deletedJobs, archivedJobIds, selectedJobId]);
 
   useEffect(() => {
     if (!examSession || examSession.remainingSeconds <= 0) return undefined;
@@ -754,8 +903,7 @@ function App() {
       const response = await apiFetch(`/jobs`, { authTokenOverride: tokenOverride });
       if (!response.ok) return;
       const saved = await response.json();
-      const hidden = new Set(archivedIds.map(String));
-      setJobs(saved.filter((job) => !hidden.has(String(job.id))).map((job, index) => ({
+      const visibleJobs = filterArchived(saved, archivedIds).map((job, index) => ({
         id: job.id,
         title: job.title,
         company: job.company || companyFromUrl(job.source_url) || "Saved Job",
@@ -767,9 +915,12 @@ function App() {
         color: colorForJobId(job.id, markers, job.title),
         interview_at: job.interview_at,
         hours_per_day: job.hours_per_day,
-      })));
+      }));
+      setJobs(visibleJobs);
+      return visibleJobs;
     } catch {
       setStatus("Backend Offline");
+      return [];
     }
   }
 
@@ -778,10 +929,12 @@ function App() {
       const response = await apiFetch(`/prep-plans`, { authTokenOverride: tokenOverride });
       if (!response.ok) return;
       const plans = await response.json();
-      const hidden = new Set(archivedIds.map(String));
-      setSavedPlans(plans.filter((savedPlan) => !hidden.has(String(savedPlan.job_post_id))));
+      const visiblePlans = filterArchived(plans, archivedIds, (savedPlan) => savedPlan.job_post_id);
+      setSavedPlans(visiblePlans);
+      return visiblePlans;
     } catch {
       setStatus("Backend Offline");
+      return [];
     }
   }
 
@@ -793,7 +946,6 @@ function App() {
     setSourceUrl("");
     setInterviewDate(defaultInterviewDate());
     setHoursPerDay(3);
-    setSelectedJobId("");
   }
 
   function openAddJobModal() {
@@ -816,7 +968,6 @@ function App() {
         interview_at: new Date(interviewDate).toISOString(),
         hours_per_day: Number(hoursPerDay),
         comfort_level: "intermediate",
-        job_post_id: selectedJobId || undefined,
       };
       if (mode === "url") payload.source_url = normalizeUrl(sourceUrl);
       else payload.job_description = jobDescription || "Python FastAPI SQL REST APIs Docker testing and system design.";
@@ -836,7 +987,8 @@ function App() {
         saveLocalMap("interviewprep_job_markers", nextMarkers);
       }
       setPlan({ ...savedPlan, job_color: planColor });
-      setSelectedJobId(savedPlan.job_post_id || "");
+      updateSelectedJobId(savedPlan.job_post_id || "");
+      saveLocalValue("interviewprep_active_job_id", savedPlan.job_post_id || "");
       setJobTitle(savedPlan.job_title || "");
       setCompany(savedPlan.company || inferCompanyName(company, jobDescription, sourceUrl));
       setSelectedPlanDay(1);
@@ -846,7 +998,7 @@ function App() {
       setStatus("Prep Plan Saved");
       setJobModalOpen(false);
       markStudyActivity("plan-generated");
-      addActivity({ type: "plan", title: "Prep plan generated", detail: savedPlan.job_title, badge: `${savedPlan.days_until_interview}d`, target: "prep" });
+      addActivity({ type: "plan", title: "Prep plan generated", detail: savedPlan.job_title, badge: `${savedPlan.days_until_interview}d`, target: "prep", prepPlanId: savedPlan.prep_plan_id, jobPostId: savedPlan.job_post_id });
       refreshJobs(nextMarkers);
       refreshSavedPlans();
     } catch (error) {
@@ -886,9 +1038,12 @@ function App() {
       setJobMarkers(nextMarkers);
       saveLocalMap("interviewprep_job_markers", nextMarkers);
       await refreshJobs(nextMarkers);
-      addActivity({ type: "job", title: "Job saved", detail: saved.role_title || jobTitle || "Saved job", badge: "", target: "jobs" });
+      addActivity({ type: "job", title: "Job saved", detail: saved.role_title || jobTitle || "Saved job", badge: "", target: "jobs", jobPostId: saved.job_post_id });
       setStatus("Job Saved");
-      setSelectedJobId(saved.job_post_id || "");
+      updateSelectedJobId(saved.job_post_id || "");
+      saveLocalValue("interviewprep_active_job_id", saved.job_post_id || "");
+      setPlan(null);
+      setReadinessReport(null);
       setJobModalOpen(false);
     } catch (error) {
       setStatus(`Error: ${error.message}`);
@@ -919,7 +1074,11 @@ function App() {
       setJobDraft({ title: "", description: "", sourceUrl: "", color: "#2563eb" });
       setJobModalOpen(false);
       await refreshJobs(nextMarkers);
-      addActivity({ type: "job", title: "Job added manually", detail: saved.role_title || jobDraft.title, badge: "", target: "jobs" });
+      updateSelectedJobId(saved.job_post_id || "");
+      saveLocalValue("interviewprep_active_job_id", saved.job_post_id || "");
+      setPlan(null);
+      setReadinessReport(null);
+      addActivity({ type: "job", title: "Job added manually", detail: saved.role_title || jobDraft.title, badge: "", target: "jobs", jobPostId: saved.job_post_id });
       setStatus("Job Saved");
     } catch (error) {
       setStatus(`Error: ${error.message}`);
@@ -937,14 +1096,22 @@ function App() {
       const nextArchivedIds = [...new Set([String(jobId), ...archivedJobIds.map(String)])];
       setArchivedJobIds(nextArchivedIds);
       saveLocalList("interviewprep_archived_job_ids", nextArchivedIds);
-      setJobs((current) => current.filter((job) => String(job.id) !== String(jobId)));
+      const remainingJobs = jobs.filter((job) => String(job.id) !== String(jobId));
+      setJobs(remainingJobs);
       setSavedPlans((current) => current.filter((savedPlan) => String(savedPlan.job_post_id) !== String(jobId)));
       removeCalendarEventsForJobs([jobId], deletedJob ? [deletedJob.title] : []);
-      if (String(plan?.job_post_id) === String(jobId)) setPlan(null);
+      if (String(selectedJobId) === String(jobId)) {
+        const nextJob = remainingJobs[0] || null;
+        updateSelectedJobId(nextJob?.id || "");
+        saveLocalValue("interviewprep_active_job_id", nextJob?.id || "");
+        setPlan(null);
+        setReadinessReport(null);
+        if (nextJob) await useSavedJob(nextJob, { navigate: false });
+      }
       setSelectedJobIds((current) => current.filter((id) => String(id) !== String(jobId)));
       setConfirmDeleteJob(null);
       setJobActionMenuId(null);
-      addActivity({ type: "job", title: "Job moved to bin", detail: deletedJob?.title || "Saved job", badge: "", target: "jobs" });
+      addActivity({ type: "job", title: "Job moved to bin", detail: deletedJob?.title || "Saved job", badge: "", target: "jobs", jobPostId: jobId });
       setStatus("Job Moved To Bin");
     } catch (error) {
       setStatus(`Error: ${error.message}`);
@@ -965,12 +1132,20 @@ function App() {
       setArchivedJobIds(nextArchivedIds);
       saveLocalList("interviewprep_archived_job_ids", nextArchivedIds);
       const deletedCount = selectedJobIds.length;
-      setJobs((current) => current.filter((job) => !selectedIds.has(String(job.id))));
+      const remainingJobs = jobs.filter((job) => !selectedIds.has(String(job.id)));
+      setJobs(remainingJobs);
       setSavedPlans((current) => current.filter((savedPlan) => !selectedIds.has(String(savedPlan.job_post_id))));
       setSelectedJobIds([]);
       setConfirmBulkDeleteJobs(false);
       removeCalendarEventsForJobs(selectedJobIds, recoverableJobs.map((job) => job.title));
-      if (selectedIds.has(String(plan?.job_post_id))) setPlan(null);
+      if (selectedIds.has(String(selectedJobId))) {
+        const nextJob = remainingJobs[0] || null;
+        updateSelectedJobId(nextJob?.id || "");
+        saveLocalValue("interviewprep_active_job_id", nextJob?.id || "");
+        setPlan(null);
+        setReadinessReport(null);
+        if (nextJob) await useSavedJob(nextJob, { navigate: false });
+      }
       addActivity({ type: "job", title: "Bulk moved jobs to bin", detail: `${deletedCount} jobs archived`, badge: String(deletedCount), target: "jobs" });
       setStatus(`${deletedCount} Jobs Moved To Bin`);
     } catch (error) {
@@ -1080,7 +1255,8 @@ function App() {
     saveLocalList("interviewprep_deleted_jobs", nextDeletedJobs);
   }
 
-  async function useSavedJob(job) {
+  async function useSavedJob(job, options = {}) {
+    const { navigate = true } = options;
     setLoading(true);
     setStatus("Loading Job");
     try {
@@ -1099,7 +1275,8 @@ function App() {
       setJobDescription(detail.description || "");
       setSourceUrl(detail.source_url || "");
       setMode(detail.source_url ? "url" : "paste");
-      setSelectedJobId(detail.id);
+      updateSelectedJobId(detail.id);
+      saveLocalValue("interviewprep_active_job_id", detail.id);
       if (detail.interview_at) setInterviewDate(toLocalDateTimeInput(detail.interview_at));
       if (detail.hours_per_day) setHoursPerDay(detail.hours_per_day);
       if (matchingPlan) {
@@ -1108,9 +1285,13 @@ function App() {
           const planDetail = await planResponse.json();
           setPlan({ ...planDetail, job_color: colorForJobId(planDetail.job_post_id, jobMarkers, planDetail.job_title) });
           setSelectedPlanDay(1);
+          await refreshReadiness(authToken, planDetail.prep_plan_id);
         }
+      } else {
+        setPlan(null);
+        setReadinessReport(null);
       }
-      setActiveView("dashboard");
+      if (navigate) setActiveView("dashboard");
       setStatus(matchingPlan ? "Job and Prep Plan Loaded" : "Job Loaded Into Prep Form");
     } catch (error) {
       setStatus(`Error: ${error.message}`);
@@ -1291,10 +1472,11 @@ function App() {
       if (!response.ok) throw new Error(await readApiError(response, "Prep plan"));
       const detail = await response.json();
       setPlan({ ...detail, job_color: colorForJobId(detail.job_post_id, jobMarkers, detail.job_title) });
-      setSelectedJobId(detail.job_post_id || "");
+      updateSelectedJobId(detail.job_post_id || "");
+      saveLocalValue("interviewprep_active_job_id", detail.job_post_id || "");
       setSelectedPlanDay(1);
       setStatus("Prep Plan Loaded");
-      await refreshReadiness();
+      await refreshReadiness(authToken, detail.prep_plan_id);
     } catch (error) {
       setStatus(`Error: ${error.message}`);
     } finally {
@@ -1308,7 +1490,10 @@ function App() {
     try {
       const response = await apiFetch(`/prep-plans/${prepPlanId}`, { method: "DELETE" });
       if (!response.ok) throw new Error(`API returned ${response.status}`);
-      if (plan?.prep_plan_id === prepPlanId) setPlan(null);
+      if (plan?.prep_plan_id === prepPlanId) {
+        setPlan(null);
+        setReadinessReport(null);
+      }
       await refreshSavedPlans();
       setStatus("Plan Removed");
     } catch (error) {
@@ -1368,13 +1553,13 @@ function App() {
       setExamAttempts(nextAttempts);
       saveLocalList("interviewprep_exam_attempts", nextAttempts);
       setExam(generatedExam);
-      addGeneratedCalendarEvent(`Exam: ${sourcePlan.job_title}`, "exam", colorForPlan(sourcePlan, jobMarkers), day, sourcePlan);
+      addGeneratedCalendarEvent(`Exam: ${sourcePlan.job_title}`, "exam", colorForPlan(sourcePlan, jobMarkers), day, sourcePlan, { resourceType: "exam", resourceId: generatedExam.id });
       setExamAnswers({});
       setExamResult(null);
       playGeneratedSound(soundVolume);
       setStatus("Exam Ready");
       markStudyActivity("exam-generated");
-      addActivity({ type: "exam", title: "Exam generated", detail: generatedExam.title, badge: `${generatedExam.questions.length} Qs`, target: "exams" });
+      addActivity({ type: "exam", title: "Exam generated", detail: generatedExam.title, badge: `${generatedExam.questions.length} Qs`, target: "exams", prepPlanId: sourcePlan.prep_plan_id, jobPostId: sourcePlan.job_post_id });
       setActiveView("exams");
     } catch (error) {
       setStatus(`Error: ${error.message}`);
@@ -1409,7 +1594,7 @@ function App() {
     const nextAttempts = [attempt, ...mockAttempts];
     setMockAttempts(nextAttempts);
     saveLocalList("interviewprep_mock_attempts", nextAttempts);
-    addActivity({ type: "mock", title: "Mock interview set up", detail: `${sourcePlan.job_title} • ${attempt.difficulty}`, badge: `${attempt.questionCount} Qs`, target: "exams" });
+    addActivity({ type: "mock", title: "Mock interview set up", detail: `${sourcePlan.job_title} • ${attempt.difficulty}`, badge: `${attempt.questionCount} Qs`, target: "exams", prepPlanId: sourcePlan.prep_plan_id, jobPostId: sourcePlan.job_post_id });
     setStatus("Mock Interview Ready");
     setActiveView("exams");
   }
@@ -1480,17 +1665,41 @@ function App() {
     });
   }
 
-  function deleteAttempt(kind, id) {
-    if (kind === "exam") {
-      const next = examAttempts.filter((attempt) => attempt.id !== id);
-      setExamAttempts(next);
-      saveLocalList("interviewprep_exam_attempts", next);
-    } else {
-      const next = mockAttempts.filter((attempt) => attempt.id !== id);
-      setMockAttempts(next);
-      saveLocalList("interviewprep_mock_attempts", next);
+  async function deleteAttempt(kind, id) {
+    const source = kind === "exam" ? examAttempts : mockAttempts;
+    const attempt = source.find((item) => item.id === id);
+    const backendId = kind === "exam" ? attempt?.exam?.id : attempt?.interview?.id;
+    setLoading(true);
+    setStatus(`Deleting ${kind === "exam" ? "Exam" : "Mock Interview"}`);
+    try {
+      if (backendId) {
+        const path = kind === "exam" ? `/exams/${backendId}` : `/mock-interviews/${backendId}`;
+        const response = await apiFetch(path, { method: "DELETE" });
+        if (!response.ok && response.status !== 404) throw new Error(await readApiError(response, "Attempt delete"));
+      }
+      const next = source.filter((item) => item.id !== id);
+      if (kind === "exam") {
+        setExamAttempts(next);
+        saveLocalList("interviewprep_exam_attempts", next);
+      } else {
+        setMockAttempts(next);
+        saveLocalList("interviewprep_mock_attempts", next);
+      }
+      if (backendId) {
+        setCalendarEvents((current) => {
+          const remaining = current.filter((event) => !(event.resourceType === kind && String(event.resourceId) === String(backendId)));
+          saveLocalList("interviewprep_calendar_events", remaining);
+          return remaining;
+        });
+      }
+      setConfirmDeleteAttempt(null);
+      await refreshReadiness(authToken, attempt?.prepPlanId || plan?.prep_plan_id);
+      setStatus("Attempt Deleted");
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
-    setConfirmDeleteAttempt(null);
   }
 
   function moveExamQuestion(offset) {
@@ -1538,7 +1747,7 @@ function App() {
       setActiveView("exams");
       setStatus("Exam Scored");
       markStudyActivity("exam-submitted");
-      addActivity({ type: "exam", title: "Exam submitted", detail: activeExam.title, badge: `${Math.round(result.average_score * 100)}%`, target: "exams" });
+      addActivity({ type: "exam", title: "Exam submitted", detail: activeExam.title, badge: `${Math.round(result.average_score * 100)}%`, target: "exams", prepPlanId: plan?.prep_plan_id, jobPostId: plan?.job_post_id });
     } catch (error) {
       setStatus(`Error: ${error.message}`);
     } finally {
@@ -1565,9 +1774,14 @@ function App() {
         }),
       });
       if (!response.ok) throw new Error(`API returned ${response.status}`);
-      const interview = await response.json();
+      let interview = await response.json();
+      if (options.forceComplete && interview.status !== "complete") {
+        const completeResponse = await apiFetch(`/mock-interviews/${activeInterview.id}/complete`, { method: "POST" });
+        if (!completeResponse.ok) throw new Error(`API returned ${completeResponse.status}`);
+        interview = await completeResponse.json();
+      }
       setMockInterview(interview);
-      addGeneratedCalendarEvent(`Mock interview: ${plan.job_title}`, "mock", colorForPlan(plan, jobMarkers), options.day || selectedPlanDay);
+      addGeneratedCalendarEvent(`Mock interview: ${plan.job_title}`, "mock", colorForPlan(plan, jobMarkers), options.day || selectedPlanDay, plan, { resourceType: "mock", resourceId: interview.id });
       setStatus("Mock Interview Started");
       markStudyActivity("mock-started");
       addActivity({ type: "mock", title: "Mock interview started", detail: plan?.job_title || "Interview practice", badge: "", target: "exams" });
@@ -1644,12 +1858,21 @@ function App() {
       await submitMockSessionAnswer(answer, { forceComplete: true });
       return;
     }
-    const interview = {
-      ...mockSession.interview,
-      status: "complete",
-      average_score: mockSession.interview.average_score ?? 0,
-      questionTypes: mockSession.questionTypes || [],
-    };
+    setLoading(true);
+    setStatus("Ending Mock Interview");
+    let interview;
+    try {
+      const response = await apiFetch(`/mock-interviews/${mockSession.interview.id}/complete`, { method: "POST" });
+      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      interview = {
+        ...await response.json(),
+        questionTypes: mockSession.questionTypes || [],
+      };
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+      setLoading(false);
+      return;
+    }
     setMockAttempts((current) => {
       const next = current.map((attempt) => attempt.id === mockSession.attemptId ? {
         ...attempt,
@@ -1666,6 +1889,7 @@ function App() {
     setActiveView("exams");
     addActivity({ type: "mock", title: "Mock interview submitted early", detail: interview.current_topic || "Interview practice", badge: `${Math.round((interview.average_score || 0) * 100)}%`, target: "exams" });
     setStatus("Mock Interview Ended");
+    setLoading(false);
   }
 
   async function submitMockAnswer(event) {
@@ -1709,6 +1933,8 @@ function App() {
       time: "now",
       badge: "",
       target: targetForActivity(item.type),
+      prepPlanId: item.prepPlanId ?? plan?.prep_plan_id,
+      jobPostId: item.jobPostId ?? plan?.job_post_id ?? selectedJobId,
       ...item,
     };
     setRecentActivity((current) => {
@@ -1720,18 +1946,19 @@ function App() {
 
   function toggleTaskDone(task) {
     const today = dateKey(new Date());
-    const taskKey = `${today}:task:${task.id || task.title}`;
+    const taskPlan = { prep_plan_id: task.planId || plan?.prep_plan_id || plan?.id };
+    const taskKey = taskCompletionKey(taskPlan, task, today);
     const wasDone = isTaskComplete(task, completedTasks);
     setCompletedTasks((current) => {
       const next = { ...current };
       if (wasDone) {
-        const suffix = `:task:${task.id || task.title}`;
+        const suffix = `:plan:${taskPlan.prep_plan_id || "unscoped"}:task:${task.serverTaskId || task.id || task.title}`;
         Object.keys(next).filter((key) => key.endsWith(suffix)).forEach((key) => delete next[key]);
       } else next[taskKey] = today;
       saveCompletedTasks(next);
       return next;
     });
-    if (!wasDone) addActivity({ type: "practice", title: "Task completed", detail: task.title, badge: "done", target: task.task_type === "practice_exam" ? "exams" : "prep" });
+    if (!wasDone) addActivity({ type: "practice", title: "Task completed", detail: task.title, badge: "done", target: task.task_type === "practice_exam" ? "exams" : "prep", prepPlanId: task.planId || plan?.prep_plan_id, jobPostId: plan?.job_post_id });
     if (task.serverTaskId) {
       apiFetch(`/prep-plans/tasks/${task.serverTaskId}`, {
         method: "PATCH",
@@ -1827,6 +2054,8 @@ function App() {
           [cacheKey]: {
             content,
             taskTitle: task.title,
+            planId: String(plan?.prep_plan_id || plan?.id || ""),
+            jobPostId: plan?.job_post_id,
             updatedAt: new Date().toISOString(),
           },
         };
@@ -1871,7 +2100,8 @@ function App() {
 
   function finishNoteTask(task) {
     const today = dateKey(new Date());
-    const taskKey = `${today}:task:${task.id || task.title}`;
+    const taskPlan = { prep_plan_id: task.planId || plan?.prep_plan_id || plan?.id };
+    const taskKey = taskCompletionKey(taskPlan, task, today);
     if (!completedTasks[taskKey]) {
       setCompletedTasks((current) => {
         const next = { ...current, [taskKey]: today };
@@ -2150,7 +2380,10 @@ function App() {
   function addCalendarEvent(event) {
     event.preventDefault();
     if (!eventDraft.title.trim()) return;
-    const nextEvent = { ...eventDraft, id: crypto.randomUUID(), source: "user" };
+    const nextEvent = normalizeCalendarEvent(
+      { ...eventDraft, id: crypto.randomUUID(), source: "user" },
+      { jobPostId: plan?.job_post_id || selectedJobId, prepPlanId: plan?.prep_plan_id },
+    );
     const nextEvents = [nextEvent, ...calendarEvents];
     setCalendarEvents(nextEvents);
     saveLocalList("interviewprep_calendar_events", nextEvents);
@@ -2158,10 +2391,9 @@ function App() {
     setStatus("Calendar Event Added");
   }
 
-  function addGeneratedCalendarEvent(title, type, color, day = 1, eventPlan = plan) {
-    const date = new Date();
-    date.setDate(date.getDate() + Math.max(0, day - 1));
-    const nextEvent = {
+  function addGeneratedCalendarEvent(title, type, color, day = 1, eventPlan = plan, resource = {}) {
+    const date = prepDateForPlanDay(eventPlan, day);
+    const nextEvent = normalizeCalendarEvent({
       id: crypto.randomUUID(),
       source: "user",
       title,
@@ -2169,9 +2401,8 @@ function App() {
       color,
       date: dateKey(date),
       link: "",
-      jobPostId: eventPlan?.job_post_id,
-      prepPlanId: eventPlan?.prep_plan_id,
-    };
+      ...resource,
+    }, { jobPostId: eventPlan?.job_post_id, prepPlanId: eventPlan?.prep_plan_id });
     setCalendarEvents((current) => {
       const nextEvents = [nextEvent, ...current];
       saveLocalList("interviewprep_calendar_events", nextEvents);
@@ -2295,8 +2526,6 @@ function App() {
       setAuthOtpCode("");
       reloadLocalWorkspaceState();
       setStatus(authMode === "register" ? "Account Created" : "Logged In");
-      refreshJobs(jobMarkers, archivedJobIds, body.access_token);
-      refreshSavedPlans(archivedJobIds, body.access_token);
     } catch (error) {
       setAuthMessageTone("error");
       setAuthMessage(error.message);
@@ -2353,11 +2582,18 @@ function App() {
     "Starting Mock Interview",
   ].includes(status);
 
-  function openActivity(item) {
+  async function openActivity(item) {
+    if (item.jobPostId && String(item.jobPostId) !== String(selectedJobId)) {
+      const activityJob = jobs.find((job) => String(job.id) === String(item.jobPostId));
+      if (activityJob) await useSavedJob(activityJob, { navigate: false });
+    }
     setActiveView(item.target || targetForActivity(item.type));
   }
 
-  const selectedContextJob = jobs.find((job) => String(job.id) === String(plan?.job_post_id || selectedJobId)) || jobs[0] || null;
+  const selectedContextJob = resolveActiveJob(jobs, selectedJobId, plan);
+  const selectedActivity = plan
+    ? activity.filter((item) => activityBelongsToPlan(item, plan))
+    : activity.filter((item) => !item.jobPostId || String(item.jobPostId) === String(selectedJobId));
 
   return (
     <div className={authToken ? `guided-shell theme-${theme}` : "marketing-host"}>
@@ -2408,7 +2644,7 @@ function App() {
             selectedJob={selectedContextJob}
             visibleTasks={visibleTasks}
             completedTasks={completedTasks}
-            activity={activity}
+            activity={selectedActivity}
             readiness={readinessReport}
             streak={streak}
             examAttempts={examAttempts}
@@ -2436,7 +2672,8 @@ function App() {
           <div data-tour-page="jobs">
           <JobsView
             jobs={jobs}
-            onSelectJob={useSavedJob}
+            activeJobId={selectedJobId}
+            onSelectJob={(job) => useSavedJob(job, { navigate: false })}
             onLoadJobDetail={loadSavedJobDetail}
             onLoadJobAnalysis={loadSavedJobAnalysis}
             onAskJobAnalysisQuestion={askSavedJobAnalysisQuestion}
@@ -2559,6 +2796,30 @@ function App() {
           </div>
         )}
 
+        {activeView === "data" && (
+          <div data-tour-page="data">
+          <InterviewDataView
+            jobs={jobs}
+            savedPlans={savedPlans}
+            plan={plan}
+            completedTasks={completedTasks}
+            examAttempts={examAttempts}
+            mockAttempts={mockAttempts}
+            notes={notes}
+            generatedStudyNotes={generatedStudyNotes}
+            calendarEvents={calendarEvents}
+            recentActivity={selectedActivity}
+            apiFetch={apiFetch}
+            onOpenPlan={async (prepPlanId) => {
+              await loadPrepPlan(prepPlanId);
+              setActiveView("prep");
+            }}
+            onOpenExams={() => setActiveView("exams")}
+            onOpenNotes={() => setActiveView("notes")}
+          />
+          </div>
+        )}
+
         {activeView === "progress" && (
           <div data-tour-page="progress">
           <ProgressView
@@ -2570,6 +2831,7 @@ function App() {
             savedPlans={savedPlans}
             jobs={jobs}
             apiFetch={apiFetch}
+            readiness={readinessReport}
             onOpenPlan={async (prepPlanId) => {
               await loadPrepPlan(prepPlanId);
               setActiveView("prep");
@@ -2596,6 +2858,7 @@ function App() {
             calendarEvents={calendarEvents}
             recentActivity={activity}
             apiFetch={apiFetch}
+            readiness={readinessReport}
             onOpenPlan={async (prepPlanId) => {
               await loadPrepPlan(prepPlanId);
               setActiveView("prep");
@@ -3132,6 +3395,7 @@ function GuidedTopNavigation({ activeView, generationInProgress, onNavigate, use
               <div className="guided-profile-status"><StatusIndicator status={status} /><span>{user?.email}</span></div>
               <button onClick={() => onNavigate("progress")}><Target size={18} />Readiness</button>
               <button onClick={() => onNavigate("calendar")}><CalendarDays size={18} />Full schedule</button>
+              <button onClick={() => onNavigate("data")}><Database size={18} />Interview data</button>
               <button data-settings-toggle="true" data-tour="settings-button" onClick={onOpenSettings}><Settings size={18} />Settings</button>
               <button onClick={() => onNavigate("about")}><Info size={18} />About PrepInterview AI</button>
               {isAdmin && <button onClick={() => onNavigate("developer")}><ShieldCheck size={18} />Admin tools <small>Admin</small></button>}
@@ -3440,14 +3704,17 @@ function GuidedAddJobModal({ mode, setMode, jobTitle, setJobTitle, company, setC
     <div className="modal-backdrop guided-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="guided-add-job-title" onMouseDown={onClose}>
       <form className="guided-job-modal" onSubmit={onGenerate} onMouseDown={(event) => event.stopPropagation()}>
         <header><div><h2 id="guided-add-job-title">Add a job</h2><p>Start with the role you want. Every preparation step will stay connected to it.</p></div><button type="button" className="icon-button" onClick={onClose}><X size={20} /></button></header>
-        <div className="guided-method-tabs">
-          <button type="button" className={mode === "url" ? "active" : ""} onClick={() => setMode("url")}><Link size={20} /><span><strong>Job URL</strong><small>Paste a listing link</small></span></button>
-          <button type="button" className={mode === "paste" ? "active" : ""} onClick={() => setMode("paste")}><ClipboardList size={20} /><span><strong>Description</strong><small>Paste the full posting</small></span></button>
-          <button type="button" className={mode === "extension" ? "active" : ""} onClick={() => setMode("extension")}><Sparkles size={20} /><span><strong>Browser capture</strong><small>Use the Chrome bubble</small></span></button>
-        </div>
+        <section className="guided-job-capture-panel" aria-label="Job source">
+          <header><div><span>Job source</span><h3>How do you want to add this role?</h3></div><small>Use the source you already have.</small></header>
+          <div className="guided-method-tabs guided-job-capture-methods" role="tablist" aria-label="Job source method">
+            <button type="button" role="tab" aria-selected={mode === "url"} className={mode === "url" ? "active" : ""} onClick={() => setMode("url")}><Link size={18} /><span><strong>Job URL</strong><small>Paste a listing link</small></span></button>
+            <button type="button" role="tab" aria-selected={mode === "paste"} className={mode === "paste" ? "active" : ""} onClick={() => setMode("paste")}><ClipboardList size={18} /><span><strong>Description</strong><small>Paste the full posting</small></span></button>
+            <button type="button" role="tab" aria-selected={mode === "extension"} className={mode === "extension" ? "active" : ""} onClick={() => setMode("extension")}><Sparkles size={18} /><span><strong>Browser capture</strong><small>Use the Chrome bubble</small></span></button>
+          </div>
+        </section>
 
         {mode === "extension" ? (
-          <section className="guided-extension-help"><Sparkles size={32} /><h3>Capture a job while you browse</h3><p>Use the PrepInterview AI bubble on LinkedIn, Handshake, or a company careers page. The captured job will appear in this account.</p><button type="button" className="outline-action" onClick={onExtension}>Install or connect extension <ExternalLink size={15} /></button></section>
+          <section className="guided-extension-help"><header><Sparkles size={20} /><div><span>Browser capture</span><h3>Capture a job while you browse</h3></div></header><p>Use the PrepInterview AI bubble on LinkedIn, Handshake, or a company careers page. The captured job will appear in this account.</p><button type="button" className="outline-action" onClick={onExtension}>Install or connect extension <ExternalLink size={15} /></button></section>
         ) : (
           <div className="guided-job-form">
             {mode === "url" ? <label><span className="guided-required-label">Job URL <sup>*</sup></span><input autoFocus value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://company.com/jobs/..." required /></label> : <label><span className="guided-required-label">Job description <sup>*</sup></span><textarea autoFocus value={jobDescription} onChange={(event) => setJobDescription(event.target.value)} maxLength={8000} placeholder="Paste the full job description here..." required /><small>{jobDescription.length} / 8000</small></label>}
@@ -4426,6 +4693,7 @@ function fallbackInterviewSignals(roleTitle) {
 
 function JobsView({
   jobs,
+  activeJobId,
   onSelectJob,
   onLoadJobDetail,
   onLoadJobAnalysis,
@@ -4449,7 +4717,6 @@ function JobsView({
   mockAttempts,
 }) {
   const [searchText, setSearchText] = useState("");
-  const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || null);
   const [activeTab, setActiveTab] = useState("analysis");
   const [deleteMode, setDeleteMode] = useState(false);
   const [deleteRequested, setDeleteRequested] = useState(false);
@@ -4469,7 +4736,7 @@ function JobsView({
   const [askingAnalysisQuestion, setAskingAnalysisQuestion] = useState(false);
 
   const filteredJobs = jobs.filter((job) => `${job.title} ${job.company || ""} ${job.description_preview || ""}`.toLowerCase().includes(searchText.trim().toLowerCase()));
-  const selectedJob = jobs.find((job) => String(job.id) === String(selectedJobId)) || jobs[0] || null;
+  const selectedJob = jobs.find((job) => String(job.id) === String(activeJobId)) || jobs[0] || null;
   const selectedDetail = selectedJob ? jobDetails[String(selectedJob.id)] || selectedJob : null;
   const matchingPlan = selectedJob ? savedPlans.find((savedPlan) => String(savedPlan.job_post_id) === String(selectedJob.id)) : null;
   const selectedPlanIsLoaded = matchingPlan && String(plan?.job_post_id) === String(selectedJob?.id);
@@ -4496,12 +4763,8 @@ function JobsView({
   const descriptionSummary = summarizeSavedJobDescription(selectedJob, descriptionText, requiredSkills, interviewFocus);
 
   useEffect(() => {
-    if (!jobs.length) {
-      setSelectedJobId(null);
-      return;
-    }
-    if (!jobs.some((job) => String(job.id) === String(selectedJobId))) setSelectedJobId(jobs[0].id);
-  }, [jobs, selectedJobId]);
+    if (jobs.length && !jobs.some((job) => String(job.id) === String(activeJobId))) onSelectJob(jobs[0]);
+  }, [jobs, activeJobId]);
 
   useEffect(() => {
     if (!selectedJob || jobDetails[String(selectedJob.id)]) return undefined;
@@ -4558,7 +4821,7 @@ function JobsView({
       toggleJobSelection(job.id);
       return;
     }
-    setSelectedJobId(job.id);
+    onSelectJob(job);
     setActiveTab("analysis");
     setAnalysisError("");
     onToggleMenu(null);
@@ -5011,7 +5274,8 @@ function PrepPlanView({ plan, selectedPlanDay, setSelectedPlanDay, completedTask
               <button
                 type="button"
                 key={item.day}
-                className={`guided-plan-date ${item.day === activeDay ? "selected" : ""} ${complete ? "complete" : ""}`}
+                className={`guided-plan-date ${!viewingInterviewDay && item.day === activeDay ? "selected" : ""} ${complete ? "complete" : ""}`}
+                aria-pressed={!viewingInterviewDay && item.day === activeDay}
                 onClick={() => {
                   setViewingInterviewDay(false);
                   setSelectedPlanDay(item.day);
@@ -5239,19 +5503,6 @@ function ExamsView({ plan, examAttempts, mockAttempts, examSettings, setExamSett
   ];
   const readyAttempts = attempts.filter((attempt) => attempt.status !== "complete");
   const completedAttempts = attempts.filter((attempt) => attempt.status === "complete");
-  const completedExamAttempts = completedAttempts.filter((attempt) => attempt.kind === "exam");
-  const completedMockAttempts = completedAttempts.filter((attempt) => attempt.kind === "mock");
-  const scorePercentage = (attempt) => {
-    const rawScore = Number(attempt.review?.average_score ?? attempt.interview?.average_score ?? attempt.interview?.overall_score);
-    if (!Number.isFinite(rawScore)) return null;
-    return Math.max(0, Math.min(100, Math.round(rawScore <= 1 ? rawScore * 100 : rawScore)));
-  };
-  const averageScore = (collection) => {
-    const scores = collection.map(scorePercentage).filter((score) => score !== null);
-    return scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : null;
-  };
-  const examAverage = averageScore(completedExamAttempts);
-  const mockAverage = averageScore(completedMockAttempts);
 
   function chooseExamDifficulty(difficulty) {
     setExamSettings(settingsForDifficulty(difficulty));
@@ -5380,12 +5631,6 @@ function ExamsView({ plan, examAttempts, mockAttempts, examSettings, setExamSett
             <h3>For {plan.job_title}</h3>
             <p>Only exams and mock interviews made for this role appear here.</p>
           </div>
-          <div className="practice-attempts-metrics" aria-label="Attempt summary">
-            <span className="attempt-count">{attempts.length} total</span>
-            <span className="attempt-count attempt-count-complete">{completedAttempts.length} completed</span>
-            {examAverage !== null && <span className="attempt-count attempt-count-score">Exams {examAverage}%</span>}
-            {mockAverage !== null && <span className="attempt-count attempt-count-score">Mocks {mockAverage}%</span>}
-          </div>
         </div>
         {!attempts.length ? <div className="practice-empty-list">Create a practice exam or mock interview to begin.</div> : <>
           {readyAttempts.length > 0 && <div className="practice-attempt-group"><h4>Ready to start</h4>{readyAttempts.map((attempt) => <PracticeAttemptRow key={`${attempt.kind}-${attempt.id}`} attempt={attempt} onStart={attempt.kind === "exam" ? startExamAttempt : startMockAttempt} onReview={attempt.kind === "exam" ? openExamReview : openMockReview} onDelete={requestDeleteAttempt} loading={loading} />)}</div>}
@@ -5400,6 +5645,7 @@ function PracticeAttemptRow({ attempt, onStart, onReview, onDelete, loading }) {
   const Icon = attempt.kind === "exam" ? FileQuestion : MessageSquareText;
   const questionCount = attempt.kind === "exam" ? (attempt.exam?.questions?.length || 0) : (attempt.questionCount || 0);
   const isComplete = attempt.status === "complete";
+  const score = attemptScorePercent(attempt);
   const canReview = attempt.kind === "exam" ? Boolean(attempt.review) : Boolean(attempt.interview);
   const title = attempt.kind === "exam" ? (attempt.exam?.title || "Practice exam") : "Mock interview";
   const scopeLabel = attempt.scopeLabel || (attempt.kind === "exam" ? examScopeLabel(attempt.scope, attempt.day) : mockScopeLabel(attempt.scope, attempt.day));
@@ -5410,11 +5656,20 @@ function PracticeAttemptRow({ attempt, onStart, onReview, onDelete, loading }) {
         <strong>{title}</strong>
         <span>{scopeLabel} · {capitalize(attempt.difficulty || "medium")} · {questionCount} questions</span>
       </div>
-      <span className={`attempt-status ${isComplete ? "complete" : "ready"}`}>{isComplete ? "Completed" : attempt.status === "active" ? "In progress" : "Ready"}</span>
+      <div className="practice-attempt-meta">
+        <span className={`attempt-status ${isComplete ? "complete" : "ready"}`}>{isComplete ? "Completed" : attempt.status === "active" ? "In progress" : "Ready"}</span>
+        {isComplete && score !== null && <strong className="attempt-score">Score {score}%</strong>}
+      </div>
       {isComplete ? <button type="button" className="outline-action compact-action" disabled={!canReview} onClick={() => onReview(attempt)}><BookOpen size={16} />Review</button> : <button type="button" className="primary-action compact-action" disabled={loading} onClick={() => onStart(attempt)}>{attempt.status === "active" ? "Resume" : "Start"}</button>}
       <button type="button" className="icon-button compact-icon-button" aria-label={`Delete ${title}`} onClick={() => onDelete({ kind: attempt.kind, id: attempt.id })}><Trash2 size={17} /></button>
     </article>
   );
+}
+
+function attemptScorePercent(attempt) {
+  const rawScore = Number(attempt?.score ?? attempt?.review?.average_score ?? attempt?.interview?.average_score ?? attempt?.interview?.overall_score);
+  if (!Number.isFinite(rawScore)) return null;
+  return Math.max(0, Math.min(100, Math.round(rawScore <= 1 ? rawScore * 100 : rawScore)));
 }
 
 function LegacyExamsView({ plan, savedPlans, planSearch, setPlanSearch, loadPrepPlan, examAttempts, mockAttempts, examSettings, setExamSettings, selectedPlanDay, examResult, generateExam, scheduleMockInterviewAttempt, startExamAttempt, startMockAttempt, openExamReview, openMockReview, requestDeleteAttempt, loading, jobMarkers }) {
@@ -6331,10 +6586,12 @@ function AnalyticsView({
   calendarEvents,
   recentActivity,
   apiFetch,
+  readiness,
   onOpenPlan,
   onOpenProgress,
 }) {
   const detailedPlans = useSavedPlanDetails(savedPlans, plan, apiFetch);
+  const readinessReports = usePlanReadinessReports(savedPlans, readiness, apiFetch);
   const [selectedPlanId, setSelectedPlanId] = useState("all");
   const selectedPlan = selectedPlanId === "all"
     ? null
@@ -6345,18 +6602,8 @@ function AnalyticsView({
   const reviewQueue = buildReviewQueue(scoped.completeExams, scoped.completeMocks);
   const planComparisons = detailedPlans.map((item) => buildAnalyticsPlanSummary(item, completedTasks, examAttempts, mockAttempts));
   const readinessReport = selectedPlan
-    ? buildReadinessReport({
-        plan: selectedPlan,
-        planProgress: scoped.planProgress,
-        noteTasks: scoped.noteTasks,
-        completedNotes: scoped.completedNotes,
-        selectedCompleteExams: scoped.completeExams,
-        selectedCompleteMocks: scoped.completeMocks,
-        selectedExamAttempts: scoped.examAttempts,
-        selectedMockAttempts: scoped.mockAttempts,
-        reviewQueue,
-      })
-    : buildOverallReadiness({ planComparisons, scoped, reviewQueue });
+    ? readinessReports[String(selectedPlan.prep_plan_id || selectedPlan.id)] || emptyReadinessReport()
+    : combineReadinessReports(Object.values(readinessReports));
   const nextInsight = buildAnalyticsInsight({ selectedPlan, scoped, topicInsights, reviewQueue, readinessScore: readinessReport.score });
 
   return (
@@ -6889,7 +7136,41 @@ function useSavedPlanDetails(savedPlans, activePlan, apiFetch) {
   });
 }
 
-function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recentActivity, savedPlans, jobs, apiFetch, onOpenPlan }) {
+function usePlanReadinessReports(savedPlans, activeReadiness, apiFetch) {
+  const active = normalizeReadinessReport(activeReadiness);
+  const [reports, setReports] = useState(() => active?.prep_plan_id ? { [String(active.prep_plan_id)]: active } : {});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchReports() {
+      if (!apiFetch || !savedPlans.length) {
+        if (!cancelled) setReports(active?.prep_plan_id ? { [String(active.prep_plan_id)]: active } : {});
+        return;
+      }
+      const entries = await Promise.all(savedPlans.map(async (savedPlan) => {
+        if (active?.prep_plan_id && String(active.prep_plan_id) === String(savedPlan.id)) {
+          return [String(savedPlan.id), active];
+        }
+        try {
+          const response = await apiFetch(`/workspace/readiness?prep_plan_id=${savedPlan.id}`);
+          if (!response.ok) return null;
+          return [String(savedPlan.id), normalizeReadinessReport(await response.json())];
+        } catch {
+          return null;
+        }
+      }));
+      if (!cancelled) setReports(Object.fromEntries(entries.filter(Boolean)));
+    }
+    fetchReports();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlans.map((item) => item.id).join("|"), active?.prep_plan_id, active?.score]);
+
+  return reports;
+}
+
+function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recentActivity, savedPlans, jobs, apiFetch, readiness, onOpenPlan }) {
   const [openSections, setOpenSections] = useState({
     plan: true,
     allPlans: true,
@@ -6903,6 +7184,7 @@ function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recent
   });
   const [planDetails, setPlanDetails] = useState({});
   const [selectedProgressPlanId, setSelectedProgressPlanId] = useState(() => plan?.prep_plan_id || savedPlans[0]?.id || "");
+  const readinessReports = usePlanReadinessReports(savedPlans, readiness, apiFetch);
 
   useEffect(() => {
     let cancelled = false;
@@ -6961,18 +7243,9 @@ function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recent
   const mockInsights = buildMockSectionInsights(selectedCompleteMocks.length ? selectedCompleteMocks : completeMocks);
   const reviewQueue = buildReviewQueue(selectedCompleteExams.length ? selectedCompleteExams : completeExams, selectedCompleteMocks.length ? selectedCompleteMocks : completeMocks);
   const milestones = buildProgressMilestones({ plan: selectedPlan, completedCount, completeExams: selectedCompleteExams, completeMocks: selectedCompleteMocks, averageScore, completedPlanDays, planDays });
-  const readinessReport = buildReadinessReport({
-    plan: selectedPlan,
-    planProgress,
-    noteTasks,
-    completedNotes,
-    selectedCompleteExams,
-    selectedCompleteMocks,
-    selectedExamAttempts,
-    selectedMockAttempts,
-    reviewQueue,
-  });
+  const readinessReport = readinessReports[String(selectedPlan?.prep_plan_id || selectedPlan?.id)] || emptyReadinessReport();
   const readinessScore = readinessReport.score;
+  const selectedActivity = recentActivity.filter((item) => activityBelongsToPlan(item, selectedPlan));
   const nextAction = getProgressNextAction({ plan: selectedPlan, planDays, completedTasks, examAttempts: selectedExamAttempts, mockAttempts: selectedMockAttempts, reviewQueue });
   const planSummaries = allDetailedPlans.map((detail) => buildPlanProgressSummary(detail, completedTasks, examAttempts, mockAttempts));
 
@@ -7009,7 +7282,7 @@ function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recent
                 <span key={item.label}>{item.label}: <strong>{item.value}%</strong></span>
               ))}
             </div>
-            <small className="readiness-formula">Formula: Plan 20% + Notes 20% + Exams 25% + Mocks 20% + Review 15%</small>
+            <small className="readiness-formula">Formula: {readinessReport.formula || READINESS_FORMULA}</small>
           </div>
         </div>
       </section>
@@ -7154,7 +7427,7 @@ function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recent
 
         <ProgressSection title="Recent activity" subtitle="Meaningful actions from your preparation flow" icon={Activity} open={openSections.activity} onToggle={() => toggleSection("activity")}>
           <div className="progress-timeline">
-            {recentActivity.slice(0, 10).map((item, index) => (
+            {selectedActivity.slice(0, 10).map((item, index) => (
               <article key={`${item.title}-${index}`}>
                 <span className={`activity-icon ${item.type}`}><Activity size={15} /></span>
                 <div>
@@ -7305,7 +7578,8 @@ function buildInterviewDataRows({ jobs, savedPlans, detailedPlans, examAttempts,
     if (row) row.generatedNotes.push(note);
   });
   calendarEvents.forEach((event) => {
-    const row = rowList.find((item) => item.primaryPlanId && String(item.primaryPlanId) === String(event.planId));
+    const normalizedEvent = normalizeCalendarEvent(event);
+    const row = rowList.find((item) => item.primaryPlanId && String(item.primaryPlanId) === String(normalizedEvent.prepPlanId));
     if (row) row.calendarEvents.push(event);
   });
 
@@ -7384,7 +7658,10 @@ function buildAnalyticsScope({ selectedPlan, detailedPlans, completedTasks, exam
   }, 0);
   const totalDays = detailedSelectedPlans.reduce((sum, item) => sum + buildPlanMilestones(item, "").filter((day) => !day.isFinal).length, 0);
   const scopedPlanIds = new Set(selectedPlans.map((item) => String(item.prep_plan_id || item.id)));
-  const upcomingEvents = calendarEvents.filter((event) => !scopedPlanIds.size || scopedPlanIds.has(String(event.planId || ""))).sort((a, b) => String(a.date || a.start || "").localeCompare(String(b.date || b.start || "")));
+  const upcomingEvents = calendarEvents
+    .map((event) => normalizeCalendarEvent(event))
+    .filter((event) => !scopedPlanIds.size || [...scopedPlanIds].some((planId) => eventBelongsToPlan(event, planId)))
+    .sort((a, b) => String(a.date || a.start || "").localeCompare(String(b.date || b.start || "")));
   const savedGeneratedNotes = Object.values(generatedStudyNotes || {}).filter((note) => !scopedPlanIds.size || scopedPlanIds.has(String(note.planId)));
   return {
     examAttempts: scopedExamAttempts,
@@ -7400,7 +7677,7 @@ function buildAnalyticsScope({ selectedPlan, detailedPlans, completedTasks, exam
     notes: notes.filter((note) => !scopedPlanIds.size || scopedPlanIds.has(String(note.planId || ""))),
     generatedNotes: savedGeneratedNotes,
     upcomingEvents,
-    recentActivity,
+    recentActivity: selectedPlan ? recentActivity.filter((item) => activityBelongsToPlan(item, selectedPlan)) : recentActivity,
   };
 }
 
@@ -7439,22 +7716,6 @@ function buildScoreTrend(attempts) {
     .slice(-10);
 }
 
-function buildOverallReadiness({ planComparisons, scoped, reviewQueue }) {
-  const planScore = planComparisons.length ? Math.round(planComparisons.reduce((sum, item) => sum + item.progress, 0) / planComparisons.length) : 0;
-  const notesScore = scoped.noteTasks.length ? Math.round((scoped.completedNotes / scoped.noteTasks.length) * 100) : 0;
-  const examsScore = scoped.averageExamScore || 0;
-  const mocksScore = scoped.averageMockScore || 0;
-  const reviewScore = scoped.completeAttempts.length ? Math.max(0, Math.min(100, 100 - reviewQueue.length * 8)) : 20;
-  const components = [
-    { label: "Plan", value: planScore, weight: 0.2 },
-    { label: "Notes", value: notesScore, weight: 0.2 },
-    { label: "Exams", value: examsScore, weight: 0.25 },
-    { label: "Mocks", value: mocksScore, weight: 0.2 },
-    { label: "Review", value: reviewScore, weight: 0.15 },
-  ];
-  return { components, score: Math.round(components.reduce((sum, item) => sum + item.value * item.weight, 0)) };
-}
-
 function buildAnalyticsInsight({ selectedPlan, scoped, topicInsights, reviewQueue, readinessScore }) {
   if (!selectedPlan && !scoped.completeAttempts.length) return "Start by generating a plan, reading notes, and submitting a first practice exam so analytics can measure real progress.";
   if (reviewQueue.length) return `Review queue has ${reviewQueue.length} weak answer${reviewQueue.length === 1 ? "" : "s"}. Fixing those will raise readiness faster than creating more random practice.`;
@@ -7473,50 +7734,6 @@ function buildPrepFunnel({ jobs, detailedPlans, scoped, reviewQueue }) {
     { label: "Completed mocks", value: scoped.completeMocks.length },
     { label: "Review items", value: reviewQueue.length },
   ].map((item) => ({ ...item, percent: Math.max(6, Math.round((item.value / max) * 100)) }));
-}
-
-function buildReadinessReport({ plan, planProgress, noteTasks, completedNotes, selectedCompleteExams, selectedCompleteMocks, selectedExamAttempts, selectedMockAttempts, reviewQueue }) {
-  if (!plan) {
-    return {
-      score: 0,
-      components: [
-        { label: "Plan", value: 0 },
-        { label: "Notes", value: 0 },
-        { label: "Exams", value: 0 },
-        { label: "Mocks", value: 0 },
-        { label: "Review", value: 0 },
-      ],
-    };
-  }
-
-  const notesScore = noteTasks.length ? Math.round((completedNotes / noteTasks.length) * 100) : 0;
-  const examScores = selectedCompleteExams.map((attempt) => Number(attempt.score || 0)).filter(Number.isFinite);
-  const mockScores = selectedCompleteMocks.map((attempt) => Number(attempt.score || 0)).filter(Number.isFinite);
-  const examsScore = examScores.length
-    ? Math.round((examScores.reduce((sum, score) => sum + score, 0) / examScores.length) * 100)
-    : selectedExamAttempts.length
-      ? 25
-      : 0;
-  const mocksScore = mockScores.length
-    ? Math.round((mockScores.reduce((sum, score) => sum + score, 0) / mockScores.length) * 100)
-    : selectedMockAttempts.length
-      ? 25
-      : 0;
-  const attemptCount = selectedCompleteExams.length + selectedCompleteMocks.length;
-  const reviewScore = attemptCount
-    ? Math.max(0, Math.min(100, 100 - reviewQueue.length * 12))
-    : 20;
-  const components = [
-    { label: "Plan", value: Math.round(planProgress), weight: 0.2 },
-    { label: "Notes", value: notesScore, weight: 0.2 },
-    { label: "Exams", value: examsScore, weight: 0.25 },
-    { label: "Mocks", value: mocksScore, weight: 0.2 },
-    { label: "Review", value: reviewScore, weight: 0.15 },
-  ];
-  return {
-    score: Math.round(components.reduce((sum, item) => sum + item.value * item.weight, 0)),
-    components,
-  };
 }
 
 function readinessLabel(score) {
@@ -7646,9 +7863,7 @@ function buildPlanProgressSummary(plan, completedTasks, examAttempts, mockAttemp
 }
 
 function isTaskComplete(task, completedTasks) {
-  if (task?.status === "complete") return true;
-  const suffix = `:task:${task.id || task.title}`;
-  return Object.entries(completedTasks || {}).some(([key, value]) => key.endsWith(suffix) && Boolean(value));
+  return isTaskCompleteForPlan({ prep_plan_id: task?.planId }, task, completedTasks);
 }
 
 function isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId) {
@@ -7672,6 +7887,10 @@ function applyWorkspaceCollection(data, key, setter, persist) {
   if (!Object.prototype.hasOwnProperty.call(data, key)) return;
   setter(data[key]);
   persist(data[key]);
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function normalizeFutureInterviewDate(value) {
@@ -7719,17 +7938,17 @@ function SettingsView({
   function updateSoundVolume(value) {
     const nextVolume = Math.max(0, Math.min(100, Number(value)));
     setSoundVolume(nextVolume);
-    localStorage.setItem("interviewprep_sound_volume", String(nextVolume));
+    saveGlobalValue("interviewprep_sound_volume", String(nextVolume));
   }
 
   function updateTheme(nextTheme) {
     setTheme(nextTheme);
-    localStorage.setItem("interviewprep_theme", nextTheme);
+    saveGlobalValue("interviewprep_theme", nextTheme);
   }
 
   function updateFallbackPreference(nextValue) {
     setAllowLocalFallback(nextValue);
-    localStorage.setItem("interviewprep_allow_local_fallback", nextValue ? "true" : "false");
+    saveGlobalValue("interviewprep_allow_local_fallback", nextValue ? "true" : "false");
   }
 
   return (
@@ -8158,6 +8377,7 @@ function samplePlanDays() {
 }
 
 function buildDailyStudyTasks(plan, day) {
+  const planId = plan?.prep_plan_id || plan?.id || plan?.job_post_id || "unscoped";
   const planTasks = plan?.tasks?.filter((task) => displayPlanDay(plan, task.day) === Number(day)) || [];
   const studySources = planTasks
     .filter((task) => !["exam", "practice_exam", "mock_interview"].includes(task.task_type))
@@ -8171,8 +8391,9 @@ function buildDailyStudyTasks(plan, day) {
   const noteTasks = sources.map((source, index) => {
     const topics = source.topics?.length ? source.topics : [source.title];
     return {
-      id: `day-${day}-note-${index}-${topics.join("-")}`,
+      id: `plan-${planId}-day-${day}-note-${index}-${topics.join("-")}`,
       serverTaskId: source.id,
+      planId,
       day,
       title: `Read notes: ${source.title}`,
       topics,
@@ -8186,7 +8407,8 @@ function buildDailyStudyTasks(plan, day) {
   return [
     ...noteTasks,
     {
-      id: `day-${day}-practice-exam`,
+      id: `plan-${planId}-day-${day}-practice-exam`,
+      planId,
       day,
       title: `Practice exam for Day ${day}`,
       topics,
@@ -8733,16 +8955,32 @@ function loadSavedUser() {
 }
 
 function loadSavedToken() {
-  return localStorage.getItem("interviewprep_token") || "";
+  try {
+    return localStorage.getItem("interviewprep_token") || "";
+  } catch {
+    return "";
+  }
 }
 
 function saveUserSession(user, token) {
-  if (user && token) {
-    localStorage.setItem("interviewprep_user", JSON.stringify(user));
-    localStorage.setItem("interviewprep_token", token);
-  } else {
-    localStorage.removeItem("interviewprep_user");
-    localStorage.removeItem("interviewprep_token");
+  try {
+    if (user && token) {
+      localStorage.setItem("interviewprep_user", JSON.stringify(user));
+      localStorage.setItem("interviewprep_token", token);
+    } else {
+      localStorage.removeItem("interviewprep_user");
+      localStorage.removeItem("interviewprep_token");
+    }
+  } catch {
+    // The active React session can continue even if browser storage is unavailable.
+  }
+}
+
+function saveGlobalValue(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Preference changes remain active for the current browser session.
   }
 }
 
@@ -8769,7 +9007,11 @@ function loadLocalList(key) {
 function saveLocalList(key, value) {
   const storageKey = scopedStorageKey(key);
   if (!storageKey) return;
-  localStorage.setItem(storageKey, JSON.stringify(value));
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value));
+  } catch {
+    // The backend workspace remains the durable source if local storage is unavailable.
+  }
 }
 
 function onboardingStorageKey(userKey = "guest") {
@@ -8795,7 +9037,11 @@ function loadOnboardingState(userKey = "guest") {
 }
 
 function saveOnboardingState(userKey, state) {
-  localStorage.setItem(onboardingStorageKey(userKey), JSON.stringify({ version: ONBOARDING_VERSION, ...state }));
+  try {
+    localStorage.setItem(onboardingStorageKey(userKey), JSON.stringify({ version: ONBOARDING_VERSION, ...state }));
+  } catch {
+    // Onboarding can safely restart if local storage is unavailable.
+  }
 }
 
 function loadLocalMap(key) {
@@ -8811,19 +9057,48 @@ function loadLocalMap(key) {
 function saveLocalMap(key, value) {
   const storageKey = scopedStorageKey(key);
   if (!storageKey) return;
-  localStorage.setItem(storageKey, JSON.stringify(value));
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value));
+  } catch {
+    // The backend workspace remains the durable source if local storage is unavailable.
+  }
+}
+
+function loadLocalValue(key) {
+  const storageKey = scopedStorageKey(key);
+  if (!storageKey) return "";
+  try {
+    return localStorage.getItem(storageKey) || "";
+  } catch {
+    return "";
+  }
+}
+
+function saveLocalValue(key, value) {
+  const storageKey = scopedStorageKey(key);
+  if (!storageKey) return;
+  try {
+    if (value === undefined || value === null || value === "") localStorage.removeItem(storageKey);
+    else localStorage.setItem(storageKey, String(value));
+  } catch {
+    // The backend workspace remains the durable source if local storage is unavailable.
+  }
 }
 
 function saveCompletedTasks(tasks) {
   const key = scopedStorageKey("interviewprep_completed_tasks");
   if (!key) return;
-  localStorage.setItem(key, JSON.stringify(tasks));
+  try {
+    localStorage.setItem(key, JSON.stringify(tasks));
+  } catch {
+    // The backend workspace remains the durable source if local storage is unavailable.
+  }
 }
 
 function scopedStorageKey(key) {
-  const token = localStorage.getItem("interviewprep_token");
-  if (!token) return "";
   try {
+    const token = localStorage.getItem("interviewprep_token");
+    if (!token) return "";
     const user = JSON.parse(localStorage.getItem("interviewprep_user"));
     if (!user?.id && !user?.email) return "";
     const scope = String(user.id || user.email).replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -8834,17 +9109,29 @@ function scopedStorageKey(key) {
 }
 
 function loadSoundVolume() {
-  const saved = Number(localStorage.getItem("interviewprep_sound_volume"));
-  if (Number.isFinite(saved)) return Math.max(0, Math.min(100, saved));
+  try {
+    const saved = Number(localStorage.getItem("interviewprep_sound_volume"));
+    if (Number.isFinite(saved)) return Math.max(0, Math.min(100, saved));
+  } catch {
+    // Use the default below.
+  }
   return 40;
 }
 
 function loadTheme() {
-  return localStorage.getItem("interviewprep_theme") === "dark" ? "dark" : "light";
+  try {
+    return localStorage.getItem("interviewprep_theme") === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
 }
 
 function loadAllowLocalFallback() {
-  return localStorage.getItem("interviewprep_allow_local_fallback") === "true";
+  try {
+    return localStorage.getItem("interviewprep_allow_local_fallback") === "true";
+  } catch {
+    return false;
+  }
 }
 
 function isStrongPassword(password) {
@@ -9101,10 +9388,8 @@ function mergeCalendarEvents(events) {
 function planEventsForCalendar(plan, planColor = "#2563eb") {
   if (!plan?.tasks?.length) return [];
   const planId = plan.prep_plan_id || plan.id || plan.job_post_id || plan.job_title || "plan";
-  const today = new Date();
   const events = plan.tasks.map((task) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + task.day - 1);
+    const date = prepDateForPlanDay(plan, task.day);
     return {
       id: `plan-${planId}-task-${task.id || task.day || task.title}`,
       title: task.title,
@@ -9117,8 +9402,7 @@ function planEventsForCalendar(plan, planColor = "#2563eb") {
       planDetail: plan,
     };
   });
-  const interviewDate = new Date(today);
-  interviewDate.setDate(today.getDate() + Math.max(0, plan.days_until_interview - 1));
+  const interviewDate = planInterviewDate(plan);
   events.push({
     id: `plan-${planId}-interview`,
     title: `Real interview: ${plan.job_title}`,

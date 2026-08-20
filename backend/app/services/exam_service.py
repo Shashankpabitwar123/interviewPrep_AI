@@ -13,6 +13,7 @@ from app.schemas.exam import (
     ExamResponse,
     ExamSubmissionRequest,
     ExamSubmissionResponse,
+    ExamStoredAttemptResponse,
     QuestionResponse,
 )
 from app.services.gemini_service import generate_gemini_json
@@ -92,6 +93,23 @@ def get_exam_detail(db: Session, exam_id: int, user: Optional[User] = None) -> O
     if exam is None or not _owns_plan(exam.prep_plan, user):
         return None
     return _exam_to_response(exam)
+
+
+def list_exam_attempts(db: Session, user: Optional[User] = None, prep_plan_id: Optional[int] = None) -> list[ExamStoredAttemptResponse]:
+    query = db.query(Exam).join(Exam.prep_plan).join(PrepPlan.job_post)
+    query = query.filter(PrepPlan.job_post.has(user_id=user.id)) if user else query.filter(PrepPlan.job_post.has(user_id=None))
+    if prep_plan_id is not None:
+        query = query.filter(Exam.prep_plan_id == prep_plan_id)
+    return [_stored_attempt_response(exam) for exam in query.order_by(Exam.created_at.desc(), Exam.id.desc()).all()]
+
+
+def delete_exam(db: Session, exam_id: int, user: Optional[User] = None) -> bool:
+    exam = db.get(Exam, exam_id)
+    if exam is None or not _owns_plan(exam.prep_plan, user):
+        return False
+    db.delete(exam)
+    db.commit()
+    return True
 
 
 def submit_exam_answers(
@@ -196,6 +214,32 @@ def _owns_plan(plan: PrepPlan, user: Optional[User]) -> bool:
     if user:
         return plan.job_post.user_id == user.id
     return plan.job_post.user_id is None
+
+
+def _stored_attempt_response(exam: Exam) -> ExamStoredAttemptResponse:
+    results: list[AnswerResult] = []
+    answers: dict[int, str] = {}
+    scores: list[float] = []
+    has_attempt = False
+    for question in sorted(exam.questions, key=lambda item: item.id):
+        latest = max(question.attempts, key=lambda attempt: attempt.id, default=None)
+        if latest is None:
+            scores.append(0.0)
+            continue
+        has_attempt = True
+        score = float(latest.score or 0)
+        scores.append(score)
+        answers[question.id] = latest.answer_text or ""
+        results.append(AnswerResult(question_id=question.id, score=score, feedback=latest.feedback or ""))
+    average = round(sum(scores) / len(exam.questions), 2) if has_attempt and exam.questions else None
+    return ExamStoredAttemptResponse(
+        exam=_exam_to_response(exam),
+        status="complete" if has_attempt else "ready",
+        average_score=average,
+        results=results,
+        answers=answers,
+        created_at=exam.created_at,
+    )
 
 
 def _generate_questions(topics: list[str], count: int, difficulty: str, question_types: list[str]) -> list[dict]:
