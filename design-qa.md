@@ -1,41 +1,38 @@
-# Design QA — Admin, Settings, and About
+# Design QA — Today Daily Briefing
 
 ## Visual sources
 
 - Job Analysis design language: `/var/folders/cm/gk1zyspd5gddzb07hjj31v_40000gn/T/TemporaryItems/NSIRD_screencaptureui_kWy7BJ/Screenshot 2026-08-20 at 2.21.14 PM.png`
-- Previous Developer Dashboard: `/var/folders/cm/gk1zyspd5gddzb07hjj31v_40000gn/T/TemporaryItems/NSIRD_screencaptureui_OeQk8R/Screenshot 2026-08-20 at 2.58.21 PM.png`
-- Previous Settings panel: `/var/folders/cm/gk1zyspd5gddzb07hjj31v_40000gn/T/TemporaryItems/NSIRD_screencaptureui_svn9o8/Screenshot 2026-08-20 at 2.58.48 PM.png`
+- Previous Today page: `/var/folders/cm/gk1zyspd5gddzb07hjj31v_40000gn/T/TemporaryItems/NSIRD_screencaptureui_XCz34l/Screenshot 2026-08-20 at 3.20.57 PM.png`
 
 ## Implementation evidence
 
-- Developer Dashboard: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-admin-redesign.jpg`
-- Settings, dark: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-settings-redesign.jpg`
-- Settings, light: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-settings-light.jpg`
-- Authenticated About landing: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-about-landing.jpg`
-
-## Comparison inputs
-
-- Admin before/after, normalized to matching 1280 × 720 panels: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-admin-before-after.jpg`
-- Job Analysis language/admin implementation, normalized to matching 1280 × 720 panels: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-job-analysis-admin-language.jpg`
-- Settings before/after, normalized to matching 520 × 720 component panels: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-settings-before-after.jpg`
+- Final Today page: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-today-daily-briefing.png`
+- Source and implementation in one normalized comparison: `/Users/shashankpabitwar/Documents/Codex/2026-08-20/now/outputs/prepinterview-today-before-after.jpg`
 
 ## Comparison history
 
-1. Reduced the dashboard from five headline metrics and nested metric cards to three operational summaries, one user directory, and three compact detail groups.
-2. Replaced oversized cards and saturated status pills with the Job Analysis page's flat surfaces, thin borders, coral section labels, compact type scale, and restrained status accents.
-3. Moved block and delete controls into a deliberate Account actions disclosure so destructive actions no longer compete with account information.
-4. Removed the non-actionable Backend status section from Settings, grouped related controls, moved account deletion to a quiet footer, and collapsed recovery tools.
-5. Verified the Settings panel in both dark and light themes and confirmed the authenticated About route renders the complete public landing site with a return-to-workspace action.
-6. Reviewed the 980 px, 760 px, and 520 px responsive rules for single-column admin layout, stacked detail groups, full-width settings actions, and mobile-safe account controls.
+1. Replaced the duplicated task dashboard with a briefing hierarchy: personalized introduction, one useful next step, momentum, full preparation history, and four direct workspace destinations.
+2. Matched the Job Analysis language with deep navy surfaces, thin borders, restrained 9 px rounding, coral hierarchy, mint completion states, and compact supporting copy.
+3. Removed the repeated full task list, the stale “New here?” banner, and the side-column progress/readiness duplication.
+4. Added a browser-local morning, afternoon, or evening greeting and a one-time typing sequence that begins after workspace hydration. Reduced-motion users receive the complete copy immediately.
+5. Preserved all original preparation dates by anchoring the timeline to the stored interview date and original plan duration. The Aug 20–30 plan renders Aug 20 through Aug 29 plus the Aug 30 interview marker.
+6. Verified the 1,432 px desktop state and the 390 px responsive state. Both have zero horizontal page overflow; the timeline alone remains intentionally horizontally scrollable when necessary.
 
 ## Functional checks
 
-- Admin-only navigation appears after a refreshed admin login.
-- User search, user selection, account action disclosure, refresh, settings close, appearance toggle, About navigation, and return-to-workspace controls work in the local app.
-- Frontend tests: 10 passed.
+- Workspace refresh completes before the introduction begins.
+- Dynamic greeting, role/company sentence, and live interview countdown render from current workspace data.
+- Primary focus opens the current task; Plan, Job Analysis, Notes, Practice, Readiness, and schedule controls route correctly.
+- Selecting Aug 24 / Day 5 from the Today timeline opens Plan with Aug 24 selected.
+- Today and Plan both show the original Aug 20 start date and all 10 preparation days.
+- Empty workspace and hydrated active-plan states both render without console errors.
+- Browser console errors: 0.
+- Frontend tests: 12 passed.
 - Backend tests: 50 passed.
 - Production frontend build: passed.
 - Frontend dependency audit: 0 vulnerabilities.
+- Git whitespace validation: passed.
 
 ## Final result
 

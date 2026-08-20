@@ -123,13 +123,32 @@ export function prepDateForPlanDay(plan, day, now = new Date()) {
   if (interview && !Number.isNaN(interview.getTime())) {
     const date = new Date(interview);
     date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() - totalDays + targetDay);
+    date.setDate(date.getDate() - totalDays + targetDay - 1);
     return date;
   }
   const date = new Date(now);
   date.setHours(12, 0, 0, 0);
   date.setDate(date.getDate() + targetDay - 1);
   return date;
+}
+
+export function prepTimelineForPlan(plan, now = new Date()) {
+  if (!plan) return [];
+  const highestTaskDay = Math.max(0, ...(plan.tasks || []).map((task) => Number(task.day) || 0));
+  const totalDays = Math.max(1, Number(plan.days_until_interview) || 0, highestTaskDay);
+  const anchoredPlan = { ...plan, days_until_interview: totalDays };
+  return Array.from({ length: totalDays }, (_, index) => ({
+    day: index + 1,
+    date: prepDateForPlanDay(anchoredPlan, index + 1, now),
+  }));
+}
+
+export function localTimeGreeting(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const hour = Number.isNaN(date.getTime()) ? new Date().getHours() : date.getHours();
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 function planMeta(plans, prepPlanId) {

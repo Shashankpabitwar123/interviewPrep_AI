@@ -2762,6 +2762,606 @@
   }
 }
 
+/* Today: a calm daily briefing that launches the next useful action. */
+.daily-briefing {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.daily-briefing > *,
+.daily-briefing-grid > * {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.daily-briefing-hero,
+.daily-focus-card,
+.daily-momentum-card,
+.daily-timeline-card,
+.daily-journey-card {
+  border: 1px solid var(--approved-line);
+  border-radius: 9px;
+  background: var(--approved-surface);
+}
+
+.daily-briefing-hero {
+  position: relative;
+  min-height: 250px;
+  padding: 30px 36px 27px;
+  overflow: hidden;
+  box-shadow: inset 4px 0 0 var(--approved-coral);
+}
+
+.daily-sync-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--approved-mint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.daily-sync-state .spin {
+  color: var(--approved-coral);
+}
+
+.daily-typing-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 960px;
+  margin-top: 17px;
+}
+
+.daily-typing-copy h1 {
+  min-height: 50px;
+  margin: 0 0 7px;
+  color: var(--approved-text);
+  font-size: clamp(34px, 4.2vw, 55px);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+}
+
+.daily-typing-copy p {
+  min-height: 26px;
+  margin: 0;
+  color: var(--approved-soft);
+  font-size: clamp(15px, 1.55vw, 20px);
+  line-height: 1.35;
+}
+
+.daily-typing-copy h1,
+.daily-typing-copy p {
+  overflow-wrap: anywhere;
+}
+
+.daily-typing-copy .daily-countdown-line {
+  color: var(--approved-coral);
+  font-weight: 650;
+}
+
+.daily-countdown-line i {
+  width: 2px;
+  height: 1.05em;
+  margin-left: 4px;
+  display: inline-block;
+  vertical-align: -0.12em;
+  background: currentColor;
+  animation: daily-caret-blink 760ms steps(1, end) infinite;
+}
+
+.daily-hero-meta {
+  position: relative;
+  z-index: 1;
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.daily-hero-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--approved-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.daily-hero-meta svg {
+  color: var(--approved-coral);
+}
+
+.daily-briefing-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(310px, 0.75fr);
+  gap: 16px;
+}
+
+.daily-focus-card,
+.daily-momentum-card,
+.daily-timeline-card,
+.daily-journey-card {
+  color: var(--approved-text);
+}
+
+.daily-focus-card {
+  min-height: 294px;
+  padding: 24px 28px;
+}
+
+.daily-focus-card > header,
+.daily-momentum-card > header,
+.daily-timeline-card > header,
+.daily-journey-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.daily-focus-card header span,
+.daily-momentum-card header span,
+.daily-timeline-card header span,
+.daily-journey-card header span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--approved-coral);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.daily-focus-card h2,
+.daily-momentum-card h2,
+.daily-timeline-card h2,
+.daily-journey-card h2 {
+  margin: 0;
+  font-size: 19px;
+  letter-spacing: -0.025em;
+}
+
+.daily-focus-card > header > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--approved-soft);
+  font-size: 11px;
+}
+
+.daily-focus-body {
+  margin-top: 25px;
+  display: grid;
+  grid-template-columns: 45px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.daily-focus-icon {
+  width: 43px;
+  height: 43px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--approved-coral);
+  border-radius: 50%;
+  color: var(--approved-coral);
+  background: var(--approved-coral-soft);
+}
+
+.daily-focus-card.complete .daily-focus-icon {
+  color: #071a12;
+  border-color: var(--approved-mint);
+  background: var(--approved-mint);
+}
+
+.daily-focus-body small {
+  color: var(--approved-coral);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.daily-focus-body h3 {
+  margin: 5px 0 7px;
+  color: var(--approved-text);
+  font-size: clamp(22px, 2.3vw, 31px);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.daily-focus-body p {
+  max-width: 780px;
+  margin: 0;
+  color: var(--approved-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.daily-focus-card > footer {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.daily-focus-card > footer button {
+  min-height: 41px;
+  padding: 0 15px;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.daily-momentum-card {
+  min-height: 294px;
+  padding: 24px;
+}
+
+.daily-momentum-card > header > svg {
+  color: var(--approved-coral);
+}
+
+.daily-momentum-metrics {
+  margin: 24px 0 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--approved-line-soft);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--approved-line-soft);
+}
+
+.daily-momentum-metrics > * {
+  min-height: 76px;
+  padding: 13px 8px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  color: var(--approved-text);
+  text-align: left;
+  background: var(--approved-surface-2);
+}
+
+.daily-momentum-metrics button:hover {
+  background: var(--approved-surface-3);
+}
+
+.daily-momentum-metrics strong {
+  font-size: 23px;
+  letter-spacing: -0.035em;
+}
+
+.daily-momentum-metrics span {
+  color: var(--approved-muted);
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.daily-momentum-card > progress {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+}
+
+.daily-momentum-card > progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--approved-line);
+}
+
+.daily-momentum-card > progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--approved-coral);
+}
+
+.daily-momentum-card > p {
+  min-height: 38px;
+  margin: 12px 0 9px;
+  color: var(--approved-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.daily-momentum-card .guided-text-button {
+  font-size: 11px;
+}
+
+.daily-timeline-card,
+.daily-journey-card {
+  padding: 24px 28px;
+}
+
+.daily-timeline-card header p,
+.daily-journey-card > header > p {
+  margin: 5px 0 0;
+  color: var(--approved-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.daily-timeline-card > header .guided-secondary-button {
+  min-height: 38px;
+  padding: 0 13px;
+  gap: 7px;
+  font-size: 11px;
+}
+
+.daily-timeline-track {
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 21px;
+  padding: 4px 2px 8px;
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--approved-line) transparent;
+}
+
+.daily-timeline-day,
+.daily-interview-marker {
+  flex: 1 0 76px;
+  min-width: 76px;
+  padding: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  color: var(--approved-muted);
+  text-align: center;
+}
+
+.daily-timeline-day > small,
+.daily-interview-marker > small {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.daily-timeline-day > span,
+.daily-interview-marker > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--approved-line);
+  border-radius: 50%;
+  color: var(--approved-soft);
+  background: var(--approved-surface-2);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.daily-timeline-day > strong,
+.daily-interview-marker > strong {
+  color: var(--approved-soft);
+  font-size: 10px;
+}
+
+.daily-timeline-day > em,
+.daily-interview-marker > em {
+  color: var(--approved-muted);
+  font-size: 8px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.daily-timeline-day:hover > span {
+  color: var(--approved-coral);
+  border-color: var(--approved-coral);
+}
+
+.daily-timeline-day.complete > span {
+  color: #071a12;
+  border-color: var(--approved-mint);
+  background: var(--approved-mint);
+}
+
+.daily-timeline-day.complete > em {
+  color: var(--approved-mint);
+}
+
+.daily-timeline-day.today > span,
+.daily-interview-marker.today > span {
+  color: var(--approved-coral);
+  border-color: var(--approved-coral);
+  background: var(--approved-coral-soft);
+  box-shadow: 0 0 0 4px var(--approved-coral-soft);
+}
+
+.daily-timeline-day.past:not(.complete) > span,
+.daily-interview-marker.past > span {
+  border-style: dashed;
+}
+
+.daily-interview-marker {
+  flex-basis: 92px;
+  min-width: 92px;
+  color: var(--approved-coral);
+}
+
+.daily-interview-marker > span {
+  color: var(--approved-coral);
+  border-color: var(--approved-coral);
+  background: var(--approved-coral-soft);
+}
+
+.daily-interview-marker > strong,
+.daily-interview-marker > em {
+  color: var(--approved-coral);
+}
+
+.daily-journey-card > header {
+  align-items: end;
+}
+
+.daily-journey-grid {
+  margin-top: 19px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--approved-line-soft);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.daily-journey-grid > button {
+  min-height: 82px;
+  padding: 15px 16px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 9px;
+  border-right: 1px solid var(--approved-line-soft);
+  color: var(--approved-text);
+  text-align: left;
+}
+
+.daily-journey-grid > button:last-child {
+  border-right: 0;
+}
+
+.daily-journey-grid > button:hover {
+  background: var(--approved-surface-2);
+}
+
+.daily-journey-grid > button > svg:first-child {
+  color: var(--approved-coral);
+}
+
+.daily-journey-grid > button > svg:last-child {
+  color: var(--approved-muted);
+}
+
+.daily-journey-grid span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.daily-journey-grid strong {
+  font-size: 12px;
+}
+
+.daily-journey-grid small {
+  overflow: hidden;
+  color: var(--approved-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-briefing-enter {
+  animation: daily-panel-enter 430ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+.daily-briefing-grid .daily-focus-card { animation-delay: 70ms; }
+.daily-briefing-grid .daily-momentum-card { animation-delay: 120ms; }
+.daily-timeline-card { animation-delay: 170ms; }
+.daily-journey-card { animation-delay: 220ms; }
+
+@keyframes daily-panel-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes daily-caret-blink {
+  0%, 48% { opacity: 1; }
+  49%, 100% { opacity: 0; }
+}
+
+@media (max-width: 1040px) {
+  .daily-briefing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-journey-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-journey-grid > button:nth-child(2) {
+    border-right: 0;
+  }
+
+  .daily-journey-grid > button:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--approved-line-soft);
+  }
+}
+
+@media (max-width: 760px) {
+  .daily-briefing-hero,
+  .daily-focus-card,
+  .daily-momentum-card,
+  .daily-timeline-card,
+  .daily-journey-card {
+    padding: 20px 18px;
+  }
+
+  .daily-briefing-hero {
+    min-height: 270px;
+  }
+
+  .daily-typing-copy h1 {
+    min-height: 76px;
+    font-size: 37px;
+  }
+
+  .daily-typing-copy p {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .daily-focus-body {
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .daily-focus-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .daily-focus-card > footer,
+  .daily-focus-card > footer button,
+  .daily-timeline-card > header .guided-secondary-button {
+    width: 100%;
+  }
+
+  .daily-timeline-card > header,
+  .daily-journey-card > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .daily-journey-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-journey-grid > button {
+    border-right: 0;
+    border-bottom: 1px solid var(--approved-line-soft);
+  }
+
+  .daily-journey-grid > button:last-child {
+    border-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-briefing-enter,
+  .daily-countdown-line i {
+    animation: none !important;
+  }
+
+  .daily-briefing * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Admin and settings use the same restrained, content-first language as Job Analysis. */
 .simple-admin-page {
   gap: 12px;

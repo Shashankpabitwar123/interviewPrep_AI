@@ -9,7 +9,9 @@ import {
   filterArchived,
   isTaskCompleteForPlan,
   normalizeCalendarEvent,
+  localTimeGreeting,
   prepDateForPlanDay,
+  prepTimelineForPlan,
   reconcileExamAttempts,
   reconcileMockAttempts,
   resolveActiveJob,
@@ -67,6 +69,28 @@ test("calendar dates remain anchored to the stored interview date", () => {
   const first = prepDateForPlanDay(plan, 1, new Date("2026-08-20T12:00:00Z"));
   const refreshed = prepDateForPlanDay(plan, 1, new Date("2026-08-25T12:00:00Z"));
   assert.equal(first.toISOString(), refreshed.toISOString());
+});
+
+test("the full preparation timeline survives after its first dates pass", () => {
+  const plan = {
+    interview_at: "2026-08-30T17:00:00",
+    days_until_interview: 10,
+    tasks: [{ day: 1 }, { day: 10 }],
+  };
+  const original = prepTimelineForPlan(plan, new Date("2026-08-20T12:00:00"));
+  const refreshed = prepTimelineForPlan(plan, new Date("2026-08-25T12:00:00"));
+  assert.equal(original.length, 10);
+  assert.equal(refreshed.length, 10);
+  assert.equal(original[0].date.toISOString(), refreshed[0].date.toISOString());
+  assert.equal(original[9].date.toISOString(), refreshed[9].date.toISOString());
+  assert.equal(original[0].date.getDate(), 20);
+  assert.equal(original[9].date.getDate(), 29);
+});
+
+test("greetings follow the browser's local time", () => {
+  assert.equal(localTimeGreeting(new Date(2026, 7, 20, 8)), "Good morning");
+  assert.equal(localTimeGreeting(new Date(2026, 7, 20, 14)), "Good afternoon");
+  assert.equal(localTimeGreeting(new Date(2026, 7, 20, 20)), "Good evening");
 });
 
 test("backend exams restore missing workspace attempts and remove stale copies", () => {
