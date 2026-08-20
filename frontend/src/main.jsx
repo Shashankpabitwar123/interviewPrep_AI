@@ -2586,8 +2586,18 @@ function App() {
     : activity.filter((item) => !item.jobPostId || String(item.jobPostId) === String(selectedJobId));
 
   return (
-    <div className={authToken ? `guided-shell theme-${theme}` : "marketing-host"}>
-      {authToken ? (
+    <div className={authToken && activeView !== "about" ? `guided-shell theme-${theme}` : "marketing-host"}>
+      {authToken && activeView === "about" ? (
+        <MarketingLanding
+          workspaceMode
+          onReturn={() => {
+            setActiveView("dashboard");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+          onStart={() => setActiveView("jobs")}
+          onSignIn={() => setActiveView("dashboard")}
+        />
+      ) : authToken ? (
         <>
           <GuidedTopNavigation
             activeView={activeView}
@@ -2611,7 +2621,7 @@ function App() {
           />
 
           <main className={`guided-app-main ${activeView === "dashboard" ? "guided-app-main--today" : ""} ${activeView === "jobs" ? "guided-app-main--jobs" : ""}`}>
-            {activeView !== "jobs" && (
+            {!["jobs", "developer"].includes(activeView) && (
               <GuidedJobContextBar
                 selectedJob={selectedContextJob}
                 selectedPlan={plan}
@@ -2806,10 +2816,6 @@ function App() {
           </div>
         )}
 
-        {activeView === "about" && (
-          <AboutView onBack={() => { setActiveView("dashboard"); setSettingsOpen(true); }} />
-        )}
-
         {activeView === "developer" && isAdmin && (
           <div data-tour-page="developer">
           <DeveloperDashboard
@@ -2837,7 +2843,6 @@ function App() {
               <div className="guided-settings-anchor">
                 <SettingsView
                   user={user}
-                  status={status}
                   theme={theme}
                   setTheme={setTheme}
                   soundVolume={soundVolume}
@@ -6866,56 +6871,75 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
   }
 
   return (
-    <section className="page-stack developer-page">
-      <section className="panel page-panel developer-hero">
-        <PanelTitle
-          icon={ShieldCheck}
-          title="Developer Dashboard"
-          subtitle="Monitor accounts, account status, product activity, and estimated AI/API token usage."
-          badge="Admin only"
-        />
-        <button type="button" className="outline-action compact-action" onClick={loadAdminData} disabled={loading}>
-          {loading ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
+    <section className="page-stack simple-admin-page guided-job-analysis-direct">
+      <section className="simple-page-intro simple-admin-intro">
+        <div>
+          <span className="guided-analysis-kicker">Admin workspace</span>
+          <h2>Developer dashboard</h2>
+          <p>Account health, product activity, and the few actions needed to support users.</p>
+        </div>
+        <button type="button" className="guided-secondary-button" onClick={loadAdminData} disabled={loading}>
+          {loading ? <Loader2 className="spin" size={15} /> : <RotateCcw size={15} />}
           Refresh
         </button>
       </section>
 
-      <section className="developer-kpi-grid">
-        <DataMetric label="Total users" value={overview?.total_users ?? 0} detail={`${overview?.active_users ?? 0} active`} />
-        <DataMetric label="Blocked users" value={overview?.blocked_users ?? 0} detail="Cannot login while blocked" />
-        <DataMetric label="Accounts today" value={overview?.accounts_created_today ?? 0} detail={`${overview?.logins_today ?? 0} logins today`} />
-        <DataMetric label="Usage events" value={overview?.total_events ?? 0} detail="Tracked product actions" />
-        <DataMetric label="Estimated tokens" value={formatNumber(overview?.total_api_tokens ?? 0)} detail="OpenAI/Tavily/local estimates" />
+      <section className="simple-admin-summary" aria-label="Product health summary">
+        <AdminSummary
+          label="Accounts"
+          value={formatNumber(overview?.total_users ?? 0)}
+          detail={`${overview?.active_users ?? 0} active · ${overview?.blocked_users ?? 0} blocked`}
+        />
+        <AdminSummary
+          label="Today"
+          value={formatNumber(overview?.logins_today ?? 0)}
+          detail={`logins · ${overview?.accounts_created_today ?? 0} new accounts`}
+        />
+        <AdminSummary
+          label="Estimated AI usage"
+          value={formatNumber(overview?.total_api_tokens ?? 0)}
+          detail={`${formatNumber(overview?.total_events ?? 0)} product actions tracked`}
+        />
       </section>
 
-      <section className="developer-grid">
-        <article className="panel page-panel developer-users-panel">
-          <div className="developer-toolbar">
-            <PanelTitle icon={UsersIcon} title="Users" subtitle="Search, inspect, block, unblock, or remove accounts." />
-            <label className="developer-search">
-              <Search size={16} />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name, email, role, or status" />
-            </label>
-          </div>
+      <section className="simple-admin-workspace">
+        <article className="simple-admin-directory">
+          <header className="simple-admin-section-head">
+            <div>
+              <span className="guided-analysis-kicker">Users</span>
+              <h3>Accounts</h3>
+            </div>
+            <small>{filteredUsers.length} shown</small>
+          </header>
+          <label className="simple-admin-search">
+            <Search size={15} aria-hidden="true" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search name or email"
+              aria-label="Search users"
+            />
+          </label>
 
-          <div className="developer-user-list">
+          <div className="simple-admin-user-list">
             {filteredUsers.map((item) => {
               const presenceClass = adminPresenceClass(item);
               return (
                 <button
                   key={item.id}
                   type="button"
-                  className={`developer-user-row ${selectedUserId === item.id ? "selected" : ""}`}
+                  className={`simple-admin-user-row ${selectedUserId === item.id ? "selected" : ""}`}
                   onClick={() => setSelectedUserId(item.id)}
+                  aria-pressed={selectedUserId === item.id}
                 >
                   <span className={`admin-status-dot ${presenceClass}`} />
-                  <span>
+                  <span className="simple-admin-user-identity">
                     <strong>{item.name}</strong>
                     <small>{item.email}</small>
                   </span>
-                  <em className={`admin-status ${presenceClass}`}>{adminPresenceLabel(item)}</em>
-                  <em className={`admin-status ${item.role === "admin" ? "admin" : "user"}`}>{item.role}</em>
-                  <span className="developer-token-count">{formatNumber(item.total_tokens)} tokens</span>
+                  <span className="simple-admin-user-state">{adminPresenceLabel(item)}</span>
+                  {item.role === "admin" && <em>Admin</em>}
+                  <ChevronRight size={15} aria-hidden="true" />
                 </button>
               );
             })}
@@ -6923,88 +6947,139 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
           </div>
         </article>
 
-        <article className="panel page-panel developer-detail-panel">
+        <article className="simple-admin-detail">
           {selectedUser ? (
             <>
-              <div className="developer-detail-head">
+              <header className="simple-admin-profile-head">
                 <div>
                   <span className={`admin-status-dot ${adminPresenceClass(selectedUser)}`} />
-                  <h2>{selectedUser.name}</h2>
-                  <p>{selectedUser.email}</p>
+                  <div>
+                    <h3>{selectedUser.name}</h3>
+                    <p>{selectedUser.email}</p>
+                    <span>{adminPresenceLabel(selectedUser)} · {selectedUser.role === "admin" ? "Administrator" : "User"}</span>
+                  </div>
                 </div>
-                <div className="developer-actions">
-                  {selectedUser.status === "blocked" ? (
+                <details className="simple-admin-actions">
+                  <summary>Account actions</summary>
+                  <div>
+                    {selectedUser.status === "blocked" ? (
+                      <button
+                        type="button"
+                        disabled={actionLoading === `unblock:${selectedUser.id}` || currentUser?.id === selectedUser.id}
+                        onClick={() => runUserAction(selectedUser, "unblock")}
+                      >
+                        <ShieldCheck size={14} /> Unblock account
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={actionLoading === `block:${selectedUser.id}` || currentUser?.id === selectedUser.id}
+                        onClick={() => runUserAction(selectedUser, "block")}
+                      >
+                        <Ban size={14} /> Block account
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className="outline-action compact-action"
-                      disabled={actionLoading === `unblock:${selectedUser.id}` || currentUser?.id === selectedUser.id}
-                      onClick={() => runUserAction(selectedUser, "unblock")}
+                      className="danger"
+                      disabled={actionLoading === `delete:${selectedUser.id}` || currentUser?.id === selectedUser.id}
+                      onClick={() => runUserAction(selectedUser, "delete")}
                     >
-                      <ShieldCheck size={15} /> Unblock
+                      <Trash2 size={14} /> Delete account
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="outline-action compact-action"
-                      disabled={actionLoading === `block:${selectedUser.id}` || currentUser?.id === selectedUser.id}
-                      onClick={() => runUserAction(selectedUser, "block")}
-                    >
-                      <Ban size={15} /> Block
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="danger-action compact-danger"
-                    disabled={actionLoading === `delete:${selectedUser.id}` || currentUser?.id === selectedUser.id}
-                    onClick={() => runUserAction(selectedUser, "delete")}
-                  >
-                    <Trash2 size={15} /> Delete
-                  </button>
-                </div>
-              </div>
+                  </div>
+                </details>
+              </header>
 
               {selectedUser.status === "blocked" && (
                 <div className="developer-warning">
-                  <ShieldAlert size={17} />
+                  <ShieldAlert size={16} />
                   <span>{selectedUser.block_reason || "This account is blocked."}</span>
                 </div>
               )}
 
-              <div className="developer-stat-grid">
-                <DataMetric label="Jobs" value={selectedUser.jobs_count ?? 0} detail="Saved job posts" />
-                <DataMetric label="Prep plans" value={selectedUser.prep_plans_count ?? 0} detail="Generated plans" />
-                <DataMetric label="Exams" value={selectedUser.exams_count ?? 0} detail="Generated exams" />
-                <DataMetric label="Mocks" value={selectedUser.mock_interviews_count ?? 0} detail="Mock interviews" />
-                <DataMetric label="Events" value={selectedUser.total_events ?? 0} detail="Tracked actions" />
-                <DataMetric label="Tokens" value={formatNumber(selectedUser.total_tokens ?? 0)} detail="Estimated usage" />
+              <div className="simple-admin-detail-groups">
+                <AdminDetailGroup
+                  title="Workspace"
+                  rows={[
+                    ["Saved jobs", selectedUser.jobs_count ?? 0],
+                    ["Prep plans", selectedUser.prep_plans_count ?? 0],
+                    ["Practice", `${selectedUser.exams_count ?? 0} exams · ${selectedUser.mock_interviews_count ?? 0} mocks`],
+                  ]}
+                />
+                <AdminDetailGroup
+                  title="Usage"
+                  rows={[
+                    ["Tracked actions", formatNumber(selectedUser.total_events ?? 0)],
+                    ["Estimated tokens", formatNumber(selectedUser.total_tokens ?? 0)],
+                  ]}
+                />
+                <AdminDetailGroup
+                  title="Account history"
+                  rows={[
+                    ["Created", formatDateTime(selectedUser.created_at)],
+                    ["Last login", formatDateTime(selectedUser.last_login_at)],
+                    ["Last seen", formatDateTime(selectedUser.last_seen_at)],
+                  ]}
+                />
               </div>
 
-              <div className="developer-meta-grid">
-                <DeveloperMeta label="Created" value={formatDateTime(selectedUser.created_at)} />
-                <DeveloperMeta label="Last login" value={formatDateTime(selectedUser.last_login_at)} />
-                <DeveloperMeta label="Last seen" value={formatDateTime(selectedUser.last_seen_at)} />
-              </div>
-
-              <h3 className="developer-section-title">Recent Usage</h3>
-              <div className="admin-event-list">
-                {(selectedDetail?.recent_events || []).map((event) => (
-                  <article key={event.id} className="admin-event-row">
-                    <span>
-                      <strong>{humanize(event.feature)}</strong>
-                      <small>{humanize(event.event_type)} · {event.provider || "app"}{event.model ? ` · ${event.model}` : ""}</small>
-                    </span>
-                    <em>{formatNumber(event.total_tokens)} tokens</em>
-                    <small>{relativeTime(event.created_at)}</small>
-                  </article>
-                ))}
-                {!selectedDetail?.recent_events?.length && <EmptyState text="No usage events recorded for this account yet." />}
-              </div>
+              <section className="simple-admin-activity">
+                <header className="simple-admin-section-head">
+                  <div>
+                    <span className="guided-analysis-kicker">Recent</span>
+                    <h3>Product activity</h3>
+                  </div>
+                  <small>{selectedDetail?.recent_events?.length || 0} events</small>
+                </header>
+                <div className="admin-event-list">
+                  {(selectedDetail?.recent_events || []).map((event) => (
+                    <article key={event.id} className="admin-event-row">
+                      <span>
+                        <strong>{humanize(event.feature)}</strong>
+                        <small>{humanize(event.event_type)} · {event.provider || "app"}{event.model ? ` · ${event.model}` : ""}</small>
+                      </span>
+                      <span className="simple-admin-event-meta">
+                        <strong>{formatNumber(event.total_tokens)} tokens</strong>
+                        <small>{relativeTime(event.created_at)}</small>
+                      </span>
+                    </article>
+                  ))}
+                  {!selectedDetail?.recent_events?.length && <EmptyState text="No usage events recorded for this account yet." />}
+                </div>
+              </section>
             </>
           ) : (
             <EmptyState text="Select a user to inspect their account and usage." />
           )}
         </article>
       </section>
+    </section>
+  );
+}
+
+function AdminSummary({ label, value, detail }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function AdminDetailGroup({ title, rows }) {
+  return (
+    <section>
+      <h4>{title}</h4>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }
@@ -7038,7 +7113,7 @@ function adminPresenceClass(user) {
 
 function adminPresenceLabel(user) {
   if (user?.status === "blocked") return "Blocked";
-  return isUserRecentlyActive(user) ? "Active" : "No";
+  return isUserRecentlyActive(user) ? "Active" : "Inactive";
 }
 
 function formatNumber(value) {
@@ -7747,7 +7822,6 @@ function removeLoadingId(current, key) {
 
 function SettingsView({
   user,
-  status,
   theme,
   setTheme,
   soundVolume,
@@ -7784,160 +7858,139 @@ function SettingsView({
   }
 
   return (
-    <div className="settings-popover">
-      <header>
+    <div className="settings-popover simple-settings-popover" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <header className="simple-settings-header">
         <div>
-          <strong>Settings</strong>
-          <span>Workspace preferences</span>
+          <strong id="settings-title">Settings</strong>
+          <span>Account and workspace preferences</span>
         </div>
-        <button className="icon-button" onClick={onClose}><X size={16} /></button>
+        <button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={16} /></button>
       </header>
-      <div className="settings-popover-body">
-        <div className="settings-mini-card">
-          <strong>Account</strong>
-          <span>{user ? user.name : "Guest"}</span>
-          {user?.email && <small>{user.email}</small>}
-          {user && (
-            <button type="button" className="settings-danger-link" onClick={onDeleteAccount}>
-              <Trash2 size={13} /> Delete account
-            </button>
-          )}
-        </div>
-        <div className="settings-mini-card">
-          <strong>Backend</strong>
-          <span>{statusText(status)}</span>
-        </div>
-        <div className={`settings-mini-card ai-fallback-card ${allowLocalFallback ? "active" : ""}`}>
-          <div className="sound-setting-head">
-            <strong><BrainCircuit size={16} /> AI generation</strong>
-            <span>{allowLocalFallback ? "Fallback on" : "AI only"}</span>
-          </div>
-          <button
-            type="button"
-            className={`theme-toggle extension-toggle ${allowLocalFallback ? "is-on" : ""}`}
-            onClick={() => updateFallbackPreference(!allowLocalFallback)}
-            aria-pressed={allowLocalFallback}
-          >
-            <span />
-            <strong>Use local fallback if AI is not responding</strong>
-          </button>
-          <small>
-            {allowLocalFallback
-              ? "If the API fails, the app can still create offline backup content."
-              : "Quality-first mode: plans, notes, exams, interviews, and AI answers must come from the API."}
-          </small>
-        </div>
-        <div className="settings-mini-card theme-settings-card">
-          <div className="sound-setting-head">
-            <strong><Palette size={16} /> Appearance</strong>
-            <span>{theme === "dark" ? "Dark" : "Light"}</span>
-          </div>
-          <button
-            type="button"
-            className={`theme-toggle ${theme === "dark" ? "is-dark" : ""}`}
-            onClick={() => updateTheme(theme === "dark" ? "light" : "dark")}
-            aria-pressed={theme === "dark"}
-          >
-            <span />
-            <strong>{theme === "dark" ? "Premium dark mode" : "Light mode"}</strong>
-          </button>
-        </div>
-        <div className="settings-mini-card sound-settings-card">
-          <div className="sound-setting-head">
-            <strong><Volume2 size={16} /> Generation sound</strong>
-            <span>{soundVolume}%</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="5"
-            value={soundVolume}
-            onChange={(event) => updateSoundVolume(event.target.value)}
-          />
-          <div className="sound-setting-footer">
-            <small>{soundVolume === 0 ? "Muted" : "Plans, notes, and exams"}</small>
-            <button type="button" className="outline-action compact-action" onClick={() => playGeneratedSound(soundVolume)}>
-              Test
-            </button>
-          </div>
-        </div>
-        <div className={`settings-mini-card extension-settings-card ${extensionState?.bubbleEnabled ? "active" : ""}`}>
-          <div className="sound-setting-head">
-            <strong><Sparkles size={16} /> Hovering extension</strong>
-            <span>{extensionLabel(extensionState)}</span>
-          </div>
-          <span>{extensionDescription(extensionState, user)}</span>
-          {extensionState?.error && <small className="extension-error">{extensionState.error}</small>}
-          <div className="extension-actions">
-            <button
-              type="button"
-              className={extensionState?.installed ? `theme-toggle extension-toggle ${extensionState?.bubbleEnabled ? "is-on" : ""}` : "outline-action compact-action"}
-              onClick={onToggleExtension}
-              aria-pressed={Boolean(extensionState?.bubbleEnabled)}
-            >
-              {extensionState?.installed ? (
-                <>
-                  <span />
-                  <strong>{extensionState.bubbleEnabled ? "Bubble on" : "Bubble off"}</strong>
-                </>
-              ) : (
-                <>Install Extension <ExternalLink size={13} /></>
-              )}
-            </button>
-            <button
-              type="button"
-              className="outline-action compact-action"
-              onClick={extensionState?.installed ? onRefreshExtension : onInstallExtension}
-            >
-              {extensionState?.installed ? "Refresh" : "Guide"}
-            </button>
-          </div>
-          {extensionState?.installed && (
-            <small>
-              {extensionState.signedIn ? "Connected to your website login." : "Login on the website to connect the extension account."}
-            </small>
-          )}
-        </div>
-        <div className="settings-mini-card">
-          <strong>Local workspace</strong>
-          <span>Plans, attempts, notes, and settings stay on this machine.</span>
-          <button type="button" className="outline-action compact-action" onClick={onReplayOnboarding}>
-            Replay onboarding
-          </button>
-        </div>
-        <div className="settings-mini-card deleted-bin-card">
-          <div className="sound-setting-head">
-            <strong><Trash2 size={16} /> Deleted jobs</strong>
-            <span>{deletedJobs.length}/10</span>
-          </div>
-          {deletedJobs.length ? (
-            <div className="deleted-job-list">
-              {deletedJobs.map((job) => (
-                <article key={`${job.id}-${job.deleted_at}`}>
-                  <div>
-                    <strong>{job.title}</strong>
-                    <span>{job.company || companyFromUrl(job.source_url) || "Deleted job"}</span>
-                  </div>
-                  <div className="deleted-job-actions">
-                    <button type="button" disabled={loading} onClick={() => restoreDeletedJob(job.id)}>
-                      <RotateCcw size={13} /> Restore
-                    </button>
-                    <button type="button" disabled={loading} onClick={() => clearDeletedJob(job.id)}>
-                      Remove
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <span>No deleted jobs yet.</span>
-          )}
+      <div className="simple-settings-account">
+        <span>{initialsFor(user?.name)}</span>
+        <div>
+          <strong>{user?.name || "Guest"}</strong>
+          <small>{user?.email || "Local workspace"}</small>
         </div>
       </div>
-      <button className="primary know-more-button" onClick={onKnowMore}>
-        <Sparkles size={17} /> Know more
-      </button>
+
+      <div className="settings-popover-body simple-settings-body">
+        <section className="simple-settings-group">
+          <span className="guided-analysis-kicker">Preferences</span>
+          <div className="simple-settings-row">
+            <div>
+              <strong><Palette size={15} /> Appearance</strong>
+              <small>{theme === "dark" ? "Dark workspace" : "Light workspace"}</small>
+            </div>
+            <button
+              type="button"
+              className={`simple-settings-switch ${theme === "dark" ? "on" : ""}`}
+              onClick={() => updateTheme(theme === "dark" ? "light" : "dark")}
+              aria-pressed={theme === "dark"}
+              aria-label="Toggle dark mode"
+            >
+              <span />
+              {theme === "dark" ? "Dark" : "Light"}
+            </button>
+          </div>
+
+          <div className="simple-settings-row simple-settings-sound">
+            <div>
+              <strong><Volume2 size={15} /> Generation sound</strong>
+              <small>{soundVolume === 0 ? "Muted" : `${soundVolume}% volume`}</small>
+            </div>
+            <div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={soundVolume}
+                onChange={(event) => updateSoundVolume(event.target.value)}
+                aria-label="Generation sound volume"
+              />
+              <button type="button" onClick={() => playGeneratedSound(soundVolume)}>Test</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="simple-settings-group">
+          <span className="guided-analysis-kicker">Generation</span>
+          <div className="simple-settings-row">
+            <div>
+              <strong><BrainCircuit size={15} /> Local fallback</strong>
+              <small>{allowLocalFallback ? "Offline backup content is allowed if AI fails." : "Quality-first: use the AI service only."}</small>
+            </div>
+            <button
+              type="button"
+              className={`simple-settings-switch ${allowLocalFallback ? "on" : ""}`}
+              onClick={() => updateFallbackPreference(!allowLocalFallback)}
+              aria-pressed={allowLocalFallback}
+              aria-label="Toggle local AI fallback"
+            >
+              <span />
+              {allowLocalFallback ? "On" : "Off"}
+            </button>
+          </div>
+        </section>
+
+        <section className="simple-settings-group">
+          <span className="guided-analysis-kicker">Browser capture</span>
+          <div className="simple-settings-row simple-extension-row">
+            <div>
+              <strong><Sparkles size={15} /> Chrome extension</strong>
+              <small>{extensionDescription(extensionState, user)}</small>
+              {extensionState?.error && <small className="extension-error">{extensionState.error}</small>}
+            </div>
+            <div className="simple-extension-actions">
+              <button
+                type="button"
+                className={extensionState?.installed ? `simple-settings-switch ${extensionState?.bubbleEnabled ? "on" : ""}` : "simple-settings-action"}
+                onClick={onToggleExtension}
+                aria-pressed={Boolean(extensionState?.bubbleEnabled)}
+              >
+                {extensionState?.installed ? <><span />{extensionState.bubbleEnabled ? "On" : "Off"}</> : <>Install <ExternalLink size={12} /></>}
+              </button>
+              <button type="button" className="simple-settings-action" onClick={extensionState?.installed ? onRefreshExtension : onInstallExtension}>
+                {extensionState?.installed ? "Refresh" : "Guide"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <details className="simple-settings-disclosure">
+          <summary>
+            <span><RotateCcw size={15} /> Workspace & recovery</span>
+            <small>{deletedJobs.length ? `${deletedJobs.length} deleted` : "No deleted jobs"}</small>
+          </summary>
+          <div>
+            <button type="button" className="simple-settings-wide-action" onClick={onReplayOnboarding}>Replay onboarding</button>
+            {deletedJobs.length ? (
+              <div className="deleted-job-list">
+                {deletedJobs.map((job) => (
+                  <article key={`${job.id}-${job.deleted_at}`}>
+                    <div>
+                      <strong>{job.title}</strong>
+                      <span>{job.company || companyFromUrl(job.source_url) || "Deleted job"}</span>
+                    </div>
+                    <div className="deleted-job-actions">
+                      <button type="button" disabled={loading} onClick={() => restoreDeletedJob(job.id)}><RotateCcw size={12} /> Restore</button>
+                      <button type="button" disabled={loading} onClick={() => clearDeletedJob(job.id)}>Remove</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p>Deleted jobs can be restored here for a short time.</p>
+            )}
+          </div>
+        </details>
+      </div>
+
+      <footer className="simple-settings-footer">
+        <button type="button" onClick={onKnowMore}><Info size={15} /> About PrepInterview AI</button>
+        {user && <button type="button" className="danger" onClick={onDeleteAccount}><Trash2 size={14} /> Delete account</button>}
+      </footer>
     </div>
   );
 }

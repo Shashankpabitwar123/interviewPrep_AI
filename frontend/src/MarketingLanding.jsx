@@ -284,9 +284,11 @@ function ExtensionPreview() {
   );
 }
 
-function MarketingLanding({ onStart, onSignIn }) {
+function MarketingLanding({ onStart, onSignIn, workspaceMode = false, onReturn }) {
+  const returnToWorkspace = onReturn || onSignIn;
+
   return (
-    <div className="marketing-page clarity-homepage">
+    <div className={`marketing-page clarity-homepage ${workspaceMode ? "marketing-workspace-preview" : ""}`}>
       <header className="marketing-nav" aria-label="Public navigation">
         <a className="marketing-brand" href="#top" aria-label="PrepInterview AI home"><BrandMark /><span>PrepInterview AI</span></a>
         <nav aria-label="Homepage sections">
@@ -302,12 +304,24 @@ function MarketingLanding({ onStart, onSignIn }) {
             <a href="#features" onClick={closeMobileMenu}>Features</a>
             <a href="#extension" onClick={closeMobileMenu}>Chrome extension</a>
             <a href="#faq" onClick={closeMobileMenu}>FAQ</a>
-            <button type="button" onClick={(event) => { closeMobileMenu(event); onSignIn(); }}>Sign in</button>
+            <button type="button" onClick={(event) => {
+              closeMobileMenu(event);
+              if (workspaceMode) returnToWorkspace();
+              else onSignIn();
+            }}>
+              {workspaceMode ? "Back to workspace" : "Sign in"}
+            </button>
           </div>
         </details>
         <div className="marketing-nav-actions">
-          <button type="button" className="text-action" onClick={onSignIn}>Sign in</button>
-          <button type="button" className="primary-action compact" onClick={onStart}>Start preparing</button>
+          {workspaceMode ? (
+            <button type="button" className="primary-action compact" onClick={returnToWorkspace}>Back to workspace</button>
+          ) : (
+            <>
+              <button type="button" className="text-action" onClick={onSignIn}>Sign in</button>
+              <button type="button" className="primary-action compact" onClick={onStart}>Start preparing</button>
+            </>
+          )}
         </div>
       </header>
 
@@ -317,7 +331,9 @@ function MarketingLanding({ onStart, onSignIn }) {
             <h1 id="marketing-title">Prepare for your interview with a plan built from the job.</h1>
             <p>Paste a job description or URL. PrepInterview AI turns it into a personalized plan, study notes, practice exams, and voice mock interviews.</p>
             <div className="hero-actions">
-              <button type="button" className="primary-action" onClick={onStart}>Create my prep plan</button>
+              <button type="button" className="primary-action" onClick={workspaceMode ? returnToWorkspace : onStart}>
+                {workspaceMode ? "Back to my workspace" : "Create my prep plan"}
+              </button>
               <a className="secondary-action" href="#how-it-works">See how it works <ArrowIcon /></a>
             </div>
           </div>
@@ -403,14 +419,19 @@ function MarketingLanding({ onStart, onSignIn }) {
 
         <section className="final-cta" aria-labelledby="final-heading">
           <div><h2 id="final-heading">Start preparing for your next interview</h2><p>Bring the job description. PrepInterview AI will help you organize what to learn, practice, and review.</p></div>
-          <div><button type="button" className="primary-action light-action" onClick={onStart}>Create my prep plan</button><button type="button" className="secondary-action coral-secondary" onClick={onSignIn}>Sign in</button></div>
+          <div>
+            <button type="button" className="primary-action light-action" onClick={workspaceMode ? returnToWorkspace : onStart}>
+              {workspaceMode ? "Return to workspace" : "Create my prep plan"}
+            </button>
+            {!workspaceMode && <button type="button" className="secondary-action coral-secondary" onClick={onSignIn}>Sign in</button>}
+          </div>
         </section>
       </main>
 
       <footer className="marketing-footer">
         <a className="marketing-brand" href="#top"><BrandMark /><span>PrepInterview AI</span></a>
         <p>Job-specific preparation from one connected workspace.</p>
-        <button type="button" onClick={onSignIn}>Sign in</button>
+        <button type="button" onClick={workspaceMode ? returnToWorkspace : onSignIn}>{workspaceMode ? "Back to workspace" : "Sign in"}</button>
       </footer>
     </div>
   );
