@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import User
+from app.models import PrepPlan, User
 from app.schemas.study_note import (
     StudyNoteAskRequest,
     StudyNoteAskResponse,
@@ -14,6 +14,7 @@ from app.schemas.study_note import (
 )
 from app.services.auth_service import get_request_user
 from app.services.study_note_service import answer_note_question, generate_study_note, improve_note
+from app.services.generation_run_service import record_generation_run
 from app.services.usage_service import record_usage_event
 
 router = APIRouter(prefix="/study-notes", tags=["study notes"])
@@ -29,6 +30,22 @@ def generate_note(
     note = generate_study_note(db, request, settings, current_user)
     if note is None:
         raise HTTPException(status_code=404, detail="Prep plan not found")
+    plan = db.get(PrepPlan, request.prep_plan_id)
+    record_generation_run(
+        db,
+        artifact_type="study_note",
+        prompt_version="study-note-v3",
+        settings=settings,
+        provider=note.source,
+        model=settings.generation_model if note.source == "openai" else None,
+        user=current_user,
+        job_post_id=plan.job_post_id if plan else None,
+        prep_plan_id=request.prep_plan_id,
+        input_value=request.model_dump(),
+        output_value=note.model_dump(mode="json"),
+        quality={"section_count": len(note.sections), "question_count": len(note.interview_questions)},
+        detail={"day": request.day, "topics": request.topics},
+    )
     record_usage_event(
         db,
         current_user,

@@ -60,6 +60,7 @@ class PrepPlanResponse(BaseModel):
     detected_skills: list[SkillSignal]
     plan_summary: str
     plan_source: str = "heuristic"
+    role_blueprint_version: str = ""
     tasks: list[PrepTask]
     interview_at: Optional[datetime] = None
     hours_per_day: float = 2.0

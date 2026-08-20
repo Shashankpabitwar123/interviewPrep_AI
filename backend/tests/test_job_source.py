@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from app.services.job_source import fetch_job_description_from_url
 
@@ -28,3 +29,14 @@ def test_fetch_job_description_from_url_extracts_readable_text(monkeypatch) -> N
     assert "Backend Software Engineer Intern" in text
     assert "Python" in text
     assert "ignoreMe" not in text
+
+
+def test_fetch_job_description_rejects_redirect_to_private_network(monkeypatch) -> None:
+    def fake_get(url, **kwargs):
+        request = httpx.Request("GET", url)
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/admin"}, request=request)
+
+    monkeypatch.setattr("app.services.job_source.httpx.get", fake_get)
+
+    with pytest.raises(ValueError, match="Private network URLs"):
+        fetch_job_description_from_url("https://example.com/jobs/analyst")

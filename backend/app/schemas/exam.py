@@ -24,7 +24,6 @@ class ExamGenerateRequest(BaseModel):
 class QuestionOption(BaseModel):
     label: str
     text: str
-    is_correct: bool = False
 
 
 class QuestionResponse(BaseModel):
@@ -32,8 +31,20 @@ class QuestionResponse(BaseModel):
     question_type: str
     prompt: str
     topics: list[str]
-    expected_answer: Optional[str] = None
     options: Optional[list[QuestionOption]] = None
+
+
+class QuestionReviewOption(QuestionOption):
+    is_correct: bool = False
+
+
+class QuestionReviewResponse(BaseModel):
+    id: int
+    question_type: str
+    prompt: str
+    topics: list[str]
+    expected_answer: Optional[str] = None
+    options: Optional[list[QuestionReviewOption]] = None
 
 
 class ExamResponse(BaseModel):
@@ -44,6 +55,16 @@ class ExamResponse(BaseModel):
     scope: str
     time_limit_minutes: int
     questions: list[QuestionResponse]
+
+
+class ExamReviewResponse(BaseModel):
+    id: int
+    prep_plan_id: int
+    title: str
+    day: int
+    scope: str
+    time_limit_minutes: int
+    questions: list[QuestionReviewResponse]
 
 
 class AnswerSubmission(BaseModel):
@@ -65,10 +86,12 @@ class ExamSubmissionResponse(BaseModel):
     exam_id: int
     average_score: float
     results: list[AnswerResult]
+    review_exam: ExamReviewResponse
 
 
 class ExamStoredAttemptResponse(BaseModel):
     exam: ExamResponse
+    review_exam: Optional[ExamReviewResponse] = None
     status: Literal["ready", "complete"]
     average_score: Optional[float] = None
     results: list[AnswerResult] = Field(default_factory=list)

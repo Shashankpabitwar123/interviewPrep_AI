@@ -1756,6 +1756,7 @@ function App() {
           question_count: options.questionCount,
           question_types: options.questionTypes || mockQuestionTypes,
           scope: options.scope || "full_plan",
+          day: options.day || selectedPlanDay,
           focus_topics: options.focusTopics || [],
           topic: options.topic,
         }),
@@ -1763,7 +1764,7 @@ function App() {
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       let interview = await response.json();
       if (options.forceComplete && interview.status !== "complete") {
-        const completeResponse = await apiFetch(`/mock-interviews/${activeInterview.id}/complete`, { method: "POST" });
+        const completeResponse = await apiFetch(`/mock-interviews/${interview.id}/complete`, { method: "POST" });
         if (!completeResponse.ok) throw new Error(`API returned ${completeResponse.status}`);
         interview = await completeResponse.json();
       }
@@ -4135,6 +4136,7 @@ function ExamSessionModal({ exam, session, answers, setAnswers, onMove, onJump, 
 
 function ExamReviewModal({ review, onClose }) {
   const { exam, result, answers } = review;
+  const reviewExam = result?.review_exam || exam;
   const resultByQuestion = Object.fromEntries((result?.results || []).map((item) => [item.question_id, item]));
   return (
     <div className="exam-modal-backdrop review-backdrop" role="dialog" aria-modal="true">
@@ -4142,14 +4144,14 @@ function ExamReviewModal({ review, onClose }) {
         <header className="exam-topbar">
           <div>
             <strong>Exam Review</strong>
-            <span>{exam.title} • Score {Math.round((result?.average_score || 0) * 100)}%</span>
+            <span>{reviewExam.title} • Score {Math.round((result?.average_score || 0) * 100)}%</span>
           </div>
           <button className="outline-action compact-action" onClick={onClose}>Exit Review</button>
           <button className="icon-button" onClick={onClose}><X size={19} /></button>
         </header>
 
         <main className="review-stage">
-          {exam.questions.map((question, index) => {
+          {reviewExam.questions.map((question, index) => {
             const questionResult = resultByQuestion[question.id];
             const correctOption = question.options?.find((option) => option.is_correct);
             const userAnswer = answers?.[question.id] || "Not answered";

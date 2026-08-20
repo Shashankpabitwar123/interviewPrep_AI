@@ -21,6 +21,7 @@ def save_job_analysis(
     interview_at: Optional[datetime] = None,
     hours_per_day: Optional[float] = None,
     structured_brief: Optional[JobDescriptionBrief] = None,
+    capture_metadata: Optional[dict] = None,
 ) -> JobAnalysisResponse:
     """Save one analyzed job and return the same response with database IDs."""
 
@@ -32,6 +33,7 @@ def save_job_analysis(
         user_id=user.id if user else None,
         interview_at=interview_at,
         hours_per_day=hours_per_day,
+        capture_metadata=capture_metadata,
     )
     db.add(job_post)
     db.flush()
@@ -67,6 +69,7 @@ def save_prep_plan(
     interview_at: Optional[datetime] = None,
     hours_per_day: float = 2.0,
     job_post_id: Optional[int] = None,
+    capture_metadata: Optional[dict] = None,
 ) -> PrepPlanResponse:
     """Save a generated prep plan and every scheduled task."""
 
@@ -82,6 +85,7 @@ def save_prep_plan(
             user_id=user.id if user else None,
             interview_at=interview_at,
             hours_per_day=hours_per_day,
+            capture_metadata=capture_metadata,
         )
         db.add(job_post)
         db.flush()
@@ -92,11 +96,14 @@ def save_prep_plan(
         job_post.source_url = source_url or job_post.source_url
         job_post.interview_at = interview_at or job_post.interview_at
         job_post.hours_per_day = hours_per_day
+        if capture_metadata:
+            job_post.capture_metadata = capture_metadata
 
     db_plan = PrepPlan(
         job_post_id=job_post.id,
         days_until_interview=plan.days_until_interview,
         summary=plan.plan_summary,
+        role_blueprint_version=plan.role_blueprint_version or None,
     )
     db.add(db_plan)
     db.flush()
@@ -335,6 +342,7 @@ def get_prep_plan_detail(db: Session, prep_plan_id: int, user: Optional[User] = 
         detected_skills=[SkillSignal(name=topic, confidence=1.0) for topic in _topics_from_tasks(plan.tasks)],
         plan_summary=plan.summary,
         plan_source="saved",
+        role_blueprint_version=plan.role_blueprint_version or "",
         tasks=tasks,
         interview_at=plan.job_post.interview_at,
         hours_per_day=plan.job_post.hours_per_day or 2.0,

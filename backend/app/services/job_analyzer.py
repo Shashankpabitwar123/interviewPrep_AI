@@ -18,6 +18,8 @@ from app.schemas.job_analysis import (
 )
 from app.services.gemini_service import generate_gemini_json
 from app.services.planner import SKILL_KEYWORDS
+from app.schemas.role_intelligence import RoleBlueprint
+from app.services.role_intelligence_service import blueprint_context
 
 
 SYSTEM_PROMPT = """You analyze job descriptions for interview preparation.
@@ -198,7 +200,7 @@ def _identity_with_openai(description: str, source_url: str | None, settings: Se
 
     client = OpenAI(api_key=settings.openai_api_key)
     completion = client.chat.completions.create(
-        model=settings.openai_model,
+        model=settings.analysis_model,
         response_format={"type": "json_object"},
         messages=[
             {
@@ -271,15 +273,21 @@ def analysis_from_job_brief(brief: JobDescriptionBrief) -> JobAnalysisResponse:
     )
 
 
-def answer_job_description_question(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
+def answer_job_description_question(
+    title: str,
+    description: str,
+    question: str,
+    settings: Settings,
+    blueprint: RoleBlueprint | None = None,
+) -> JobDescriptionAskResponse:
     if settings.openai_enabled:
         try:
-            return _description_answer_with_openai(title, description, question, settings)
+            return _description_answer_with_openai(title, description, question, settings, blueprint)
         except Exception as exc:
             logger.warning("OpenAI job-description question failed: %s", exc)
     if settings.gemini_enabled:
         try:
-            return _description_answer_with_gemini(title, description, question, settings)
+            return _description_answer_with_gemini(title, description, question, settings, blueprint)
         except Exception as exc:
             logger.warning("Gemini job-description question failed: %s", exc)
     if settings.ai_enabled:
@@ -628,7 +636,7 @@ def _brief_with_openai(title: str, description: str, source_url: str | None, set
 
     client = OpenAI(api_key=settings.openai_api_key)
     response = client.responses.parse(
-        model=settings.openai_model,
+        model=settings.analysis_model,
         input=[
             {
                 "role": "system",
@@ -702,12 +710,18 @@ def _brief_from_ai_data(data: dict, title: str, description: str, source_url: st
     )
 
 
-def _description_answer_with_openai(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
+def _description_answer_with_openai(
+    title: str,
+    description: str,
+    question: str,
+    settings: Settings,
+    blueprint: RoleBlueprint | None = None,
+) -> JobDescriptionAskResponse:
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
     response = client.responses.parse(
-        model=settings.openai_model,
+        model=settings.analysis_model,
         input=[
             {
                 "role": "system",
@@ -724,7 +738,11 @@ def _description_answer_with_openai(title: str, description: str, question: str,
             },
             {
                 "role": "user",
-                "content": f"Role: {title}\nQuestion: {question}\n\nJob description:\n{description[:9000]}",
+                "content": (
+                    f"Role: {title}\nQuestion: {question}\n\n"
+                    f"Posting-derived role intelligence:\n{blueprint_context(blueprint, include_sources=False)}\n\n"
+                    f"Job description source text:\n{description[:9000]}"
+                ),
             },
         ],
         text_format=JobDescriptionAskResponse,
@@ -732,13 +750,20 @@ def _description_answer_with_openai(title: str, description: str, question: str,
     return response.output_parsed.model_copy(update={"source": "openai"})
 
 
-def _description_answer_with_gemini(title: str, description: str, question: str, settings: Settings) -> JobDescriptionAskResponse:
+def _description_answer_with_gemini(
+    title: str,
+    description: str,
+    question: str,
+    settings: Settings,
+    blueprint: RoleBlueprint | None = None,
+) -> JobDescriptionAskResponse:
     prompt = (
         "Answer this job-description question as JSON only with keys answer, interview_use, next_steps.\n"
         "Use only the supplied job description and the user's question. Be specific, practical, "
         "and interview-focused. If the user asks for explanation, answer in enough detail to be useful.\n\n"
         f"Role: {title}\n"
         f"Question: {question}\n\n"
+        f"Posting-derived role intelligence:\n{blueprint_context(blueprint, include_sources=False)}\n\n"
         f"Job description:\n{description[:9000]}"
     )
     data = generate_gemini_json(settings, prompt, _job_description_ask_schema())
@@ -987,7 +1012,7 @@ def _analyze_with_openai(request: JobAnalysisRequest, settings: Settings) -> Job
 
     client = OpenAI(api_key=settings.openai_api_key)
     completion = client.chat.completions.create(
-        model=settings.openai_model,
+        model=settings.analysis_model,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},

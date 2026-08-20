@@ -47,6 +47,13 @@ Optional AI keys:
 export OPENAI_API_KEY="your_openai_key_here"
 export TAVILY_API_KEY="your_tavily_key_here"
 export OPENAI_MODEL="gpt-4o-mini"
+# Optional per-workload overrides. OPENAI_MODEL remains the fallback.
+export OPENAI_ANALYSIS_MODEL="gpt-4o-mini"
+export OPENAI_GENERATION_MODEL="gpt-4o-mini"
+export OPENAI_SCORING_MODEL="gpt-4o-mini"
+export TAVILY_SEARCH_DEPTH="advanced"
+export TAVILY_MAX_RESULTS="5"
+export RESEARCH_CACHE_HOURS="168"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -108,7 +115,7 @@ pytest
 Expected result:
 
 ```text
-20 passed
+55 passed
 ```
 
 ## 5. Build Frontend

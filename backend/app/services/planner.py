@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 from app.config import Settings
 from app.ai_policy import require_ai_result
 from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepTask, PrepTaskType, SkillSignal
+from app.schemas.role_intelligence import RoleBlueprint
 from app.services.gemini_service import GeminiQuotaError, generate_gemini_json
+from app.services.role_intelligence_service import blueprint_context, critical_competency_names
 
 
 SKILL_KEYWORDS = {
@@ -44,53 +46,62 @@ class AIPlanOutput(BaseModel):
     tasks: list[AIPlanTask]
 
 
-def generate_prep_plan(request: PrepPlanRequest, settings: Optional[Settings] = None) -> PrepPlanResponse:
+def generate_prep_plan(
+    request: PrepPlanRequest,
+    settings: Optional[Settings] = None,
+    blueprint: Optional[RoleBlueprint] = None,
+) -> PrepPlanResponse:
     """Create a day-by-day plan based on interview date and detected job skills."""
 
     days_until_interview = _days_until(request.interview_at)
 
     if settings and settings.openai_enabled:
         try:
-            return _generate_with_openai(request, settings, days_until_interview)
+            generated = _generate_with_openai(request, settings, days_until_interview) if blueprint is None else _generate_with_openai(request, settings, days_until_interview, blueprint)
+            return _align_plan_to_blueprint(generated, blueprint)
         except Exception:
             if settings.gemini_enabled:
                 try:
-                    return _generate_with_gemini(request, settings, days_until_interview)
+                    generated = _generate_with_gemini(request, settings, days_until_interview) if blueprint is None else _generate_with_gemini(request, settings, days_until_interview, blueprint)
+                    return _align_plan_to_blueprint(generated, blueprint)
                 except GeminiQuotaError as exc:
                     logger.warning("Gemini prep plan quota exceeded after OpenAI failure: %s", exc)
                     require_ai_result("AI prep-plan generation hit a quota limit. Enable local fallback in settings to create an offline plan.")
-                    return _generate_heuristic_plan(request, days_until_interview, plan_source="quota_fallback")
+                    return _align_plan_to_blueprint(_generate_heuristic_plan(request, days_until_interview, plan_source="quota_fallback", blueprint=blueprint), blueprint)
                 except Exception as exc:
                     logger.warning("Gemini prep plan generation failed after OpenAI failure: %s", exc)
             require_ai_result("AI prep-plan generation failed. Enable local fallback in settings to create an offline plan.")
-            return _generate_heuristic_plan(request, days_until_interview, plan_source="heuristic_fallback")
+            return _align_plan_to_blueprint(_generate_heuristic_plan(request, days_until_interview, plan_source="heuristic_fallback", blueprint=blueprint), blueprint)
 
     if settings and settings.gemini_enabled:
         try:
-            return _generate_with_gemini(request, settings, days_until_interview)
+            generated = _generate_with_gemini(request, settings, days_until_interview) if blueprint is None else _generate_with_gemini(request, settings, days_until_interview, blueprint)
+            return _align_plan_to_blueprint(generated, blueprint)
         except GeminiQuotaError as exc:
             logger.warning("Gemini prep plan quota exceeded: %s", exc)
             require_ai_result("AI prep-plan generation hit a quota limit. Enable local fallback in settings to create an offline plan.")
-            return _generate_heuristic_plan(request, days_until_interview, plan_source="quota_fallback")
+            return _align_plan_to_blueprint(_generate_heuristic_plan(request, days_until_interview, plan_source="quota_fallback", blueprint=blueprint), blueprint)
         except Exception as exc:
             logger.warning("Gemini prep plan generation failed: %s", exc)
             require_ai_result("AI prep-plan generation failed. Enable local fallback in settings to create an offline plan.")
-            return _generate_heuristic_plan(request, days_until_interview, plan_source="heuristic_fallback")
+            return _align_plan_to_blueprint(_generate_heuristic_plan(request, days_until_interview, plan_source="heuristic_fallback", blueprint=blueprint), blueprint)
 
     require_ai_result("No AI provider is configured for prep-plan generation. Enable local fallback in settings to create an offline plan.")
-    return _generate_heuristic_plan(request, days_until_interview, plan_source="heuristic")
+    return _align_plan_to_blueprint(_generate_heuristic_plan(request, days_until_interview, plan_source="heuristic", blueprint=blueprint), blueprint)
 
 
 def _generate_heuristic_plan(
     request: PrepPlanRequest,
     days_until_interview: int,
     plan_source: str,
+    blueprint: Optional[RoleBlueprint] = None,
 ) -> PrepPlanResponse:
-    detected_skills = _detect_skills(request.job_description)
+    detected_skills = _blueprint_skills(blueprint) or _detect_skills(request.job_description)
     topics = [skill.name for skill in detected_skills] or ["Python", "Data Structures", "Behavioral Interviewing"]
 
     return PrepPlanResponse(
         job_title=request.job_title,
+        company=request.company or "",
         days_until_interview=days_until_interview,
         detected_skills=detected_skills,
         plan_summary=_summary(days_until_interview, topics),
@@ -103,12 +114,13 @@ def _generate_with_openai(
     request: PrepPlanRequest,
     settings: Settings,
     days_until_interview: int,
+    blueprint: Optional[RoleBlueprint] = None,
 ) -> PrepPlanResponse:
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
     response = client.responses.parse(
-        model=settings.openai_model,
+        model=settings.generation_model,
         input=[
             {
                 "role": "system",
@@ -127,7 +139,8 @@ def _generate_with_openai(
                     f"Days until interview: {days_until_interview}\n"
                     f"Hours per day: {request.hours_per_day}\n"
                     f"Comfort level: {request.comfort_level}\n\n"
-                    f"Job description:\n{request.job_description}"
+                    f"Shared role intelligence:\n{blueprint_context(blueprint, include_sources=False)}\n\n"
+                    f"Job description source text:\n{request.job_description}"
                 ),
             },
         ],
@@ -151,6 +164,7 @@ def _generate_with_openai(
 
     return PrepPlanResponse(
         job_title=request.job_title,
+        company=request.company or "",
         days_until_interview=days_until_interview,
         detected_skills=ai_plan.detected_skills,
         plan_summary=ai_plan.plan_summary,
@@ -163,6 +177,7 @@ def _generate_with_gemini(
     request: PrepPlanRequest,
     settings: Settings,
     days_until_interview: int,
+    blueprint: Optional[RoleBlueprint] = None,
 ) -> PrepPlanResponse:
     base_topics = _topic_words(request.job_description)
     base_tasks = _build_tasks(days_until_interview, base_topics, request.hours_per_day)
@@ -186,6 +201,7 @@ def _generate_with_gemini(
         f"Days until interview: {days_until_interview}\n"
         f"Hours per day: {request.hours_per_day}\n"
         f"Comfort level: {request.comfort_level}\n\n"
+        f"Shared role intelligence:\n{blueprint_context(blueprint, include_sources=False)}\n\n"
         f"Job description:\n{request.job_description}"
     )
     data = generate_gemini_json(settings, prompt, _gemini_plan_schema())
@@ -212,6 +228,7 @@ def _generate_with_gemini(
 
     return PrepPlanResponse(
         job_title=request.job_title,
+        company=request.company or "",
         days_until_interview=days_until_interview,
         detected_skills=ai_plan.detected_skills,
         plan_summary=ai_plan.plan_summary,
@@ -467,3 +484,36 @@ def _topics_for_day(topics: list[str], day: int) -> list[str]:
 def _summary(days: int, topics: list[str]) -> str:
     topic_text = ", ".join(topics[:5])
     return f"{days}-day prep plan focused on {topic_text} with diagnostics, practice, mock interviews, and final revision."
+
+
+def _blueprint_skills(blueprint: Optional[RoleBlueprint]) -> list[SkillSignal]:
+    if blueprint is None:
+        return []
+    confidence = {"critical": 0.98, "important": 0.88, "supporting": 0.72}
+    return [
+        SkillSignal(name=item.name, confidence=confidence[item.priority])
+        for item in blueprint.competencies[:10]
+    ]
+
+
+def _align_plan_to_blueprint(plan: PrepPlanResponse, blueprint: Optional[RoleBlueprint]) -> PrepPlanResponse:
+    """Guarantee that the highest-priority role signals reach the saved plan."""
+
+    if blueprint is None:
+        return plan
+    tasks = [task.model_copy(deep=True) for task in plan.tasks]
+    covered = {topic.casefold() for task in tasks for topic in task.topics}
+    candidates = [task for task in tasks if task.task_type in {PrepTaskType.study, PrepTaskType.coding, PrepTaskType.revision, PrepTaskType.diagnostic}]
+    candidates = candidates or tasks
+    for index, competency in enumerate(critical_competency_names(blueprint)):
+        if competency.casefold() in covered or not candidates:
+            continue
+        target = candidates[index % len(candidates)]
+        target.topics = [*target.topics, competency]
+        target.instructions = f"{target.instructions.rstrip()} Cover {competency} because it is a high-priority requirement in the shared role blueprint."
+        covered.add(competency.casefold())
+    return plan.model_copy(update={
+        "detected_skills": _blueprint_skills(blueprint),
+        "role_blueprint_version": blueprint.version,
+        "tasks": tasks,
+    })

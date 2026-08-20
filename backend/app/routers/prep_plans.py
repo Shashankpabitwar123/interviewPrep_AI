@@ -3,11 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import User
+from app.models import JobPost, User
 from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepPlanSummary, PrepTaskStatusUpdate
 from app.services.auth_service import get_request_user
 from app.services.job_analyzer import analysis_from_job_brief, build_job_description_brief
-from app.services.job_source import resolve_job_description
+from app.services.job_source import ResolvedJobSource, resolve_job_source
 from app.services.planner import generate_prep_plan
 from app.services.persistence import (
     delete_prep_plan,
@@ -20,6 +20,9 @@ from app.services.persistence import (
 )
 from app.models import PrepTask
 from app.services.usage_service import record_usage_event
+from app.services.generation_run_service import record_generation_run
+from app.services.research_service import research_for_role, save_research_bundle
+from app.services.role_intelligence_service import build_role_blueprint, ensure_role_blueprint, save_role_blueprint
 
 router = APIRouter(prefix="/prep-plans", tags=["prep plans"])
 
@@ -34,7 +37,18 @@ def create_prep_plan(
     existing_job = get_job_detail(db, request.job_post_id, current_user) if request.job_post_id else None
     if request.job_post_id and existing_job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    description = existing_job.description if existing_job and not request.job_description and not request.source_url else resolve_job_description(request.job_description, request.source_url)
+    if existing_job and not request.job_description and not request.source_url:
+        source = ResolvedJobSource(
+            text=existing_job.description,
+            extraction_method=(db.get(JobPost, existing_job.id).capture_metadata or {}).get("extraction_method", "saved") if db.get(JobPost, existing_job.id) else "saved",
+            source_url=existing_job.source_url,
+        )
+    else:
+        try:
+            source = resolve_job_source(request.job_description, request.source_url, settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    description = source.text
     source_url = request.source_url or (existing_job.source_url if existing_job else None)
     requested_title = request.job_title if request.job_title != "Auto-detect role" else (existing_job.title if existing_job else request.job_title)
     requested_company = request.company if request.company != "Auto-detect company" else (existing_job.company if existing_job else request.company)
@@ -49,7 +63,25 @@ def create_prep_plan(
     inferred_title = brief.role_title if title_is_auto and brief.role_title else requested_title
     inferred_company = brief.company if company_is_auto and brief.company else (requested_company or "")
     plan_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description, "source_url": source_url})
-    plan = generate_prep_plan(plan_request, settings)
+    if existing_job:
+        db_job = db.get(JobPost, existing_job.id)
+        blueprint, research_bundle = ensure_role_blueprint(db, db_job, brief, settings, current_user)
+    else:
+        research_bundle = research_for_role(
+            settings,
+            role=inferred_title,
+            company=inferred_company,
+            topics=[item.topic for item in brief.interview_topics],
+            job_description=description,
+            source_url=source_url,
+        )
+        blueprint = build_role_blueprint(
+            brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+            description,
+            source_url,
+            research_bundle,
+        )
+    plan = generate_prep_plan(plan_request, settings, blueprint)
     saved_plan = save_prep_plan(
         db,
         inferred_title,
@@ -61,6 +93,7 @@ def create_prep_plan(
         interview_at=request.interview_at,
         hours_per_day=request.hours_per_day,
         job_post_id=request.job_post_id,
+        capture_metadata=source.metadata(),
     )
     stored_brief = save_job_brief(
         db,
@@ -71,6 +104,26 @@ def create_prep_plan(
     )
     if stored_brief is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    saved_job = db.get(JobPost, saved_plan.job_post_id)
+    if saved_job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not existing_job:
+        snapshot = save_research_bundle(db, saved_job, research_bundle)
+        save_role_blueprint(db, saved_job.id, blueprint, snapshot.id, current_user)
+    record_generation_run(
+        db,
+        artifact_type="prep_plan",
+        prompt_version="prep-plan-v3",
+        settings=settings,
+        provider=saved_plan.plan_source,
+        model=settings.generation_model if saved_plan.plan_source == "openai" else None,
+        user=current_user,
+        job_post_id=saved_plan.job_post_id,
+        prep_plan_id=saved_plan.prep_plan_id,
+        input_value=blueprint.model_dump(mode="json"),
+        output_value=saved_plan.model_dump(mode="json"),
+        quality={"critical_topics": len([item for item in blueprint.competencies if item.priority == "critical"])},
+    )
     record_usage_event(
         db,
         current_user,

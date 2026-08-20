@@ -47,6 +47,14 @@ def test_job_analysis_endpoint_saves_and_reads_job() -> None:
     assert second_read.status_code == 200
     assert second_read.json() == brief
 
+    intelligence_response = client.get(f"/jobs/{body['job_post_id']}/intelligence")
+    intelligence = intelligence_response.json()
+    assert intelligence_response.status_code == 200
+    assert intelligence["blueprint"]["version"] == "v3"
+    assert intelligence["blueprint"]["source_fingerprint"]
+    assert intelligence["blueprint"]["competencies"]
+    assert intelligence["blueprint"]["research_sources"][0]["origin"] == "job_posting"
+
 
 def test_logged_in_users_only_see_their_own_jobs() -> None:
     client = _client_with_memory_db()
@@ -350,6 +358,12 @@ def test_exam_generation_and_submission_flow() -> None:
     exam = exam_response.json()
     assert exam_response.status_code == 200
     assert len(exam["questions"]) == 3
+    assert all("expected_answer" not in question for question in exam["questions"])
+    assert all(
+        "is_correct" not in option
+        for question in exam["questions"]
+        for option in (question.get("options") or [])
+    )
 
     answers = []
     for question in exam["questions"]:
@@ -364,6 +378,13 @@ def test_exam_generation_and_submission_flow() -> None:
 
     assert submission.status_code == 200
     assert submission.json()["average_score"] > 0.5
+    review = submission.json()["review_exam"]
+    assert all("expected_answer" in question for question in review["questions"])
+    assert any(
+        "is_correct" in option
+        for question in review["questions"]
+        for option in (question.get("options") or [])
+    )
     stored = client.get(f"/exams?prep_plan_id={prep_plan_id}")
     assert stored.status_code == 200
     assert stored.json()[0]["exam"]["id"] == exam["id"]
@@ -758,6 +779,8 @@ def test_mock_interview_flow() -> None:
     assert started["scope"] == "through_selected_day"
     assert started["focus_topics"] == ["SQL joins", "Python"]
     assert started["current_topic"] == "SQL joins"
+    assert len(started["session_plan"]) == started["question_count"]
+    assert all(slot["intent"] and slot["rubric"] for slot in started["session_plan"])
 
     answer_response = client.post(
         f"/mock-interviews/{started['id']}/answer",
@@ -769,7 +792,8 @@ def test_mock_interview_flow() -> None:
 
     assert answer_response.status_code == 200
     assert answered["average_score"] > 0
-    assert any(message["role"] == "feedback" for message in answered["messages"])
+    feedback = next(message for message in answered["messages"] if message["role"] == "feedback")
+    assert set(feedback["detail"]["dimensions"]) >= {"relevance", "depth", "structure", "communication"}
     listed = client.get(f"/mock-interviews?prep_plan_id={prep_plan_id}")
     assert listed.status_code == 200
     assert listed.json()[0]["id"] == started["id"]

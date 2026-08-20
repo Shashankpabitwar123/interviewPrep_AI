@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import User
+from app.models import JobPost, User
 from app.schemas.job_analysis import (
     JobAnalysisRequest,
     JobAnalysisResponse,
@@ -14,12 +14,13 @@ from app.schemas.job_analysis import (
     JobPostDetail,
     JobPostSummary,
 )
+from app.schemas.role_intelligence import RoleIntelligenceResponse
 from app.services.job_analyzer import (
     analysis_from_job_brief,
     answer_job_description_question,
     build_job_description_brief,
 )
-from app.services.job_source import resolve_job_description
+from app.services.job_source import ResolvedJobSource, resolve_job_source
 from app.services.persistence import (
     delete_job,
     get_job_detail,
@@ -31,6 +32,8 @@ from app.services.persistence import (
 )
 from app.services.auth_service import get_request_user
 from app.services.usage_service import record_usage_event
+from app.services.generation_run_service import record_generation_run
+from app.services.role_intelligence_service import ensure_role_blueprint, get_saved_role_blueprint
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -43,9 +46,17 @@ def analyze_job(
     current_user: User | None = Depends(get_request_user),
 ) -> JobAnalysisResponse:
     if request.save_mode == "url" and request.source_url and not request.job_description:
-        description = f"Saved URL bookmark. Open the source URL to view the job description. URL: {request.source_url}"
+        source = ResolvedJobSource(
+            text=f"Saved URL bookmark. Open the source URL to view the job description. URL: {request.source_url}",
+            extraction_method="bookmark",
+            source_url=request.source_url,
+        )
     else:
-        description = resolve_job_description(request.job_description, request.source_url)
+        try:
+            source = resolve_job_source(request.job_description, request.source_url, settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    description = source.text
     # Generate one canonical analysis during upload. It detects missing role
     # details and feeds the compact planner fields, so new jobs never need a
     # separate title/company or analysis generation request.
@@ -67,7 +78,31 @@ def analyze_job(
         interview_at=request.interview_at,
         hours_per_day=request.hours_per_day,
         structured_brief=brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+        capture_metadata=source.metadata(),
     )
+    job = db.get(JobPost, saved_job.job_post_id)
+    blueprint = None
+    research_bundle = None
+    if job is not None and request.save_mode != "url":
+        blueprint, research_bundle = ensure_role_blueprint(
+            db,
+            job,
+            brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+            settings,
+            current_user,
+        )
+        record_generation_run(
+            db,
+            artifact_type="role_blueprint",
+            prompt_version="role-blueprint-v3",
+            settings=settings,
+            provider="tavily+system" if research_bundle.results else "system",
+            user=current_user,
+            job_post_id=job.id,
+            input_value=description,
+            output_value=blueprint.model_dump(mode="json"),
+            quality={"competency_count": len(blueprint.competencies), "research_status": research_bundle.status},
+        )
     record_usage_event(
         db,
         current_user,
@@ -137,6 +172,9 @@ def get_job_brief(
         raise HTTPException(status_code=404, detail="Job not found")
     brief = get_saved_job_brief(db, job_post_id, current_user)
     if brief is not None:
+        db_job = db.get(JobPost, job_post_id)
+        if db_job is not None and not db_job.description.startswith("Saved URL bookmark."):
+            ensure_role_blueprint(db, db_job, brief, settings, current_user)
         return brief
 
     # This route only repairs old/stale saved jobs. New jobs receive their
@@ -146,6 +184,9 @@ def get_job_brief(
     stored = save_job_brief(db, job_post_id, brief, analysis_from_job_brief(brief), current_user)
     if stored is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    db_job = db.get(JobPost, job_post_id)
+    if db_job is not None and not db_job.description.startswith("Saved URL bookmark."):
+        ensure_role_blueprint(db, db_job, stored, settings, current_user)
     record_usage_event(
         db,
         current_user,
@@ -159,6 +200,31 @@ def get_job_brief(
     return stored
 
 
+@router.get("/{job_post_id}/intelligence", response_model=RoleIntelligenceResponse)
+def get_role_intelligence(
+    job_post_id: int,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> RoleIntelligenceResponse:
+    job = db.get(JobPost, job_post_id)
+    detail = get_job_detail(db, job_post_id, current_user)
+    if job is None or detail is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    brief = get_saved_job_brief(db, job_post_id, current_user)
+    if brief is None:
+        brief = build_job_description_brief(job.title, job.description, job.source_url, settings)
+        save_job_brief(db, job.id, brief, analysis_from_job_brief(brief), current_user)
+    cached = get_saved_role_blueprint(db, job.id, current_user)
+    blueprint, bundle = ensure_role_blueprint(db, job, brief, settings, current_user)
+    return RoleIntelligenceResponse(
+        blueprint=blueprint,
+        research_status=bundle.status,
+        research_source_count=max(0, len(blueprint.research_sources) - 1),
+        cached=cached is not None or bundle.cached,
+    )
+
+
 @router.post("/{job_post_id}/ask", response_model=JobDescriptionAskResponse)
 def ask_job_description(
     job_post_id: int,
@@ -170,7 +236,8 @@ def ask_job_description(
     job = get_job_detail(db, job_post_id, current_user)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    answer = answer_job_description_question(job.title, job.description, request.question, settings)
+    blueprint = get_saved_role_blueprint(db, job_post_id, current_user)
+    answer = answer_job_description_question(job.title, job.description, request.question, settings, blueprint)
     record_usage_event(
         db,
         current_user,

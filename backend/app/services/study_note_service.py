@@ -18,7 +18,9 @@ from app.schemas.study_note import (
 )
 from app.ai_policy import require_ai_result
 from app.services.gemini_service import generate_gemini_json
-from app.services.research_service import ResearchResult, research_for_note
+from app.schemas.role_intelligence import RoleBlueprint
+from app.services.research_service import ResearchResult, get_or_create_research_snapshot
+from app.services.role_intelligence_service import blueprint_context
 
 
 logger = logging.getLogger(__name__)
@@ -33,13 +35,8 @@ def generate_study_note(
     plan = db.get(PrepPlan, request.prep_plan_id)
     if plan is None or plan.job_post.user_id != (user.id if user else None):
         return None
-    research = research_for_note(
-        settings,
-        role=plan.job_post.title,
-        company=_company_hint(plan.job_post.description, plan.job_post.source_url),
-        topics=request.topics,
-        job_description=plan.job_post.description,
-    )
+    research_bundle = get_or_create_research_snapshot(db, plan.job_post, settings, topics=request.topics)
+    research = research_bundle.results
 
     if settings and settings.openai_enabled:
         try:
@@ -88,7 +85,12 @@ def improve_note(request: StudyNoteImproveRequest, settings: Optional[Settings])
     return _fallback_improved_note(request)
 
 
-def _generate_with_openai(plan: PrepPlan, request: StudyNoteRequest, settings: Settings, research: list[ResearchResult]) -> StudyNoteResponse:
+def _generate_with_openai(
+    plan: PrepPlan,
+    request: StudyNoteRequest,
+    settings: Settings,
+    research: list[ResearchResult],
+) -> StudyNoteResponse:
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
@@ -96,7 +98,7 @@ def _generate_with_openai(plan: PrepPlan, request: StudyNoteRequest, settings: S
     for max_output_tokens in (10000, 14000):
         try:
             response = client.responses.parse(
-                model=settings.openai_model,
+                model=settings.generation_model,
                 input=[
                     {
                         "role": "system",
@@ -108,7 +110,7 @@ def _generate_with_openai(plan: PrepPlan, request: StudyNoteRequest, settings: S
                             "Return complete structured JSON; keep wording concise enough to avoid truncation."
                         ),
                     },
-                    {"role": "user", "content": _note_prompt(plan, request, research)},
+                    {"role": "user", "content": _note_prompt(plan, request, research, _role_blueprint_for_plan(plan))},
                 ],
                 text_format=StudyNoteResponse,
                 max_output_tokens=max_output_tokens,
@@ -122,8 +124,13 @@ def _generate_with_openai(plan: PrepPlan, request: StudyNoteRequest, settings: S
     raise RuntimeError("OpenAI study note generation failed before producing a response.")
 
 
-def _generate_with_gemini(plan: PrepPlan, request: StudyNoteRequest, settings: Settings, research: list[ResearchResult]) -> StudyNoteResponse:
-    data = generate_gemini_json(settings, _note_prompt(plan, request, research), _gemini_note_schema())
+def _generate_with_gemini(
+    plan: PrepPlan,
+    request: StudyNoteRequest,
+    settings: Settings,
+    research: list[ResearchResult],
+) -> StudyNoteResponse:
+    data = generate_gemini_json(settings, _note_prompt(plan, request, research, _role_blueprint_for_plan(plan)), _gemini_note_schema())
     return _ensure_research_sources(StudyNoteResponse.model_validate(data), research).model_copy(update={"source": "gemini"})
 
 
@@ -132,7 +139,7 @@ def _answer_with_openai(request: StudyNoteAskRequest, settings: Settings) -> Stu
 
     client = OpenAI(api_key=settings.openai_api_key)
     response = client.responses.parse(
-        model=settings.openai_model,
+        model=settings.generation_model,
         input=[
             {
                 "role": "system",
@@ -162,7 +169,7 @@ def _improve_with_openai(request: StudyNoteImproveRequest, settings: Settings) -
 
     client = OpenAI(api_key=settings.openai_api_key)
     response = client.responses.parse(
-        model=settings.openai_model,
+        model=settings.generation_model,
         input=[
             {
                 "role": "system",
@@ -277,7 +284,12 @@ def _fallback_improved_note(request: StudyNoteImproveRequest) -> StudyNoteImprov
     return StudyNoteImproveResponse(title=title, body=improved, color="#2563eb", source="local fallback")
 
 
-def _note_prompt(plan: PrepPlan, request: StudyNoteRequest, research: list[ResearchResult]) -> str:
+def _note_prompt(
+    plan: PrepPlan,
+    request: StudyNoteRequest,
+    research: list[ResearchResult],
+    blueprint: Optional[RoleBlueprint] = None,
+) -> str:
     topics = ", ".join(request.topics) or request.title
     research_text = _research_context(research)
     return (
@@ -295,6 +307,7 @@ def _note_prompt(plan: PrepPlan, request: StudyNoteRequest, research: list[Resea
         "- a checklist for readiness before the practice exam\n\n"
         "Important: Do not invent exact recent interview questions from companies. Use web research only as support, summarize it briefly, and cite links.\n\n"
         f"Role: {plan.job_post.title}\n"
+        f"Shared role intelligence:\n{blueprint_context(blueprint, include_sources=True)}\n\n"
         f"Plan summary: {plan.summary}\n"
         f"Day: {request.day}\n"
         f"Note title: {request.title}\n"
@@ -483,15 +496,29 @@ def _research_sources(research: list[ResearchResult]) -> list[WebResearchSource]
             url=item.url,
             summary=item.content[:500] or "Relevant source found during web research.",
             query=item.query,
+            source_id=item.source_id,
+            origin=item.origin,
+            authority=item.authority,
+            relevance_score=item.relevance_score,
         )
         for item in research
     ]
 
 
 def _ensure_research_sources(note: StudyNoteResponse, research: list[ResearchResult]) -> StudyNoteResponse:
-    if note.web_research:
-        return note
+    # Provenance must come from the server-side evidence bundle, not from
+    # model-authored URLs or source metadata.
     return note.model_copy(update={"web_research": _research_sources(research)})
+
+
+def _role_blueprint_for_plan(plan: PrepPlan) -> Optional[RoleBlueprint]:
+    record = plan.job_post.role_blueprint
+    if record is None:
+        return None
+    try:
+        return RoleBlueprint.model_validate(record.blueprint)
+    except Exception:
+        return None
 
 
 def _company_hint(description: str, source_url: str | None) -> str:

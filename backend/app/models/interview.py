@@ -77,9 +77,12 @@ class JobPost(TimestampMixin, Base):
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     interview_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     hours_per_day: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    capture_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     analysis: Mapped[Optional["JobAnalysis"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
     prep_plans: Mapped[list["PrepPlan"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
+    role_blueprint: Mapped[Optional["RoleBlueprintRecord"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
+    research_snapshots: Mapped[list["ResearchSnapshot"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
 
 
 class JobAnalysis(TimestampMixin, Base):
@@ -116,6 +119,7 @@ class PrepPlan(TimestampMixin, Base):
     job_post_id: Mapped[int] = mapped_column(ForeignKey("job_posts.id"))
     days_until_interview: Mapped[int] = mapped_column(Integer)
     summary: Mapped[str] = mapped_column(Text)
+    role_blueprint_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
     job_post: Mapped["JobPost"] = relationship(back_populates="prep_plans")
     tasks: Mapped[list["PrepTask"]] = relationship(back_populates="prep_plan", cascade="all, delete-orphan")
@@ -152,6 +156,8 @@ class Exam(TimestampMixin, Base):
     day: Mapped[int] = mapped_column(Integer)
     scope: Mapped[str] = mapped_column(String(40), default="selected_day", server_default="selected_day")
     time_limit_minutes: Mapped[int] = mapped_column(Integer)
+    generation_blueprint: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    quality_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     prep_plan: Mapped["PrepPlan"] = relationship(back_populates="exams")
     questions: Mapped[list["Question"]] = relationship(back_populates="exam", cascade="all, delete-orphan")
@@ -169,6 +175,7 @@ class Question(TimestampMixin, Base):
     topics: Mapped[list[str]] = mapped_column(JSON)
     expected_answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     options: Mapped[Optional[list[dict]]] = mapped_column(JSON, nullable=True)
+    question_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     exam: Mapped["Exam"] = relationship(back_populates="questions")
     attempts: Mapped[list["AnswerAttempt"]] = relationship(back_populates="question", cascade="all, delete-orphan")
@@ -214,6 +221,8 @@ class MockInterview(TimestampMixin, Base):
     current_topic: Mapped[str] = mapped_column(String(160))
     status: Mapped[str] = mapped_column(String(40), default="active")
     average_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    session_plan: Mapped[Optional[list[dict]]] = mapped_column(JSON, nullable=True)
+    overall_feedback: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     prep_plan: Mapped["PrepPlan"] = relationship(back_populates="mock_interviews")
     messages: Mapped[list["MockMessage"]] = relationship(back_populates="mock_interview", cascade="all, delete-orphan")
@@ -229,6 +238,7 @@ class MockMessage(TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(40))
     content: Mapped[str] = mapped_column(Text)
     score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     mock_interview: Mapped["MockInterview"] = relationship(back_populates="messages")
 
@@ -243,3 +253,57 @@ class WorkspaceState(TimestampMixin, Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     user: Mapped[Optional["User"]] = relationship(back_populates="workspace_state")
+
+
+class ResearchSnapshot(TimestampMixin, Base):
+    """Cached, auditable web evidence collected for one saved job."""
+
+    __tablename__ = "research_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_post_id: Mapped[int] = mapped_column(ForeignKey("job_posts.id", ondelete="CASCADE"), index=True)
+    description_hash: Mapped[str] = mapped_column(String(64), index=True)
+    research_version: Mapped[str] = mapped_column(String(32), default="v1")
+    provider: Mapped[str] = mapped_column(String(40), default="tavily")
+    status: Mapped[str] = mapped_column(String(40), default="complete")
+    sources: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    query_log: Mapped[list[dict]] = mapped_column(JSON, default=list)
+
+    job_post: Mapped["JobPost"] = relationship(back_populates="research_snapshots")
+
+
+class RoleBlueprintRecord(TimestampMixin, Base):
+    """Persisted v3 role intelligence shared by all job-scoped generators."""
+
+    __tablename__ = "role_blueprints"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_post_id: Mapped[int] = mapped_column(ForeignKey("job_posts.id", ondelete="CASCADE"), unique=True, index=True)
+    version: Mapped[str] = mapped_column(String(32), default="v3")
+    description_hash: Mapped[str] = mapped_column(String(64), index=True)
+    blueprint: Mapped[dict] = mapped_column(JSON)
+    research_snapshot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("research_snapshots.id", ondelete="SET NULL"), nullable=True)
+
+    job_post: Mapped["JobPost"] = relationship(back_populates="role_blueprint")
+
+
+class GenerationRun(TimestampMixin, Base):
+    """Operational record for prompt/version, cost, latency, and quality tracing."""
+
+    __tablename__ = "generation_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    job_post_id: Mapped[Optional[int]] = mapped_column(ForeignKey("job_posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    prep_plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("prep_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(80), index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="openai")
+    model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    prompt_version: Mapped[str] = mapped_column(String(40), default="v1")
+    context_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="complete")
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    quality: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

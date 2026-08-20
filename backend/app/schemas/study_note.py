@@ -26,6 +26,10 @@ class WebResearchSource(BaseModel):
     url: str
     summary: str
     query: str
+    source_id: str = ""
+    origin: str = "web_research"
+    authority: float = 0.5
+    relevance_score: float = 0.5
 
 
 class StudyNoteResponse(BaseModel):

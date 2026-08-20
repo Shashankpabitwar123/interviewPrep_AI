@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -11,12 +13,16 @@ from app.schemas.exam import (
     AnswerResult,
     ExamGenerateRequest,
     ExamResponse,
+    ExamReviewResponse,
     ExamSubmissionRequest,
     ExamSubmissionResponse,
     ExamStoredAttemptResponse,
     QuestionResponse,
+    QuestionReviewResponse,
 )
+from app.schemas.role_intelligence import RoleBlueprint
 from app.services.gemini_service import generate_gemini_json
+from app.services.role_intelligence_service import blueprint_context
 
 logger = logging.getLogger(__name__)
 
@@ -57,26 +63,36 @@ def generate_exam_for_plan(
         return None
 
     scope, topics = _resolve_exam_scope(plan, request)
+    role_blueprint = _role_blueprint_for_plan(plan)
+    generation_blueprint = _build_exam_blueprint(topics, request, role_blueprint)
     db_exam = Exam(
         prep_plan_id=plan.id,
         title=_exam_title(request.day, request.difficulty, scope),
         day=request.day,
         scope=scope,
         time_limit_minutes=request.time_limit_minutes or max(20, request.question_count * 6),
+        generation_blueprint=generation_blueprint,
     )
     db.add(db_exam)
     db.flush()
 
-    generated = _generate_questions_with_ai(plan, topics, request, settings, scope) or []
+    generated = _generate_questions_with_ai(plan, topics, request, settings, scope, role_blueprint, generation_blueprint) or []
     if len(generated) < request.question_count:
         require_ai_result(
             "AI exam generation did not return enough questions. Enable local fallback in settings to fill the exam with offline questions."
         )
         generated.extend(_generate_questions(topics, request.question_count - len(generated), request.difficulty, request.question_types))
     generated = [_constrain_question_topics(question, topics, index) for index, question in enumerate(generated)]
+    generated = _quality_review_with_ai(generated, plan, request, role_blueprint, settings)
+    quality_report = _exam_quality_report(generated, topics, request.question_count)
+    db_exam.quality_report = quality_report
     db_questions: list[Question] = []
-    for question in generated:
-        db_question = Question(exam_id=db_exam.id, **question)
+    for index, question in enumerate(generated):
+        db_question = Question(
+            exam_id=db_exam.id,
+            question_metadata=generation_blueprint[index] if index < len(generation_blueprint) else {},
+            **question,
+        )
         db.add(db_question)
         db_questions.append(db_question)
 
@@ -85,14 +101,14 @@ def generate_exam_for_plan(
     for question in db_questions:
         db.refresh(question)
 
-    return _exam_to_response(db_exam)
+    return _exam_to_take_response(db_exam)
 
 
 def get_exam_detail(db: Session, exam_id: int, user: Optional[User] = None) -> Optional[ExamResponse]:
     exam = db.get(Exam, exam_id)
     if exam is None or not _owns_plan(exam.prep_plan, user):
         return None
-    return _exam_to_response(exam)
+    return _exam_to_take_response(exam)
 
 
 def list_exam_attempts(db: Session, user: Optional[User] = None, prep_plan_id: Optional[int] = None) -> list[ExamStoredAttemptResponse]:
@@ -152,7 +168,12 @@ def submit_exam_answers(
 
     db.commit()
     average = round(sum(result.score for result in results) / len(results), 2) if results else 0.0
-    return ExamSubmissionResponse(exam_id=exam.id, average_score=average, results=results)
+    return ExamSubmissionResponse(
+        exam_id=exam.id,
+        average_score=average,
+        results=results,
+        review_exam=_exam_to_review_response(exam),
+    )
 
 
 def _topics_for_day(plan: PrepPlan, day: int) -> list[str]:
@@ -210,6 +231,50 @@ def _exam_title(day: int, difficulty: str, scope: str) -> str:
     return f"{prefix} {difficulty.title()} Interview Prep Exam"
 
 
+def _role_blueprint_for_plan(plan: PrepPlan) -> Optional[RoleBlueprint]:
+    record = plan.job_post.role_blueprint
+    if record is None:
+        return None
+    try:
+        return RoleBlueprint.model_validate(record.blueprint)
+    except Exception:
+        return None
+
+
+def _build_exam_blueprint(
+    topics: list[str],
+    request: ExamGenerateRequest,
+    role_blueprint: Optional[RoleBlueprint],
+) -> list[dict]:
+    """Create coverage before prose generation so question quality is measurable."""
+
+    types = _effective_question_types(request.question_types, request.difficulty)
+    if request.auto_question_types:
+        types = {
+            "easy": ["multiple_choice", "one_word", "fill_blank", "short_answer"],
+            "medium": ["multiple_choice", "short_answer", "multiple_select", "coding"],
+            "hard": ["short_answer", "coding", "multiple_select", "multiple_choice"],
+        }.get(request.difficulty, types)
+    cognitive_levels = {
+        "easy": ["remember", "understand", "apply"],
+        "medium": ["understand", "apply", "analyze"],
+        "hard": ["apply", "analyze", "evaluate", "create"],
+    }.get(request.difficulty, ["understand", "apply", "analyze"])
+    competency_names = {item.name.casefold(): item.name for item in (role_blueprint.competencies if role_blueprint else [])}
+    specs: list[dict] = []
+    for index in range(request.question_count):
+        topic = topics[index % len(topics)]
+        specs.append({
+            "number": index + 1,
+            "topic": topic,
+            "competency": competency_names.get(topic.casefold(), topic),
+            "question_type": types[index % len(types)],
+            "difficulty": request.difficulty,
+            "cognitive_level": cognitive_levels[index % len(cognitive_levels)],
+        })
+    return specs
+
+
 def _owns_plan(plan: PrepPlan, user: Optional[User]) -> bool:
     if user:
         return plan.job_post.user_id == user.id
@@ -233,7 +298,8 @@ def _stored_attempt_response(exam: Exam) -> ExamStoredAttemptResponse:
         results.append(AnswerResult(question_id=question.id, score=score, feedback=latest.feedback or ""))
     average = round(sum(scores) / len(exam.questions), 2) if has_attempt and exam.questions else None
     return ExamStoredAttemptResponse(
-        exam=_exam_to_response(exam),
+        exam=_exam_to_take_response(exam),
+        review_exam=_exam_to_review_response(exam) if has_attempt else None,
         status="complete" if has_attempt else "ready",
         average_score=average,
         results=results,
@@ -286,6 +352,8 @@ def _generate_questions_with_ai(
     request: ExamGenerateRequest,
     settings: Optional[Settings],
     scope: str,
+    role_blueprint: Optional[RoleBlueprint] = None,
+    generation_blueprint: Optional[list[dict]] = None,
 ) -> Optional[list[dict]]:
     if not settings or not settings.ai_enabled:
         require_ai_result("No AI provider is configured for exam generation. Enable local fallback in settings to create an offline exam.")
@@ -306,6 +374,8 @@ def _generate_questions_with_ai(
             batch_question_count=batch_size,
             batch_number=batch_number,
             existing_prompts=[question["prompt"] for question in questions[-12:]],
+            role_blueprint=role_blueprint,
+            generation_blueprint=(generation_blueprint or [])[len(questions):len(questions) + batch_size],
         )
         data = _request_exam_batch(prompt, settings, batch_size)
         normalized = _normalize_ai_exam_questions(data, topics, request)
@@ -387,12 +457,109 @@ def _normalize_ai_exam_questions(data: object, topics: list[str], request: ExamG
     return questions
 
 
+def _quality_review_with_ai(
+    questions: list[dict],
+    plan: PrepPlan,
+    request: ExamGenerateRequest,
+    role_blueprint: Optional[RoleBlueprint],
+    settings: Optional[Settings],
+) -> list[dict]:
+    """Use one structured critic pass to repair ambiguity and weak distractors."""
+
+    if not settings or not settings.openai_enabled or not questions:
+        return questions
+    prompt = (
+        "Audit and repair this interview exam. Return the same number of questions in the same JSON schema. "
+        "Preserve scope and topics. Remove ambiguity, repeated wording, answer clues, unsupported company claims, "
+        "and weak distractors. Every expected answer must be accurate, concise, and usable for fair grading. "
+        "For multiple choice, exactly one option is correct. For multiple select, at least one option is correct. "
+        "Do not place the answer inside the question prompt.\n\n"
+        f"Role intelligence:\n{blueprint_context(role_blueprint, include_sources=False)}\n\n"
+        f"Exam to audit:\n{json.dumps({'questions': questions}, ensure_ascii=False)}"
+    )
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=settings.openai_api_key)
+        response = client.responses.parse(
+            model=settings.analysis_model,
+            input=[
+                {"role": "system", "content": "You are a strict interview-assessment editor. Return structured JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            text_format=AIExamOutput,
+            max_output_tokens=max(6000, len(questions) * 900),
+        )
+        allowed_topics = _resolve_exam_scope(plan, request)[1]
+        repaired = _normalize_ai_exam_questions(response.output_parsed.model_dump(), allowed_topics, request)
+        repaired = [
+            _constrain_question_topics(question, allowed_topics, index)
+            for index, question in enumerate(repaired)
+        ]
+        if len(repaired) != len(questions):
+            return questions
+        original_report = _exam_quality_report(questions, allowed_topics, len(questions))
+        repaired_report = _exam_quality_report(repaired, allowed_topics, len(questions))
+        return repaired if repaired_report["issue_count"] <= original_report["issue_count"] else questions
+    except Exception as exc:
+        logger.warning("OpenAI exam quality review failed: %s", exc)
+        return questions
+
+
+def _exam_quality_report(questions: list[dict], allowed_topics: list[str], expected_count: int) -> dict:
+    issues: list[dict] = []
+    seen_prompts: set[str] = set()
+    allowed = {topic.casefold() for topic in allowed_topics}
+    covered: set[str] = set()
+    for index, question in enumerate(questions, start=1):
+        prompt = re.sub(r"\s+", " ", str(question.get("prompt") or "")).strip()
+        expected = re.sub(r"\s+", " ", str(question.get("expected_answer") or "")).strip()
+        key = _question_dedupe_key(prompt)
+        if not prompt or len(prompt) < 24:
+            issues.append({"question": index, "type": "prompt_too_short"})
+        if key in seen_prompts:
+            issues.append({"question": index, "type": "duplicate_prompt"})
+        seen_prompts.add(key)
+        if not expected:
+            issues.append({"question": index, "type": "missing_expected_answer"})
+        if len(expected) >= 14 and expected.casefold() in prompt.casefold():
+            issues.append({"question": index, "type": "answer_leak_in_prompt"})
+        topics = {str(topic).casefold() for topic in question.get("topics") or []}
+        covered.update(topics & allowed)
+        if topics - allowed:
+            issues.append({"question": index, "type": "out_of_scope_topic"})
+        options = question.get("options") or []
+        if question.get("question_type") in {"multiple_choice", "multiple_select"}:
+            texts = [str(option.get("text") or "").casefold() for option in options]
+            correct_count = sum(1 for option in options if option.get("is_correct"))
+            if len(options) < 3 or len(texts) != len(set(texts)):
+                issues.append({"question": index, "type": "invalid_options"})
+            if question.get("question_type") == "multiple_choice" and correct_count != 1:
+                issues.append({"question": index, "type": "invalid_correct_option_count"})
+            if question.get("question_type") == "multiple_select" and correct_count < 1:
+                issues.append({"question": index, "type": "missing_correct_selection"})
+    if len(questions) != expected_count:
+        issues.append({"question": 0, "type": "incorrect_question_count"})
+    missing_coverage = [topic for topic in allowed_topics if topic.casefold() not in covered]
+    if expected_count >= len(allowed_topics):
+        issues.extend({"question": 0, "type": "missing_topic_coverage", "topic": topic} for topic in missing_coverage)
+    return {
+        "passed": not issues,
+        "issue_count": len(issues),
+        "issues": issues[:30],
+        "question_count": len(questions),
+        "expected_count": expected_count,
+        "covered_topics": sorted(covered),
+        "missing_topics": missing_coverage,
+    }
+
+
 def _generate_questions_with_openai(prompt: str, settings: Settings, question_count: int, max_output_tokens: int) -> dict:
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
     response = client.responses.parse(
-        model=settings.openai_model,
+        model=settings.generation_model,
         input=[
             {
                 "role": "system",
@@ -421,6 +588,8 @@ def _exam_prompt(
     batch_question_count: Optional[int] = None,
     batch_number: int = 1,
     existing_prompts: Optional[list[str]] = None,
+    role_blueprint: Optional[RoleBlueprint] = None,
+    generation_blueprint: Optional[list[dict]] = None,
 ) -> str:
     scope_label = {
         "selected_day": "the selected day's planned topics only",
@@ -452,7 +621,8 @@ def _exam_prompt(
         "- If multiple_select is requested, at least two options can be correct when appropriate.\n\n"
         f"Return exactly {question_count} complete questions for batch {batch_number}. Keep each prompt and expected answer concise enough to fit the structured response.\n"
         f"Role: {plan.job_post.title}\n"
-        f"Company/job context: {getattr(plan.job_post, 'description', '')[:2000]}\n"
+        f"Shared role intelligence:\n{blueprint_context(role_blueprint, include_sources=False)}\n"
+        f"Job-posting source excerpt: {getattr(plan.job_post, 'description', '')[:3000]}\n"
         f"Prep plan summary: {plan.summary}\n"
         f"Exam scope: {scope_label}\n"
         f"Day: {request.day}\n"
@@ -463,7 +633,8 @@ def _exam_prompt(
         f"Difficulty rules: {difficulty_rules}\n"
         f"Allowed question types: {allowed_types}\n"
         f"Question type policy: {'Choose the strongest mix for this role and topics.' if request.auto_question_types else 'Use the requested types as much as possible.'}\n"
-        f"Topics to test: {', '.join(topics)}"
+        f"Topics to test: {', '.join(topics)}\n"
+        f"Required assessment blueprint for this batch:\n{json.dumps(generation_blueprint or [], ensure_ascii=False)}"
         f"{avoid_block}"
     )
 
@@ -684,7 +855,7 @@ def _score_answer_with_ai(
 
             client = OpenAI(api_key=settings.openai_api_key)
             response = client.responses.parse(
-                model=settings.openai_model,
+                model=settings.scoring_model,
                 input=[
                     {
                         "role": "system",
@@ -755,9 +926,34 @@ def _gemini_score_schema() -> dict:
     }
 
 
-def _exam_to_response(exam: Exam) -> ExamResponse:
+def _exam_to_take_response(exam: Exam) -> ExamResponse:
     questions = [
         QuestionResponse(
+            id=question.id,
+            question_type=question.question_type,
+            prompt=question.prompt,
+            topics=question.topics,
+            options=[
+                {"label": option.get("label", ""), "text": option.get("text", "")}
+                for option in (question.options or [])
+            ] or None,
+        )
+        for question in sorted(exam.questions, key=lambda question: question.id)
+    ]
+    return ExamResponse(
+        id=exam.id,
+        prep_plan_id=exam.prep_plan_id,
+        title=exam.title,
+        day=exam.day,
+        scope=exam.scope or "selected_day",
+        time_limit_minutes=exam.time_limit_minutes,
+        questions=questions,
+    )
+
+
+def _exam_to_review_response(exam: Exam) -> ExamReviewResponse:
+    questions = [
+        QuestionReviewResponse(
             id=question.id,
             question_type=question.question_type,
             prompt=question.prompt,
@@ -767,7 +963,7 @@ def _exam_to_response(exam: Exam) -> ExamResponse:
         )
         for question in sorted(exam.questions, key=lambda question: question.id)
     ]
-    return ExamResponse(
+    return ExamReviewResponse(
         id=exam.id,
         prep_plan_id=exam.prep_plan_id,
         title=exam.title,

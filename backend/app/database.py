@@ -77,6 +77,9 @@ def _apply_lightweight_migrations() -> None:
     if "hours_per_day" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE job_posts ADD COLUMN hours_per_day FLOAT"))
+    if "capture_metadata" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE job_posts ADD COLUMN capture_metadata JSON"))
 
     if "interview_experiences" in table_names:
         _add_missing_columns("interview_experiences", {"user_id": "INTEGER"})
@@ -84,7 +87,19 @@ def _apply_lightweight_migrations() -> None:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_interview_experiences_user_id ON interview_experiences (user_id)"))
 
     if "exams" in table_names:
-        _add_missing_columns("exams", {"scope": "VARCHAR(40) DEFAULT 'selected_day'"})
+        _add_missing_columns("exams", {
+            "scope": "VARCHAR(40) DEFAULT 'selected_day'",
+            "generation_blueprint": "JSON",
+            "quality_report": "JSON",
+        })
+    if "prep_plans" in table_names:
+        _add_missing_columns("prep_plans", {"role_blueprint_version": "VARCHAR(32)"})
+    if "questions" in table_names:
+        _add_missing_columns("questions", {"question_metadata": "JSON"})
+    if "mock_interviews" in table_names:
+        _add_missing_columns("mock_interviews", {"session_plan": "JSON", "overall_feedback": "JSON"})
+    if "mock_messages" in table_names:
+        _add_missing_columns("mock_messages", {"detail": "JSON"})
 
 
 def _add_missing_columns(table_name: str, column_sql: dict[str, str]) -> None:

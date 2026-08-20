@@ -28,9 +28,28 @@ class Settings(BaseModel):
     smtp_from_email: Optional[str] = None
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
+    openai_analysis_model: Optional[str] = None
+    openai_generation_model: Optional[str] = None
+    openai_scoring_model: Optional[str] = None
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.5-flash"
     tavily_api_key: Optional[str] = None
+    tavily_search_depth: str = "advanced"
+    tavily_max_results: int = 5
+    research_cache_hours: int = 168
+    onet_api_key: Optional[str] = None
+
+    @property
+    def analysis_model(self) -> str:
+        return self.openai_analysis_model or self.openai_model
+
+    @property
+    def generation_model(self) -> str:
+        return self.openai_generation_model or self.openai_model
+
+    @property
+    def scoring_model(self) -> str:
+        return self.openai_scoring_model or self.openai_model
 
     @property
     def openai_enabled(self) -> bool:
@@ -84,7 +103,14 @@ def get_settings() -> Settings:
         smtp_from_email=os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USERNAME") or os.getenv("GMAIL_SMTP_USER"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        openai_analysis_model=os.getenv("OPENAI_ANALYSIS_MODEL"),
+        openai_generation_model=os.getenv("OPENAI_GENERATION_MODEL"),
+        openai_scoring_model=os.getenv("OPENAI_SCORING_MODEL"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         tavily_api_key=os.getenv("TAVILY_API_KEY"),
+        tavily_search_depth=os.getenv("TAVILY_SEARCH_DEPTH", "advanced"),
+        tavily_max_results=max(1, min(10, int(os.getenv("TAVILY_MAX_RESULTS", "5")))),
+        research_cache_hours=max(1, int(os.getenv("RESEARCH_CACHE_HOURS", "168"))),
+        onet_api_key=os.getenv("ONET_API_KEY"),
     )

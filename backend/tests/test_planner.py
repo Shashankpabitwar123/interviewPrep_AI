@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import Settings
 from app.schemas.prep_plan import PrepPlanRequest, PrepTaskType
+from app.schemas.role_intelligence import RoleBlueprint, RoleCompetency
 from app.services import planner
 from app.services.planner import generate_prep_plan
 
@@ -80,3 +81,37 @@ def test_generate_plan_falls_back_when_ai_fails(monkeypatch) -> None:
 
     assert plan.plan_source == "heuristic_fallback"
     assert plan.tasks
+
+
+def test_role_blueprint_critical_competencies_are_covered_by_plan() -> None:
+    request = PrepPlanRequest(
+        job_title="Risk Data Analyst",
+        job_description="Prepare reconciled datasets and report findings to risk stakeholders.",
+        interview_at=datetime.now(timezone.utc) + timedelta(days=3),
+    )
+    blueprint = RoleBlueprint(
+        source_fingerprint="fingerprint",
+        role_title="Risk Data Analyst",
+        role_summary="Support reliable risk reporting.",
+        competencies=[
+            RoleCompetency(
+                name="Data reconciliation",
+                category="domain",
+                priority="critical",
+                why_it_matters="The posting makes dataset accuracy a core responsibility.",
+            ),
+            RoleCompetency(
+                name="Stakeholder communication",
+                category="behavioral",
+                priority="important",
+                why_it_matters="The role presents findings to risk partners.",
+            ),
+        ],
+    )
+
+    plan = generate_prep_plan(request, blueprint=blueprint)
+    covered_topics = {topic for task in plan.tasks for topic in task.topics}
+
+    assert plan.role_blueprint_version == "v3"
+    assert "Data reconciliation" in covered_topics
+    assert [skill.name for skill in plan.detected_skills][:2] == ["Data reconciliation", "Stakeholder communication"]

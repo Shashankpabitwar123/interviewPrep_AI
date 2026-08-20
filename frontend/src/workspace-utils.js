@@ -175,7 +175,12 @@ export function reconcileExamAttempts(localAttempts, backendAttempts, plans) {
       day: existing?.day ?? stored.exam.day,
       status: stored.status,
       score: complete ? stored.average_score : undefined,
-      review: complete ? { exam_id: stored.exam.id, average_score: stored.average_score, results: stored.results || [] } : undefined,
+      review: complete ? {
+        exam_id: stored.exam.id,
+        average_score: stored.average_score,
+        results: stored.results || [],
+        review_exam: stored.review_exam,
+      } : undefined,
       answers: stored.answers || existing?.answers || {},
       createdAt: existing?.createdAt || stored.created_at,
       completedAt: complete ? existing?.completedAt || stored.created_at : undefined,

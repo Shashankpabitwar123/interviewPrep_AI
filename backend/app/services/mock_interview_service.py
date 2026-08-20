@@ -9,7 +9,9 @@ from app.config import Settings
 from app.models import MockInterview, MockMessage, PrepPlan, User
 from app.ai_policy import require_ai_result
 from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest
+from app.schemas.role_intelligence import RoleBlueprint
 from app.services.gemini_service import generate_gemini_json
+from app.services.role_intelligence_service import blueprint_context
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,9 @@ class MockQuestionOutput(BaseModel):
 class MockFeedbackOutput(BaseModel):
     score: float = Field(ge=0, le=1)
     feedback: str
+    strengths: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
+    dimensions: dict[str, float] = Field(default_factory=dict)
     follow_up_question: str
 
 
@@ -40,13 +45,22 @@ def start_mock_interview(
         return None
 
     config = _mock_config(request)
-    topic = request.topic or (config["focus_topics"][0] if config["focus_topics"] else _first_topic(plan))
-    interview = MockInterview(prep_plan_id=plan.id, current_topic=topic, status="active")
+    role_blueprint = _role_blueprint_for_plan(plan)
+    session_plan = _build_session_plan(plan, request, config, role_blueprint)
+    config["session_plan"] = session_plan
+    first_slot = session_plan[0]
+    topic = first_slot["topic"]
+    interview = MockInterview(
+        prep_plan_id=plan.id,
+        current_topic=topic,
+        status="active",
+        session_plan=session_plan,
+    )
     db.add(interview)
     db.flush()
     db.add(MockMessage(mock_interview_id=interview.id, role="meta", content=json.dumps(config)))
-    question_type = config["question_types"][0]
-    ai_question = _question_with_ai(plan, topic, question_type, config, settings)
+    question_type = first_slot["question_type"]
+    ai_question = _question_with_ai(plan, topic, question_type, config, settings, first_slot, role_blueprint)
     if ai_question:
         question = ai_question
     else:
@@ -89,6 +103,7 @@ def complete_mock_interview(db: Session, mock_interview_id: int, user: Optional[
     interview.status = "complete"
     scores = [float(message.score) for message in interview.messages if message.score is not None]
     interview.average_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+    interview.overall_feedback = _overall_feedback(interview)
     db.commit()
     db.refresh(interview)
     return _to_response(interview)
@@ -107,25 +122,37 @@ def answer_mock_question(
 
     config = _config_for_interview(interview)
     answered_count = _answered_count(interview)
-    ai_feedback = _mock_feedback_with_ai(interview, request.answer_text, config, settings)
+    session_plan = config.get("session_plan") or interview.session_plan or []
+    current_slot = session_plan[answered_count] if answered_count < len(session_plan) else _fallback_slot(interview.current_topic, answered_count + 1, config)
+    next_slot = session_plan[answered_count + 1] if answered_count + 1 < len(session_plan) else None
+    ai_feedback = _mock_feedback_with_ai(interview, request.answer_text, config, settings, current_slot, next_slot)
     if ai_feedback:
-        score, feedback, follow_up = ai_feedback
+        score, feedback, follow_up, feedback_detail = ai_feedback
     else:
         require_ai_result("AI mock interview feedback failed. Enable local fallback in settings to score the answer offline.")
         score, feedback = _score_answer(request.answer_text)
         follow_up = _follow_up(interview.current_topic, score, config)
+        feedback_detail = {
+            "dimensions": {"relevance": score, "depth": score, "structure": score, "communication": score},
+            "strengths": [],
+            "improvements": [feedback],
+        }
     db.add(MockMessage(mock_interview_id=interview.id, role="candidate", content=request.answer_text))
-    db.add(MockMessage(mock_interview_id=interview.id, role="feedback", content=feedback, score=score))
+    db.add(MockMessage(mock_interview_id=interview.id, role="feedback", content=feedback, score=score, detail=feedback_detail))
     next_question_number = answered_count + 2
     if next_question_number <= config["question_count"]:
-        question_type = config["question_types"][(next_question_number - 1) % len(config["question_types"])]
-        next_question = follow_up or _question(interview.current_topic, question_type, config["difficulty"])
+        slot = next_slot or _fallback_slot(interview.current_topic, next_question_number, config)
+        interview.current_topic = slot["topic"]
+        question_type = slot["question_type"]
+        next_question = follow_up or _question(slot["topic"], question_type, config["difficulty"])
         db.add(MockMessage(mock_interview_id=interview.id, role="interviewer", content=next_question))
     else:
         interview.status = "complete"
 
     scores = [message.score for message in interview.messages if message.score is not None] + [score]
     interview.average_score = round(sum(scores) / len(scores), 2)
+    if interview.status == "complete":
+        interview.overall_feedback = _overall_feedback(interview, feedback_detail)
     db.commit()
     db.refresh(interview)
     return _to_response(interview)
@@ -160,6 +187,7 @@ def _mock_config(request: MockInterviewStartRequest) -> dict:
         "question_count": min(12, max(1, question_count)),
         "question_types": question_types or ["technical", "multiple_choice", "coding", "behavioral"],
         "scope": request.scope,
+        "day": request.day,
         "focus_topics": focus_topics,
     }
 
@@ -173,7 +201,9 @@ def _config_for_interview(interview: MockInterview) -> dict:
                 config.setdefault("question_count", 6)
                 config.setdefault("question_types", ["technical", "multiple_choice", "coding", "behavioral"])
                 config.setdefault("scope", "full_plan")
+                config.setdefault("day", None)
                 config.setdefault("focus_topics", [])
+                config.setdefault("session_plan", interview.session_plan or [])
                 return config
             except json.JSONDecodeError:
                 break
@@ -182,12 +212,109 @@ def _config_for_interview(interview: MockInterview) -> dict:
         "question_count": 6,
         "question_types": ["technical", "multiple_choice", "coding", "behavioral"],
         "scope": "full_plan",
+        "day": None,
         "focus_topics": [],
+        "session_plan": interview.session_plan or [],
     }
 
 
 def _answered_count(interview: MockInterview) -> int:
     return sum(1 for message in interview.messages if message.role == "candidate")
+
+
+def _role_blueprint_for_plan(plan: PrepPlan) -> Optional[RoleBlueprint]:
+    record = plan.job_post.role_blueprint
+    if record is None:
+        return None
+    try:
+        return RoleBlueprint.model_validate(record.blueprint)
+    except Exception:
+        return None
+
+
+def _build_session_plan(
+    plan: PrepPlan,
+    request: MockInterviewStartRequest,
+    config: dict,
+    role_blueprint: Optional[RoleBlueprint],
+) -> list[dict]:
+    topics = _topics_for_mock_scope(plan, request)
+    competency_by_name = {
+        item.name.casefold(): item
+        for item in (role_blueprint.competencies if role_blueprint else [])
+    }
+    session_plan: list[dict] = []
+    for index in range(config["question_count"]):
+        topic = topics[index % len(topics)]
+        question_type = config["question_types"][index % len(config["question_types"])]
+        competency = competency_by_name.get(topic.casefold())
+        if question_type == "behavioral" and role_blueprint and role_blueprint.behavioral_story_prompts:
+            topic = role_blueprint.behavioral_story_prompts[index % len(role_blueprint.behavioral_story_prompts)]
+        session_plan.append({
+            "number": index + 1,
+            "topic": topic,
+            "competency": competency.name if competency else topic,
+            "question_type": question_type,
+            "intent": _question_intent(question_type, topic),
+            "rubric": _rubric_for_question_type(question_type),
+        })
+    return session_plan
+
+
+def _topics_for_mock_scope(plan: PrepPlan, request: MockInterviewStartRequest) -> list[str]:
+    explicit: list[str] = []
+    for topic in [request.topic, *request.focus_topics]:
+        clean = (topic or "").strip()
+        if clean and clean not in explicit:
+            explicit.append(clean)
+    if explicit:
+        return explicit
+    day = request.day or 1
+    topics: list[str] = []
+    for task in sorted(plan.tasks, key=lambda item: (item.day, item.id)):
+        if request.scope == "selected_day" and task.day != day:
+            continue
+        if request.scope == "through_selected_day" and task.day > day:
+            continue
+        for topic in task.topics or []:
+            clean = topic.strip()
+            if clean and clean not in topics:
+                topics.append(clean)
+    return topics or [_first_topic(plan)]
+
+
+def _question_intent(question_type: str, topic: str) -> str:
+    intents = {
+        "technical": f"Test whether the candidate can apply {topic}, explain tradeoffs, and validate the result.",
+        "coding": f"Test practical solution design, edge cases, correctness, and complexity involving {topic}.",
+        "behavioral": "Elicit a specific past example with ownership, action, result, and reflection.",
+        "team_problem_solving": "Evaluate collaboration, disagreement handling, stakeholder communication, and decisions.",
+        "multiple_choice": f"Test recognition of the strongest applied decision involving {topic}.",
+        "multiple_select": f"Test whether the candidate recognizes all important considerations involving {topic}.",
+        "one_word": f"Check concise recall of a core concept connected to {topic}.",
+    }
+    return intents.get(question_type, f"Test interview readiness for {topic}.")
+
+
+def _rubric_for_question_type(question_type: str) -> list[str]:
+    base = ["relevance", "accuracy", "depth", "structure", "communication"]
+    if question_type == "coding":
+        return [*base, "edge cases", "complexity", "validation"]
+    if question_type in {"behavioral", "team_problem_solving"}:
+        return [*base, "specific example", "ownership", "result", "reflection"]
+    return [*base, "tradeoffs", "concrete example"]
+
+
+def _fallback_slot(topic: str, number: int, config: dict) -> dict:
+    question_type = config["question_types"][(number - 1) % len(config["question_types"])]
+    return {
+        "number": number,
+        "topic": topic,
+        "competency": topic,
+        "question_type": question_type,
+        "intent": _question_intent(question_type, topic),
+        "rubric": _rubric_for_question_type(question_type),
+    }
 
 
 def _question(topic: str, question_type: str, difficulty: str) -> str:
@@ -221,19 +348,21 @@ def _question_with_ai(
     question_type: str,
     config: dict,
     settings: Optional[Settings],
+    slot: Optional[dict] = None,
+    role_blueprint: Optional[RoleBlueprint] = None,
 ) -> Optional[str]:
     if not settings or not settings.ai_enabled:
         require_ai_result("No AI provider is configured for mock interview questions. Enable local fallback in settings to use offline questions.")
         return None
 
-    prompt = _question_prompt(plan, topic, question_type, config)
+    prompt = _question_prompt(plan, topic, question_type, config, slot, role_blueprint)
     if settings.openai_enabled:
         try:
             from openai import OpenAI
 
             client = OpenAI(api_key=settings.openai_api_key)
             response = client.responses.parse(
-                model=settings.openai_model,
+                model=settings.generation_model,
                 input=[
                     {
                         "role": "system",
@@ -257,7 +386,14 @@ def _question_with_ai(
     return None
 
 
-def _question_prompt(plan: PrepPlan, topic: str, question_type: str, config: dict) -> str:
+def _question_prompt(
+    plan: PrepPlan,
+    topic: str,
+    question_type: str,
+    config: dict,
+    slot: Optional[dict] = None,
+    role_blueprint: Optional[RoleBlueprint] = None,
+) -> str:
     scope_labels = {
         "selected_day": "the selected preparation day only",
         "through_selected_day": "all material covered through the selected preparation day",
@@ -273,10 +409,14 @@ def _question_prompt(plan: PrepPlan, topic: str, question_type: str, config: dic
         "For coding ask for code or pseudocode plus complexity.\n\n"
         "For team_problem_solving ask about collaboration, disagreement, tradeoffs, ownership, and communication.\n\n"
         f"Role: {plan.job_post.title}\n"
+        f"Shared role intelligence:\n{blueprint_context(role_blueprint, include_sources=False)}\n"
+        f"Job-posting source excerpt: {plan.job_post.description[:2500]}\n"
         f"Prep plan summary: {plan.summary}\n"
         f"Practice scope: {scope_labels.get(config.get('scope'), 'the complete preparation plan')}\n"
         f"Selected focus topics: {focus_topics or 'Use the relevant plan topics.'}\n"
         f"Topic: {topic}\n"
+        f"Question intent: {(slot or {}).get('intent', 'Test applied interview readiness.')}\n"
+        f"Scoring rubric: {', '.join((slot or {}).get('rubric', [])) or 'relevance, correctness, depth, structure, communication'}\n"
         f"Difficulty: {config['difficulty']}\n"
         f"Question type: {question_type}"
     )
@@ -303,7 +443,9 @@ def _mock_feedback_with_ai(
     answer_text: str,
     config: dict,
     settings: Optional[Settings],
-) -> Optional[tuple[float, str, str]]:
+    current_slot: Optional[dict] = None,
+    next_slot: Optional[dict] = None,
+) -> Optional[tuple[float, str, str, dict]]:
     if not settings or not settings.ai_enabled:
         require_ai_result("No AI provider is configured for mock interview feedback. Enable local fallback in settings to score answers offline.")
         return None
@@ -316,15 +458,20 @@ def _mock_feedback_with_ai(
 
     prompt = (
         "Evaluate this mock interview answer as JSON only. "
-        "Return a score from 0 to 1, actionable feedback, and one follow-up interviewer question. "
-        "Make the follow-up match the requested difficulty and interview style.\n\n"
+        "Return a score from 0 to 1, actionable feedback, strengths, improvements, dimension scores, and one next interviewer question. "
+        "Dimension keys must include relevance, accuracy, depth, structure, and communication, each from 0 to 1. "
+        "The next question must follow the supplied next-question slot instead of staying on the same topic.\n\n"
+        f"Shared role intelligence:\n{blueprint_context(_role_blueprint_for_plan(interview.prep_plan), include_sources=False)}\n\n"
         f"Topic: {interview.current_topic}\n"
         f"Practice scope: {config.get('scope', 'full_plan')}\n"
         f"Selected focus topics: {', '.join(config.get('focus_topics') or []) or 'Use the active interview topic.'}\n"
         f"Difficulty: {config['difficulty']}\n"
         f"Question types available: {', '.join(config['question_types'])}\n"
         f"Question: {previous_question}\n"
-        f"Candidate answer: {answer_text}"
+        f"Current question intent: {(current_slot or {}).get('intent', '')}\n"
+        f"Current scoring rubric: {', '.join((current_slot or {}).get('rubric', []))}\n"
+        f"Candidate answer: {answer_text}\n\n"
+        f"Next-question slot: {json.dumps(next_slot or {}, ensure_ascii=False)}"
     )
     if settings.openai_enabled:
         try:
@@ -332,7 +479,7 @@ def _mock_feedback_with_ai(
 
             client = OpenAI(api_key=settings.openai_api_key)
             response = client.responses.parse(
-                model=settings.openai_model,
+                model=settings.scoring_model,
                 input=[
                     {
                         "role": "system",
@@ -343,14 +490,27 @@ def _mock_feedback_with_ai(
                 text_format=MockFeedbackOutput,
             )
             data = response.output_parsed
-            return round(float(data.score), 2), data.feedback, data.follow_up_question
+            detail = {
+                "dimensions": _normalized_dimensions(data.dimensions, float(data.score)),
+                "strengths": data.strengths[:4],
+                "improvements": data.improvements[:4],
+                "competency": (current_slot or {}).get("competency", interview.current_topic),
+            }
+            return round(float(data.score), 2), data.feedback, data.follow_up_question, detail
         except Exception as exc:
             logger.warning("OpenAI mock interview feedback failed: %s", exc)
 
     if settings.gemini_enabled:
         try:
             data = generate_gemini_json(settings, prompt, _gemini_feedback_schema())
-            return round(float(data["score"]), 2), data["feedback"], data["follow_up_question"]
+            score = round(float(data["score"]), 2)
+            detail = {
+                "dimensions": _normalized_dimensions(data.get("dimensions") or {}, score),
+                "strengths": data.get("strengths") or [],
+                "improvements": data.get("improvements") or [],
+                "competency": (current_slot or {}).get("competency", interview.current_topic),
+            }
+            return score, data["feedback"], data["follow_up_question"], detail
         except Exception as exc:
             logger.warning("Gemini mock interview feedback failed: %s", exc)
     require_ai_result("AI mock interview feedback failed. Enable local fallback in settings to score answers offline.")
@@ -371,6 +531,19 @@ def _gemini_feedback_schema() -> dict:
         "properties": {
             "score": {"type": "number"},
             "feedback": {"type": "string"},
+            "strengths": {"type": "array", "items": {"type": "string"}},
+            "improvements": {"type": "array", "items": {"type": "string"}},
+            "dimensions": {
+                "type": "object",
+                "properties": {
+                    "relevance": {"type": "number"},
+                    "accuracy": {"type": "number"},
+                    "depth": {"type": "number"},
+                    "structure": {"type": "number"},
+                    "communication": {"type": "number"},
+                },
+                "required": ["relevance", "accuracy", "depth", "structure", "communication"],
+            },
             "follow_up_question": {"type": "string"},
         },
         "required": ["score", "feedback", "follow_up_question"],
@@ -390,6 +563,8 @@ def _to_response(interview: MockInterview) -> MockInterviewResponse:
         focus_topics=config["focus_topics"],
         answered_questions=_answered_count(interview),
         average_score=interview.average_score,
+        session_plan=interview.session_plan or config.get("session_plan") or [],
+        overall_feedback=interview.overall_feedback or {},
         created_at=interview.created_at,
         messages=[
             {
@@ -397,8 +572,48 @@ def _to_response(interview: MockInterview) -> MockInterviewResponse:
                 "role": message.role,
                 "content": message.content,
                 "score": message.score,
+                "detail": message.detail or {},
             }
             for message in sorted(interview.messages, key=lambda message: message.id)
             if message.role != "meta"
         ],
     )
+
+
+def _normalized_dimensions(dimensions: dict, fallback_score: float) -> dict[str, float]:
+    keys = ["relevance", "accuracy", "depth", "structure", "communication"]
+    normalized: dict[str, float] = {}
+    for key in keys:
+        try:
+            normalized[key] = round(max(0.0, min(1.0, float(dimensions.get(key, fallback_score)))), 2)
+        except (TypeError, ValueError):
+            normalized[key] = round(fallback_score, 2)
+    return normalized
+
+
+def _overall_feedback(interview: MockInterview, pending_detail: Optional[dict] = None) -> dict:
+    details = [message.detail for message in interview.messages if message.role == "feedback" and message.detail]
+    if pending_detail:
+        details.append(pending_detail)
+    dimension_values: dict[str, list[float]] = {}
+    strengths: list[str] = []
+    improvements: list[str] = []
+    for detail in details:
+        for name, value in (detail.get("dimensions") or {}).items():
+            dimension_values.setdefault(name, []).append(float(value))
+        strengths.extend(detail.get("strengths") or [])
+        improvements.extend(detail.get("improvements") or [])
+    dimensions = {
+        name: round(sum(values) / len(values), 2)
+        for name, values in dimension_values.items()
+        if values
+    }
+    weakest = sorted(dimensions, key=dimensions.get)[:2]
+    strongest = sorted(dimensions, key=dimensions.get, reverse=True)[:2]
+    return {
+        "dimensions": dimensions,
+        "strongest_dimensions": strongest,
+        "focus_dimensions": weakest,
+        "strengths": list(dict.fromkeys(strengths))[:4],
+        "improvements": list(dict.fromkeys(improvements))[:4],
+    }

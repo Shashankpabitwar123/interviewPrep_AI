@@ -8,6 +8,7 @@ class MockInterviewStartRequest(BaseModel):
     prep_plan_id: int
     topic: Optional[str] = None
     scope: Literal["selected_day", "through_selected_day", "full_plan"] = "full_plan"
+    day: Optional[int] = Field(default=None, ge=1)
     focus_topics: list[str] = Field(default_factory=list, max_length=12)
     difficulty: str = Field(default="medium", examples=["easy", "medium", "hard"])
     question_count: Optional[int] = Field(default=None, ge=1, le=12)
@@ -26,6 +27,16 @@ class MockMessageResponse(BaseModel):
     role: str
     content: str
     score: Optional[float] = None
+    detail: dict = Field(default_factory=dict)
+
+
+class MockQuestionPlan(BaseModel):
+    number: int
+    topic: str
+    competency: str
+    question_type: str
+    intent: str
+    rubric: list[str] = Field(default_factory=list)
 
 
 class MockInterviewResponse(BaseModel):
@@ -39,5 +50,7 @@ class MockInterviewResponse(BaseModel):
     focus_topics: list[str] = Field(default_factory=list)
     answered_questions: int = 0
     average_score: Optional[float] = None
+    session_plan: list[MockQuestionPlan] = Field(default_factory=list)
+    overall_feedback: dict = Field(default_factory=dict)
     created_at: datetime
     messages: list[MockMessageResponse]
