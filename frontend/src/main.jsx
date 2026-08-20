@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { CircularProgressbar } from "react-circular-progressbar";
 import MarketingLanding from "./MarketingLanding.jsx";
 import {
   READINESS_FORMULA,
@@ -24,6 +25,7 @@ import "@fontsource/public-sans/400.css";
 import "@fontsource/public-sans/500.css";
 import "@fontsource/public-sans/600.css";
 import "@fontsource/public-sans/700.css";
+import "react-circular-progressbar/dist/styles.css";
 import {
   Activity,
   BarChart3,
@@ -3434,6 +3436,65 @@ function TypedBriefing({ lines, ready, animate, onComplete }) {
   );
 }
 
+function AnimatedMomentumMetric({ label, value, suffix = "", ringValue, description, tone = "coral", ready, onClick }) {
+  const tooltipId = useId();
+  const targetValue = Math.max(0, Number(value) || 0);
+  const targetRing = Math.min(100, Math.max(0, Number(ringValue ?? targetValue) || 0));
+  const [displayValue, setDisplayValue] = useState(0);
+  const [displayRing, setDisplayRing] = useState(0);
+
+  useEffect(() => {
+    if (!ready) {
+      setDisplayValue(0);
+      setDisplayRing(0);
+      return undefined;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDisplayValue(targetValue);
+      setDisplayRing(targetRing);
+      return undefined;
+    }
+
+    let animationFrame;
+    let startedAt;
+    const duration = 950;
+    const animateValue = (timestamp) => {
+      startedAt ??= timestamp;
+      const progress = Math.min(1, (timestamp - startedAt) / duration);
+      const eased = 1 - ((1 - progress) ** 3);
+      setDisplayValue(Math.round(targetValue * eased));
+      setDisplayRing(targetRing * eased);
+      if (progress < 1) animationFrame = window.requestAnimationFrame(animateValue);
+    };
+    animationFrame = window.requestAnimationFrame(animateValue);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [ready, targetRing, targetValue]);
+
+  const metricContents = (
+    <>
+      <span className="daily-momentum-ring" aria-hidden="true">
+        <CircularProgressbar value={displayRing} text={`${displayValue}${suffix}`} strokeWidth={8} />
+      </span>
+      <strong>{label}</strong>
+    </>
+  );
+
+  return (
+    <div className={`daily-momentum-metric tone-${tone}`}>
+      {onClick ? (
+        <button className="daily-momentum-metric-control" onClick={onClick} aria-describedby={tooltipId} aria-label={`${label}: ${targetValue}${suffix}. Open details.`}>
+          {metricContents}
+        </button>
+      ) : (
+        <div className="daily-momentum-metric-control" tabIndex={0} aria-describedby={tooltipId} aria-label={`${label}: ${targetValue}${suffix}`}>
+          {metricContents}
+        </div>
+      )}
+      <span className="daily-momentum-tooltip" id={tooltipId} role="tooltip"><b>{label}</b>{description}</span>
+    </div>
+  );
+}
+
 function GuidedTodayView({
   user,
   plan,
@@ -3596,12 +3657,32 @@ function GuidedTodayView({
         <article className="daily-momentum-card daily-briefing-enter" data-tour="today-readiness">
           <header><div><span>MOMENTUM</span><h2>Your preparation at a glance</h2></div><TrendingUp size={21} /></header>
           <div className="daily-momentum-metrics">
-            <button onClick={onOpenReadiness}><strong>{readinessScore}%</strong><span>Readiness</span></button>
-            <button onClick={onOpenLearn}><strong>{planProgress}%</strong><span>Plan done</span></button>
-            <div><strong>{streak.count}</strong><span>Day streak</span></div>
+            <AnimatedMomentumMetric
+              label="Readiness"
+              value={readinessScore}
+              suffix="%"
+              description="Weighted score from completed plan work, exams, and mock interviews."
+              ready={workspaceReady}
+              onClick={onOpenReadiness}
+            />
+            <AnimatedMomentumMetric
+              label="Plan done"
+              value={planProgress}
+              suffix="%"
+              description="The percentage of scheduled preparation tasks you’ve completed."
+              ready={workspaceReady}
+              onClick={onOpenLearn}
+            />
+            <AnimatedMomentumMetric
+              label="Day streak"
+              value={streak.count}
+              ringValue={Math.min(100, (streak.count / 7) * 100)}
+              description="Consecutive days with completed preparation activity. The ring tracks a 7-day goal."
+              tone="mint"
+              ready={workspaceReady}
+            />
           </div>
-          <progress max="100" value={readinessScore} aria-label={`${readinessScore}% readiness`} />
-          <p>{readinessScore > 0 ? readiness?.label : scoredPractice > 0 ? "Your scored practice is ready to review." : "Complete a scored exam or mock interview to start measuring readiness."}</p>
+          <p className="daily-momentum-summary">{readinessScore > 0 ? readiness?.label : scoredPractice > 0 ? "Your scored practice is ready to review." : "Complete a scored exam or mock interview to start measuring readiness."}</p>
           <button className="guided-text-button" onClick={onOpenReadiness}>See readiness details <ChevronRight size={16} /></button>
         </article>
       </div>

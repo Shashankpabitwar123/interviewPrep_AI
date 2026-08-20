@@ -3006,62 +3006,132 @@
 }
 
 .daily-momentum-metrics {
-  margin: 24px 0 18px;
+  margin: 22px 0 18px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  border: 1px solid var(--approved-line-soft);
-  border-radius: 7px;
-  overflow: hidden;
-  background: var(--approved-line-soft);
+  gap: 10px;
 }
 
-.daily-momentum-metrics > * {
-  min-height: 76px;
-  padding: 13px 8px;
+.daily-momentum-metric {
+  --momentum-ring: var(--approved-coral);
+  position: relative;
+  min-width: 0;
+}
+
+.daily-momentum-metric.tone-mint {
+  --momentum-ring: var(--approved-mint);
+}
+
+.daily-momentum-metric-control {
+  width: 100%;
+  min-height: 112px;
+  padding: 5px 3px 7px;
   display: grid;
-  align-content: center;
-  gap: 3px;
+  justify-items: center;
+  align-content: start;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--approved-text);
-  text-align: left;
-  background: var(--approved-surface-2);
+  text-align: center;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
 }
 
-.daily-momentum-metrics button:hover {
+.daily-momentum-metric-control:hover,
+.daily-momentum-metric-control:focus-visible {
+  border-color: var(--approved-line);
   background: var(--approved-surface-3);
+  transform: translateY(-2px);
+  outline: none;
 }
 
-.daily-momentum-metrics strong {
-  font-size: 23px;
-  letter-spacing: -0.035em;
+.daily-momentum-ring {
+  width: 82px;
+  height: 82px;
+  display: block;
 }
 
-.daily-momentum-metrics span {
+.daily-momentum-ring .CircularProgressbar-trail {
+  stroke: var(--approved-line);
+}
+
+.daily-momentum-ring .CircularProgressbar-path {
+  stroke: var(--momentum-ring);
+  stroke-linecap: round;
+  transition: none;
+}
+
+.daily-momentum-ring .CircularProgressbar-text {
+  fill: var(--approved-text);
+  font-family: "Public Sans", sans-serif;
+  font-size: 22px;
+  font-weight: 750;
+}
+
+.daily-momentum-metric-control > strong {
   color: var(--approved-muted);
   font-size: 9px;
-  font-weight: 650;
+  font-weight: 750;
+  letter-spacing: 0.045em;
   text-transform: uppercase;
 }
 
-.daily-momentum-card > progress {
-  width: 100%;
-  height: 4px;
-  appearance: none;
+.daily-momentum-tooltip {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  z-index: 20;
+  width: 190px;
+  padding: 10px 11px;
+  border: 1px solid var(--approved-line);
+  border-radius: 7px;
+  color: var(--approved-soft);
+  background: var(--approved-surface-3);
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--approved-canvas) 70%, transparent);
+  font-size: 10px;
+  line-height: 1.45;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -4px);
+  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+  pointer-events: none;
 }
 
-.daily-momentum-card > progress::-webkit-progress-bar {
-  border-radius: 999px;
-  background: var(--approved-line);
+.daily-momentum-tooltip b {
+  margin-bottom: 3px;
+  display: block;
+  color: var(--approved-text);
+  font-size: 10px;
 }
 
-.daily-momentum-card > progress::-webkit-progress-value {
-  border-radius: 999px;
-  background: var(--approved-coral);
+.daily-momentum-metric:first-child .daily-momentum-tooltip {
+  left: 0;
+  transform: translate(0, -4px);
 }
 
-.daily-momentum-card > p {
+.daily-momentum-metric:last-child .daily-momentum-tooltip {
+  right: 0;
+  left: auto;
+  transform: translate(0, -4px);
+}
+
+.daily-momentum-metric:hover .daily-momentum-tooltip,
+.daily-momentum-metric:focus-within .daily-momentum-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+.daily-momentum-metric:first-child:hover .daily-momentum-tooltip,
+.daily-momentum-metric:first-child:focus-within .daily-momentum-tooltip,
+.daily-momentum-metric:last-child:hover .daily-momentum-tooltip,
+.daily-momentum-metric:last-child:focus-within .daily-momentum-tooltip {
+  transform: translate(0, 0);
+}
+
+.daily-momentum-card > .daily-momentum-summary {
   min-height: 38px;
-  margin: 12px 0 9px;
+  margin: 6px 0 9px;
   color: var(--approved-soft);
   font-size: 11px;
   line-height: 1.45;
@@ -3330,6 +3400,19 @@
     width: 100%;
   }
 
+  .daily-momentum-metrics {
+    gap: 5px;
+  }
+
+  .daily-momentum-ring {
+    width: 76px;
+    height: 76px;
+  }
+
+  .daily-momentum-tooltip {
+    width: min(190px, calc(100vw - 56px));
+  }
+
   .daily-timeline-card > header,
   .daily-journey-card > header {
     align-items: flex-start;
@@ -3359,6 +3442,11 @@
   .daily-briefing * {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .daily-momentum-metric-control,
+  .daily-momentum-tooltip {
+    transform: none !important;
   }
 }
 
