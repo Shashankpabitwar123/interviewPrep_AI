@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import JobAnalysis, JobPost, PrepPlan, PrepTask, User
+from app.models import ArtifactFeedback, CompetencyEvidence, JobAnalysis, JobPost, PrepPlan, PrepTask, User
 from app.schemas.job_analysis import JobAnalysisResponse, JobDescriptionBrief, JobPostDetail, JobPostSummary
 from app.schemas.prep_plan import PrepPlanResponse, PrepPlanSummary, SkillSignal
 from app.services.job_analyzer import extract_core_skills
@@ -104,6 +104,7 @@ def save_prep_plan(
         days_until_interview=plan.days_until_interview,
         summary=plan.plan_summary,
         role_blueprint_version=plan.role_blueprint_version or None,
+        quality_report=plan.quality_report or None,
     )
     db.add(db_plan)
     db.flush()
@@ -343,6 +344,7 @@ def get_prep_plan_detail(db: Session, prep_plan_id: int, user: Optional[User] = 
         plan_summary=plan.summary,
         plan_source="saved",
         role_blueprint_version=plan.role_blueprint_version or "",
+        quality_report=plan.quality_report or {},
         tasks=tasks,
         interview_at=plan.job_post.interview_at,
         hours_per_day=plan.job_post.hours_per_day or 2.0,
@@ -353,6 +355,8 @@ def delete_prep_plan(db: Session, prep_plan_id: int, user: Optional[User] = None
     plan = db.get(PrepPlan, prep_plan_id)
     if plan is None or not _owns_job(plan.job_post, user):
         return False
+    db.query(CompetencyEvidence).filter(CompetencyEvidence.prep_plan_id == plan.id).delete(synchronize_session=False)
+    db.query(ArtifactFeedback).filter(ArtifactFeedback.prep_plan_id == plan.id).delete(synchronize_session=False)
     db.delete(plan)
     db.commit()
     return True

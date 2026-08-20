@@ -1,5 +1,7 @@
 from app.models.interview import (
     AnswerAttempt,
+    ArtifactFeedback,
+    CompetencyEvidence,
     Exam,
     EmailVerificationOTP,
     InterviewExperience,
@@ -20,6 +22,8 @@ from app.models.interview import (
 
 __all__ = [
     "AnswerAttempt",
+    "ArtifactFeedback",
+    "CompetencyEvidence",
     "Exam",
     "EmailVerificationOTP",
     "InterviewExperience",

@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional
 
@@ -21,6 +22,9 @@ from app.services.gemini_service import generate_gemini_json
 from app.schemas.role_intelligence import RoleBlueprint
 from app.services.research_service import ResearchResult, get_or_create_research_snapshot
 from app.services.role_intelligence_service import blueprint_context
+from app.services.artifact_quality_service import assess_study_note, choose_higher_quality
+from app.services.competency_service import learning_state_context
+from app.services.experience_service import interview_evidence_context
 
 
 logger = logging.getLogger(__name__)
@@ -37,21 +41,37 @@ def generate_study_note(
         return None
     research_bundle = get_or_create_research_snapshot(db, plan.job_post, settings, topics=request.topics)
     research = research_bundle.results
+    adaptive_context = learning_state_context(db, plan, user)
+    experience_context = interview_evidence_context(
+        db,
+        role_title=plan.job_post.title,
+        company=plan.job_post.company or "",
+        user=user,
+    )
+    generation_request = request.model_copy(update={
+        "instructions": (
+            f"{request.instructions}\n\nAdaptive learning state:\n{adaptive_context}\n\n"
+            f"Relevant interview evidence:\n{experience_context}"
+        ).strip(),
+    })
 
+    note: StudyNoteResponse | None = None
     if settings and settings.openai_enabled:
         try:
-            return _generate_with_openai(plan, request, settings, research)
+            note = _generate_with_openai(plan, generation_request, settings, research)
         except Exception as exc:
             logger.warning("OpenAI study note generation failed: %s", exc)
 
-    if settings and settings.gemini_enabled:
+    if note is None and settings and settings.gemini_enabled:
         try:
-            return _generate_with_gemini(plan, request, settings, research)
+            note = _generate_with_gemini(plan, generation_request, settings, research)
         except Exception as exc:
             logger.warning("Gemini study note generation failed: %s", exc)
 
-    require_ai_result("AI study-note generation failed. Enable local fallback in settings to create an offline note.")
-    return _fallback_note(plan, request, research, source="heuristic")
+    if note is None:
+        require_ai_result("AI study-note generation failed. Enable local fallback in settings to create an offline note.")
+        note = _fallback_note(plan, request, research, source="heuristic")
+    return _quality_checked_note(plan, request, note, research, settings)
 
 
 def answer_note_question(request: StudyNoteAskRequest, settings: Optional[Settings]) -> StudyNoteAskResponse:
@@ -132,6 +152,78 @@ def _generate_with_gemini(
 ) -> StudyNoteResponse:
     data = generate_gemini_json(settings, _note_prompt(plan, request, research, _role_blueprint_for_plan(plan)), _gemini_note_schema())
     return _ensure_research_sources(StudyNoteResponse.model_validate(data), research).model_copy(update={"source": "gemini"})
+
+
+def _quality_checked_note(
+    plan: PrepPlan,
+    request: StudyNoteRequest,
+    note: StudyNoteResponse,
+    research: list[ResearchResult],
+    settings: Optional[Settings],
+) -> StudyNoteResponse:
+    blueprint = _role_blueprint_for_plan(plan)
+    first = note.model_copy(update={"quality_report": assess_study_note(note, request.topics, blueprint)})
+    if first.quality_report.get("passed") or not settings or not settings.openai_enabled:
+        return first
+    repaired = _repair_note_with_openai(plan, request, first, research, blueprint, settings)
+    if repaired is None:
+        return first.model_copy(update={"quality_report": {
+            **first.quality_report,
+            "repair_attempted": True,
+            "repair_selected": False,
+        }})
+    repaired = repaired.model_copy(update={
+        "source": note.source,
+        "quality_report": assess_study_note(repaired, request.topics, blueprint),
+    })
+    selected = choose_higher_quality(first, repaired)
+    return selected.model_copy(update={"quality_report": {
+        **selected.quality_report,
+        "repair_attempted": True,
+        "repair_selected": selected is repaired,
+        "initial_score": first.quality_report.get("score", 0),
+    }})
+
+
+def _repair_note_with_openai(
+    plan: PrepPlan,
+    request: StudyNoteRequest,
+    note: StudyNoteResponse,
+    research: list[ResearchResult],
+    blueprint: Optional[RoleBlueprint],
+    settings: Settings,
+) -> StudyNoteResponse | None:
+    """Run at most one repair pass when deterministic gates find a weak note."""
+
+    issues = note.quality_report.get("issues") or []
+    prompt = (
+        "Repair this interview-preparation note as structured JSON. Preserve accurate content and traceable URLs, "
+        "but resolve every listed quality issue. Keep the requested topic scope. Add role-specific examples, "
+        "explanation guidance, common mistakes, at least three likely question patterns, and a usable checklist. "
+        "Do not invent company interview questions or sources.\n\n"
+        f"Requested topics: {', '.join(request.topics) or request.title}\n"
+        f"Role intelligence:\n{blueprint_context(blueprint, include_sources=True)}\n\n"
+        f"Quality issues:\n{json.dumps(issues, ensure_ascii=False)}\n\n"
+        f"Research supplied to the original note:\n{_research_context(research)}\n\n"
+        f"Original note:\n{json.dumps(note.model_dump(exclude={'quality_report'}, mode='json'), ensure_ascii=False)}"
+    )
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=settings.openai_api_key)
+        response = client.responses.parse(
+            model=settings.analysis_model,
+            input=[
+                {"role": "system", "content": "You are a strict interview-learning content editor. Return complete structured JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            text_format=StudyNoteResponse,
+            max_output_tokens=14000,
+        )
+        return _ensure_research_sources(response.output_parsed, research)
+    except Exception as exc:
+        logger.warning("OpenAI study note quality repair failed: %s", exc)
+        return None
 
 
 def _answer_with_openai(request: StudyNoteAskRequest, settings: Settings) -> StudyNoteAskResponse:

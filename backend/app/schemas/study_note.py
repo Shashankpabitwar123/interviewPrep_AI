@@ -46,6 +46,7 @@ class StudyNoteResponse(BaseModel):
     resources: list[StudyResource]
     checklist: list[str]
     source: str = "heuristic"
+    quality_report: dict = Field(default_factory=dict)
 
 
 class StudyNoteAskTurn(BaseModel):

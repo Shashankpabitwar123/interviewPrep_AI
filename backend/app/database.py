@@ -93,11 +93,11 @@ def _apply_lightweight_migrations() -> None:
             "quality_report": "JSON",
         })
     if "prep_plans" in table_names:
-        _add_missing_columns("prep_plans", {"role_blueprint_version": "VARCHAR(32)"})
+        _add_missing_columns("prep_plans", {"role_blueprint_version": "VARCHAR(32)", "quality_report": "JSON"})
     if "questions" in table_names:
         _add_missing_columns("questions", {"question_metadata": "JSON"})
     if "mock_interviews" in table_names:
-        _add_missing_columns("mock_interviews", {"session_plan": "JSON", "overall_feedback": "JSON"})
+        _add_missing_columns("mock_interviews", {"session_plan": "JSON", "overall_feedback": "JSON", "quality_report": "JSON"})
     if "mock_messages" in table_names:
         _add_missing_columns("mock_messages", {"detail": "JSON"})
 

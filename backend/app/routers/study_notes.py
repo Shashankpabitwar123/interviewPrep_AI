@@ -1,3 +1,5 @@
+from time import perf_counter
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -27,14 +29,33 @@ def generate_note(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_request_user),
 ) -> StudyNoteResponse:
-    note = generate_study_note(db, request, settings, current_user)
+    generation_started = perf_counter()
+    try:
+        note = generate_study_note(db, request, settings, current_user)
+    except Exception as exc:
+        db.rollback()
+        plan = db.get(PrepPlan, request.prep_plan_id)
+        record_generation_run(
+            db,
+            artifact_type="study_note",
+            prompt_version="study-note-v4",
+            settings=settings,
+            user=current_user,
+            job_post_id=plan.job_post_id if plan else None,
+            prep_plan_id=request.prep_plan_id,
+            input_value=request.model_dump(),
+            status="failed",
+            detail={"error_type": type(exc).__name__, "stage": "note_generation"},
+            latency_ms=round((perf_counter() - generation_started) * 1000),
+        )
+        raise
     if note is None:
         raise HTTPException(status_code=404, detail="Prep plan not found")
     plan = db.get(PrepPlan, request.prep_plan_id)
     record_generation_run(
         db,
         artifact_type="study_note",
-        prompt_version="study-note-v3",
+        prompt_version="study-note-v4",
         settings=settings,
         provider=note.source,
         model=settings.generation_model if note.source == "openai" else None,
@@ -43,8 +64,9 @@ def generate_note(
         prep_plan_id=request.prep_plan_id,
         input_value=request.model_dump(),
         output_value=note.model_dump(mode="json"),
-        quality={"section_count": len(note.sections), "question_count": len(note.interview_questions)},
+        quality=note.quality_report,
         detail={"day": request.day, "topics": request.topics},
+        latency_ms=round((perf_counter() - generation_started) * 1000),
     )
     record_usage_event(
         db,

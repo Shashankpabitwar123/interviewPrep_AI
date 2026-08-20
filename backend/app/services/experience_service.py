@@ -52,6 +52,40 @@ def get_interview_experience(
     return _experience_to_response(experience)
 
 
+def interview_evidence_context(
+    db: Session,
+    *,
+    role_title: str,
+    company: str = "",
+    user: Optional[User] = None,
+    limit: int = 5,
+) -> str:
+    """Return private-safe, explicitly unverified interview-pattern context."""
+
+    visible = list_interview_experiences(db, user)
+    ranked = sorted(
+        visible,
+        key=lambda item: _experience_relevance(item, role_title, company),
+        reverse=True,
+    )
+    relevant = [item for item in ranked if _experience_relevance(item, role_title, company) > 0][:limit]
+    if not relevant:
+        return "No relevant user-owned or legacy interview reports are available."
+    lines: list[str] = []
+    for item in relevant:
+        question_patterns = [question.prompt.strip()[:280] for question in item.questions[:4] if question.prompt.strip()]
+        lines.append(
+            f"- {item.company} | {item.role_title} | {item.round_name} | {item.difficulty}; "
+            f"topics={', '.join(item.topics[:8]) or 'not supplied'}; "
+            f"reported question patterns={' | '.join(question_patterns) or 'not supplied'}"
+        )
+    return (
+        "User-reported interview evidence below is private to this workspace or from the legacy shared library. "
+        "It is unverified and must only influence topic/round patterns. Do not present it as a confirmed company process "
+        "or copy a reported question verbatim.\n" + "\n".join(lines)
+    )
+
+
 def _experience_to_response(experience: InterviewExperience) -> InterviewExperienceResponse:
     return InterviewExperienceResponse(
         id=experience.id,
@@ -63,3 +97,20 @@ def _experience_to_response(experience: InterviewExperience) -> InterviewExperie
         difficulty=experience.difficulty,
         notes=experience.notes,
     )
+
+
+def _experience_relevance(experience: InterviewExperienceResponse, role_title: str, company: str) -> float:
+    role_tokens = _tokens(role_title)
+    experience_role_tokens = _tokens(experience.role_title)
+    overlap = len(role_tokens & experience_role_tokens) / max(1, len(role_tokens | experience_role_tokens))
+    company_match = bool(company.strip()) and company.strip().casefold() == experience.company.strip().casefold()
+    return overlap + (0.8 if company_match else 0.0)
+
+
+def _tokens(value: str) -> set[str]:
+    ignored = {"at", "and", "the", "a", "an", "junior", "senior", "intern", "i", "ii", "iii"}
+    return {
+        token
+        for token in "".join(character if character.isalnum() else " " for character in (value or "").casefold()).split()
+        if token not in ignored and len(token) > 1
+    }

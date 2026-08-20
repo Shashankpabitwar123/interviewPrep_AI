@@ -61,6 +61,7 @@ class PrepPlanResponse(BaseModel):
     plan_summary: str
     plan_source: str = "heuristic"
     role_blueprint_version: str = ""
+    quality_report: dict = Field(default_factory=dict)
     tasks: list[PrepTask]
     interview_at: Optional[datetime] = None
     hours_per_day: float = 2.0

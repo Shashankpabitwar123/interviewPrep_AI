@@ -5,8 +5,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Exam, JobPost, MockInterview, PrepPlan, User, UserUsageEvent
-from app.schemas.admin import AdminBlockRequest, AdminOverview, AdminUsageEventResponse, AdminUserDetail, AdminUserSummary
+from app.models import ArtifactFeedback, Exam, GenerationRun, JobPost, MockInterview, PrepPlan, User, UserUsageEvent
+from app.schemas.admin import AdminArtifactQuality, AdminBlockRequest, AdminGenerationQuality, AdminOverview, AdminUsageEventResponse, AdminUserDetail, AdminUserSummary
 from app.services.auth_service import delete_user_account, require_admin_user
 from app.services.usage_service import record_usage_event
 
@@ -35,6 +35,7 @@ def get_admin_overview(
         total_events=db.query(UserUsageEvent).count(),
         recent_events=[AdminUsageEventResponse.model_validate(event) for event in recent_events],
         users=users,
+        generation_quality=_generation_quality(db),
     )
 
 
@@ -194,3 +195,60 @@ def _aggregate_joined_exams(db: Session, user_ids: list[int]) -> dict[int, int]:
 def _aggregate_joined_mocks(db: Session, user_ids: list[int]) -> dict[int, int]:
     rows = db.query(JobPost.user_id, func.count(MockInterview.id)).join(PrepPlan, PrepPlan.job_post_id == JobPost.id).join(MockInterview, MockInterview.prep_plan_id == PrepPlan.id).filter(JobPost.user_id.in_(user_ids)).group_by(JobPost.user_id).all()
     return {int(user_id): int(count or 0) for user_id, count in rows if user_id is not None}
+
+
+def _generation_quality(db: Session) -> AdminGenerationQuality:
+    runs = db.query(GenerationRun).all()
+    feedback = db.query(ArtifactFeedback).all()
+    failed_runs = [run for run in runs if run.status != "complete"]
+    evaluated = [run for run in runs if isinstance(run.quality, dict) and isinstance(run.quality.get("passed"), bool)]
+    passed = [run for run in evaluated if run.quality.get("passed")]
+    scores = [int(run.quality.get("score")) for run in evaluated if isinstance(run.quality.get("score"), (int, float))]
+    latencies = sorted(int(run.latency_ms) for run in runs if run.latency_ms is not None)
+    helpful = sum(1 for item in feedback if item.rating == "helpful")
+    needs_work = sum(1 for item in feedback if item.rating == "needs_work")
+    artifact_types = sorted({run.artifact_type for run in runs})
+    artifacts = [_artifact_quality(artifact_type, [run for run in runs if run.artifact_type == artifact_type]) for artifact_type in artifact_types]
+    return AdminGenerationQuality(
+        total_runs=len(runs),
+        failed_runs=len(failed_runs),
+        success_rate=_percentage(len(runs) - len(failed_runs), len(runs), empty=100),
+        evaluated_runs=len(evaluated),
+        passed_runs=len(passed),
+        pass_rate=_percentage(len(passed), len(evaluated)),
+        average_score=round(sum(scores) / len(scores)) if scores else 0,
+        average_latency_ms=round(sum(latencies) / len(latencies)) if latencies else 0,
+        p95_latency_ms=_percentile(latencies, 0.95),
+        helpful_feedback=helpful,
+        needs_work_feedback=needs_work,
+        helpful_rate=_percentage(helpful, helpful + needs_work),
+        artifacts=artifacts,
+    )
+
+
+def _artifact_quality(artifact_type: str, runs: list[GenerationRun]) -> AdminArtifactQuality:
+    evaluated = [run for run in runs if isinstance(run.quality, dict) and isinstance(run.quality.get("passed"), bool)]
+    passed = [run for run in evaluated if run.quality.get("passed")]
+    scores = [int(run.quality.get("score")) for run in evaluated if isinstance(run.quality.get("score"), (int, float))]
+    latencies = [int(run.latency_ms) for run in runs if run.latency_ms is not None]
+    return AdminArtifactQuality(
+        artifact_type=artifact_type,
+        runs=len(runs),
+        failed_runs=sum(1 for run in runs if run.status != "complete"),
+        evaluated_runs=len(evaluated),
+        passed_runs=len(passed),
+        pass_rate=_percentage(len(passed), len(evaluated)),
+        average_score=round(sum(scores) / len(scores)) if scores else 0,
+        average_latency_ms=round(sum(latencies) / len(latencies)) if latencies else 0,
+    )
+
+
+def _percentage(value: int, total: int, *, empty: int = 0) -> int:
+    return round((value / total) * 100) if total else empty
+
+
+def _percentile(values: list[int], percentile: float) -> int:
+    if not values:
+        return 0
+    index = min(len(values) - 1, max(0, round((len(values) - 1) * percentile)))
+    return values[index]

@@ -115,7 +115,7 @@ pytest
 Expected result:
 
 ```text
-55 passed
+59 passed
 ```
 
 ## 5. Build Frontend

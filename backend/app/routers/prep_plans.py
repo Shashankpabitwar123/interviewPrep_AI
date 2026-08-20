@@ -1,3 +1,5 @@
+from time import perf_counter
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,8 @@ from app.services.usage_service import record_usage_event
 from app.services.generation_run_service import record_generation_run
 from app.services.research_service import research_for_role, save_research_bundle
 from app.services.role_intelligence_service import build_role_blueprint, ensure_role_blueprint, save_role_blueprint
+from app.services.competency_service import record_task_evidence
+from app.services.experience_service import interview_evidence_context
 
 router = APIRouter(prefix="/prep-plans", tags=["prep plans"])
 
@@ -34,6 +38,7 @@ def create_prep_plan(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_request_user),
 ) -> PrepPlanResponse:
+    generation_started = perf_counter()
     existing_job = get_job_detail(db, request.job_post_id, current_user) if request.job_post_id else None
     if request.job_post_id and existing_job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -81,7 +86,29 @@ def create_prep_plan(
             source_url,
             research_bundle,
         )
-    plan = generate_prep_plan(plan_request, settings, blueprint)
+    experience_context = interview_evidence_context(
+        db,
+        role_title=inferred_title,
+        company=inferred_company,
+        user=current_user,
+    )
+    try:
+        plan = generate_prep_plan(plan_request, settings, blueprint, experience_context)
+    except Exception as exc:
+        db.rollback()
+        record_generation_run(
+            db,
+            artifact_type="prep_plan",
+            prompt_version="prep-plan-v4",
+            settings=settings,
+            user=current_user,
+            job_post_id=request.job_post_id,
+            input_value=plan_request.model_dump(),
+            status="failed",
+            detail={"error_type": type(exc).__name__, "stage": "plan_generation"},
+            latency_ms=round((perf_counter() - generation_started) * 1000),
+        )
+        raise
     saved_plan = save_prep_plan(
         db,
         inferred_title,
@@ -113,7 +140,7 @@ def create_prep_plan(
     record_generation_run(
         db,
         artifact_type="prep_plan",
-        prompt_version="prep-plan-v3",
+        prompt_version="prep-plan-v4",
         settings=settings,
         provider=saved_plan.plan_source,
         model=settings.generation_model if saved_plan.plan_source == "openai" else None,
@@ -122,7 +149,11 @@ def create_prep_plan(
         prep_plan_id=saved_plan.prep_plan_id,
         input_value=blueprint.model_dump(mode="json"),
         output_value=saved_plan.model_dump(mode="json"),
-        quality={"critical_topics": len([item for item in blueprint.competencies if item.priority == "critical"])},
+        quality={
+            **saved_plan.quality_report,
+            "critical_topics": len([item for item in blueprint.competencies if item.priority == "critical"]),
+        },
+        latency_ms=round((perf_counter() - generation_started) * 1000),
     )
     record_usage_event(
         db,
@@ -148,7 +179,7 @@ def update_task_status(
     if task is None or get_prep_plan_detail(db, task.prep_plan_id, current_user) is None:
         raise HTTPException(status_code=404, detail="Prep task not found")
     task.status = request.status
-    db.commit()
+    record_task_evidence(db, task, current_user)
     return {"task_id": task.id, "status": task.status}
 
 

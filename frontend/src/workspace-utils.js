@@ -1,14 +1,15 @@
-export const READINESS_FORMULA = "30% plan + 20% learning + 25% exams + 20% mock interviews + 5% consistency";
+export const READINESS_FORMULA = "25% plan + 15% learning + 25% role mastery + 20% exams + 10% mock interviews + 5% consistency";
 
 export function emptyReadinessReport() {
   return {
     score: 0,
     formula: READINESS_FORMULA,
     components: [
-      { key: "plan", label: "Plan completion", value: 0, weight: 0.30 },
-      { key: "learning", label: "Learning", value: 0, weight: 0.20 },
-      { key: "exams", label: "Exam performance", value: 0, weight: 0.25 },
-      { key: "mocks", label: "Mock interviews", value: 0, weight: 0.20 },
+      { key: "plan", label: "Plan completion", value: 0, weight: 0.25 },
+      { key: "learning", label: "Learning", value: 0, weight: 0.15 },
+      { key: "competencies", label: "Role mastery", value: 0, weight: 0.25 },
+      { key: "exams", label: "Exam performance", value: 0, weight: 0.20 },
+      { key: "mocks", label: "Mock interviews", value: 0, weight: 0.10 },
       { key: "consistency", label: "Consistency", value: 0, weight: 0.05 },
     ],
   };
@@ -72,7 +73,7 @@ export function combineReadinessReports(reports) {
   if (!normalized.length) {
     return emptyReadinessReport();
   }
-  const componentKeys = ["plan", "learning", "exams", "mocks", "consistency"];
+  const componentKeys = ["plan", "learning", "competencies", "exams", "mocks", "consistency"];
   const components = componentKeys.map((key) => {
     const matching = normalized
       .flatMap((report) => report.components)

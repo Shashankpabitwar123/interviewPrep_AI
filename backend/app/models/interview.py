@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -83,6 +83,8 @@ class JobPost(TimestampMixin, Base):
     prep_plans: Mapped[list["PrepPlan"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
     role_blueprint: Mapped[Optional["RoleBlueprintRecord"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
     research_snapshots: Mapped[list["ResearchSnapshot"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
+    competency_evidence: Mapped[list["CompetencyEvidence"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
+    artifact_feedback: Mapped[list["ArtifactFeedback"]] = relationship(back_populates="job_post", cascade="all, delete-orphan")
 
 
 class JobAnalysis(TimestampMixin, Base):
@@ -120,6 +122,7 @@ class PrepPlan(TimestampMixin, Base):
     days_until_interview: Mapped[int] = mapped_column(Integer)
     summary: Mapped[str] = mapped_column(Text)
     role_blueprint_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    quality_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     job_post: Mapped["JobPost"] = relationship(back_populates="prep_plans")
     tasks: Mapped[list["PrepTask"]] = relationship(back_populates="prep_plan", cascade="all, delete-orphan")
@@ -223,6 +226,7 @@ class MockInterview(TimestampMixin, Base):
     average_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     session_plan: Mapped[Optional[list[dict]]] = mapped_column(JSON, nullable=True)
     overall_feedback: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    quality_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     prep_plan: Mapped["PrepPlan"] = relationship(back_populates="mock_interviews")
     messages: Mapped[list["MockMessage"]] = relationship(back_populates="mock_interview", cascade="all, delete-orphan")
@@ -307,3 +311,50 @@ class GenerationRun(TimestampMixin, Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     quality: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class CompetencyEvidence(TimestampMixin, Base):
+    """One auditable learning signal used to calculate job-specific mastery."""
+
+    __tablename__ = "competency_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_post_id",
+            "source_type",
+            "source_id",
+            "competency_key",
+            name="uq_competency_evidence_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    job_post_id: Mapped[int] = mapped_column(ForeignKey("job_posts.id", ondelete="CASCADE"), index=True)
+    prep_plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("prep_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    competency_key: Mapped[str] = mapped_column(String(180), index=True)
+    competency_name: Mapped[str] = mapped_column(String(200))
+    source_type: Mapped[str] = mapped_column(String(60), index=True)
+    source_id: Mapped[str] = mapped_column(String(180))
+    score: Mapped[float] = mapped_column(Float)
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    job_post: Mapped["JobPost"] = relationship(back_populates="competency_evidence")
+
+
+class ArtifactFeedback(TimestampMixin, Base):
+    """Small user quality signal for a generated plan, note, exam, or mock."""
+
+    __tablename__ = "artifact_feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    job_post_id: Mapped[int] = mapped_column(ForeignKey("job_posts.id", ondelete="CASCADE"), index=True)
+    prep_plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("prep_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(60), index=True)
+    artifact_id: Mapped[str] = mapped_column(String(180), index=True)
+    rating: Mapped[str] = mapped_column(String(40), index=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    job_post: Mapped["JobPost"] = relationship(back_populates="artifact_feedback")

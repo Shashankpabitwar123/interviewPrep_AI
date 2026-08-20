@@ -330,6 +330,9 @@ Local env vars are per terminal session unless placed in a `.env`, shell profile
   - recent improvements
   - weak topics
 - Formula should be grounded in real state rather than fixed 10%.
+- Current v4 formula is 25% plan + 15% learning + 25% role mastery + 20% exams + 10% mock interviews + 5% consistency.
+- Role mastery comes from auditable completed-task, exam-question, and mock-answer competency evidence; old stored attempts are backfilled when needed.
+- The next action and later practice prioritize the weakest role-specific competencies without overriding an explicit user-selected topic scope.
 - The text “Selected notes” was changed conceptually to “Completed notes.”
 
 ### Analytics
@@ -345,6 +348,7 @@ Local env vars are per terminal session unless placed in a `.env`, shell profile
   - role/topic distribution
   - time-to-interview preparedness.
 - If a portion is still incomplete, say “still in development” cleanly and visibly in both themes.
+- The developer dashboard now separates generation success from content quality, including pass rate, latency, failure traces, and helpfulness feedback.
 
 ### Interview Data
 

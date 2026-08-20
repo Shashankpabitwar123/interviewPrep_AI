@@ -11,6 +11,7 @@ from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepTask, P
 from app.schemas.role_intelligence import RoleBlueprint
 from app.services.gemini_service import GeminiQuotaError, generate_gemini_json
 from app.services.role_intelligence_service import blueprint_context, critical_competency_names
+from app.services.artifact_quality_service import assess_prep_plan
 
 
 SKILL_KEYWORDS = {
@@ -50,6 +51,7 @@ def generate_prep_plan(
     request: PrepPlanRequest,
     settings: Optional[Settings] = None,
     blueprint: Optional[RoleBlueprint] = None,
+    interview_evidence: str = "",
 ) -> PrepPlanResponse:
     """Create a day-by-day plan based on interview date and detected job skills."""
 
@@ -57,12 +59,20 @@ def generate_prep_plan(
 
     if settings and settings.openai_enabled:
         try:
-            generated = _generate_with_openai(request, settings, days_until_interview) if blueprint is None else _generate_with_openai(request, settings, days_until_interview, blueprint)
+            generated = (
+                _generate_with_openai(request, settings, days_until_interview)
+                if blueprint is None and not interview_evidence
+                else _generate_with_openai(request, settings, days_until_interview, blueprint, interview_evidence)
+            )
             return _align_plan_to_blueprint(generated, blueprint)
         except Exception:
             if settings.gemini_enabled:
                 try:
-                    generated = _generate_with_gemini(request, settings, days_until_interview) if blueprint is None else _generate_with_gemini(request, settings, days_until_interview, blueprint)
+                    generated = (
+                        _generate_with_gemini(request, settings, days_until_interview)
+                        if blueprint is None and not interview_evidence
+                        else _generate_with_gemini(request, settings, days_until_interview, blueprint, interview_evidence)
+                    )
                     return _align_plan_to_blueprint(generated, blueprint)
                 except GeminiQuotaError as exc:
                     logger.warning("Gemini prep plan quota exceeded after OpenAI failure: %s", exc)
@@ -75,7 +85,11 @@ def generate_prep_plan(
 
     if settings and settings.gemini_enabled:
         try:
-            generated = _generate_with_gemini(request, settings, days_until_interview) if blueprint is None else _generate_with_gemini(request, settings, days_until_interview, blueprint)
+            generated = (
+                _generate_with_gemini(request, settings, days_until_interview)
+                if blueprint is None and not interview_evidence
+                else _generate_with_gemini(request, settings, days_until_interview, blueprint, interview_evidence)
+            )
             return _align_plan_to_blueprint(generated, blueprint)
         except GeminiQuotaError as exc:
             logger.warning("Gemini prep plan quota exceeded: %s", exc)
@@ -115,6 +129,7 @@ def _generate_with_openai(
     settings: Settings,
     days_until_interview: int,
     blueprint: Optional[RoleBlueprint] = None,
+    interview_evidence: str = "",
 ) -> PrepPlanResponse:
     from openai import OpenAI
 
@@ -140,6 +155,7 @@ def _generate_with_openai(
                     f"Hours per day: {request.hours_per_day}\n"
                     f"Comfort level: {request.comfort_level}\n\n"
                     f"Shared role intelligence:\n{blueprint_context(blueprint, include_sources=False)}\n\n"
+                    f"Relevant interview evidence:\n{interview_evidence or 'No relevant user-reported interview evidence is available.'}\n\n"
                     f"Job description source text:\n{request.job_description}"
                 ),
             },
@@ -178,6 +194,7 @@ def _generate_with_gemini(
     settings: Settings,
     days_until_interview: int,
     blueprint: Optional[RoleBlueprint] = None,
+    interview_evidence: str = "",
 ) -> PrepPlanResponse:
     base_topics = _topic_words(request.job_description)
     base_tasks = _build_tasks(days_until_interview, base_topics, request.hours_per_day)
@@ -202,6 +219,7 @@ def _generate_with_gemini(
         f"Hours per day: {request.hours_per_day}\n"
         f"Comfort level: {request.comfort_level}\n\n"
         f"Shared role intelligence:\n{blueprint_context(blueprint, include_sources=False)}\n\n"
+        f"Relevant interview evidence:\n{interview_evidence or 'No relevant user-reported interview evidence is available.'}\n\n"
         f"Job description:\n{request.job_description}"
     )
     data = generate_gemini_json(settings, prompt, _gemini_plan_schema())
@@ -500,7 +518,8 @@ def _align_plan_to_blueprint(plan: PrepPlanResponse, blueprint: Optional[RoleBlu
     """Guarantee that the highest-priority role signals reach the saved plan."""
 
     if blueprint is None:
-        return plan
+        repaired = _repair_plan_structure(plan, None)
+        return repaired.model_copy(update={"quality_report": assess_prep_plan(repaired, None)})
     tasks = [task.model_copy(deep=True) for task in plan.tasks]
     covered = {topic.casefold() for task in tasks for topic in task.topics}
     candidates = [task for task in tasks if task.task_type in {PrepTaskType.study, PrepTaskType.coding, PrepTaskType.revision, PrepTaskType.diagnostic}]
@@ -512,8 +531,49 @@ def _align_plan_to_blueprint(plan: PrepPlanResponse, blueprint: Optional[RoleBlu
         target.topics = [*target.topics, competency]
         target.instructions = f"{target.instructions.rstrip()} Cover {competency} because it is a high-priority requirement in the shared role blueprint."
         covered.add(competency.casefold())
-    return plan.model_copy(update={
+    aligned = plan.model_copy(update={
         "detected_skills": _blueprint_skills(blueprint),
         "role_blueprint_version": blueprint.version,
         "tasks": tasks,
     })
+    repaired = _repair_plan_structure(aligned, blueprint)
+    return repaired.model_copy(update={"quality_report": assess_prep_plan(repaired, blueprint)})
+
+
+def _repair_plan_structure(plan: PrepPlanResponse, blueprint: Optional[RoleBlueprint]) -> PrepPlanResponse:
+    """Repair structural gaps deterministically without changing the requested timeline."""
+
+    tasks = [task.model_copy(deep=True) for task in plan.tasks]
+    topics = [item.name for item in (blueprint.competencies if blueprint else [])] or [
+        topic for task in tasks for topic in task.topics
+    ] or ["Role fundamentals"]
+    days_with_tasks = {task.day for task in tasks}
+    for day in range(1, plan.days_until_interview + 1):
+        if day in days_with_tasks:
+            continue
+        topic = topics[(day - 1) % len(topics)]
+        tasks.append(PrepTask(
+            day=day,
+            title=f"Day {day} role-focused review",
+            task_type=PrepTaskType.study,
+            duration_minutes=60,
+            topics=[topic],
+            instructions=f"Study {topic}, connect it to the saved job responsibilities, prepare one example, and explain one tradeoff aloud.",
+        ))
+
+    seen_titles: dict[str, int] = {}
+    for task in sorted(tasks, key=lambda item: (item.day, item.title)):
+        key = task.title.casefold().strip()
+        seen_titles[key] = seen_titles.get(key, 0) + 1
+        if seen_titles[key] > 1:
+            task.title = f"{task.title} — Day {task.day}, part {seen_titles[key]}"
+        if not task.topics:
+            task.topics = [topics[(task.day - 1) % len(topics)]]
+        if len(task.instructions.strip()) < 40:
+            task.instructions = (
+                f"{task.instructions.rstrip()} Prepare a concrete example, a tradeoff, and a validation step for the interview."
+            ).strip()
+    if tasks and not any(task.task_type in {PrepTaskType.diagnostic, PrepTaskType.exam, PrepTaskType.mock_interview} for task in tasks):
+        tasks[0].task_type = PrepTaskType.diagnostic
+        tasks[0].instructions = f"{tasks[0].instructions.rstrip()} Use this as a baseline before later practice."
+    return plan.model_copy(update={"tasks": sorted(tasks, key=lambda item: (item.day, item.title))})

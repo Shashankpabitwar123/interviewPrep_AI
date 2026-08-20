@@ -1,9 +1,11 @@
+from time import perf_counter
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import Exam, User
+from app.models import Exam, PrepPlan, User
 from app.schemas.exam import ExamGenerateRequest, ExamResponse, ExamStoredAttemptResponse, ExamSubmissionRequest, ExamSubmissionResponse
 from app.services.auth_service import get_request_user
 from app.services.exam_service import delete_exam, generate_exam_for_plan, get_exam_detail, list_exam_attempts, submit_exam_answers
@@ -29,7 +31,26 @@ def generate_exam(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_request_user),
 ) -> ExamResponse:
-    exam = generate_exam_for_plan(db, request, settings, current_user)
+    generation_started = perf_counter()
+    try:
+        exam = generate_exam_for_plan(db, request, settings, current_user)
+    except Exception as exc:
+        db.rollback()
+        plan = db.get(PrepPlan, request.prep_plan_id)
+        record_generation_run(
+            db,
+            artifact_type="exam",
+            prompt_version="exam-v4",
+            settings=settings,
+            user=current_user,
+            job_post_id=plan.job_post_id if plan else None,
+            prep_plan_id=request.prep_plan_id,
+            input_value=request.model_dump(),
+            status="failed",
+            detail={"error_type": type(exc).__name__, "stage": "exam_generation"},
+            latency_ms=round((perf_counter() - generation_started) * 1000),
+        )
+        raise
     if exam is None:
         raise HTTPException(status_code=404, detail="Prep plan not found")
     db_exam = db.get(Exam, exam.id)
@@ -37,7 +58,7 @@ def generate_exam(
     record_generation_run(
         db,
         artifact_type="exam",
-        prompt_version="exam-v3",
+        prompt_version="exam-v4",
         settings=settings,
         model=settings.generation_model if settings.openai_enabled else None,
         user=current_user,
@@ -51,6 +72,7 @@ def generate_exam(
             "day": exam.day,
             "quality_model": settings.analysis_model if settings.openai_enabled else None,
         },
+        latency_ms=round((perf_counter() - generation_started) * 1000),
     )
     record_usage_event(
         db,

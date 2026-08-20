@@ -44,6 +44,33 @@ class AdminUserDetail(BaseModel):
     recent_events: list[AdminUsageEventResponse]
 
 
+class AdminArtifactQuality(BaseModel):
+    artifact_type: str
+    runs: int = 0
+    failed_runs: int = 0
+    evaluated_runs: int = 0
+    passed_runs: int = 0
+    pass_rate: int = 0
+    average_score: int = 0
+    average_latency_ms: int = 0
+
+
+class AdminGenerationQuality(BaseModel):
+    total_runs: int = 0
+    failed_runs: int = 0
+    success_rate: int = 100
+    evaluated_runs: int = 0
+    passed_runs: int = 0
+    pass_rate: int = 0
+    average_score: int = 0
+    average_latency_ms: int = 0
+    p95_latency_ms: int = 0
+    helpful_feedback: int = 0
+    needs_work_feedback: int = 0
+    helpful_rate: int = 0
+    artifacts: list[AdminArtifactQuality] = Field(default_factory=list)
+
+
 class AdminOverview(BaseModel):
     total_users: int
     active_users: int
@@ -55,6 +82,7 @@ class AdminOverview(BaseModel):
     total_events: int
     recent_events: list[AdminUsageEventResponse]
     users: list[AdminUserSummary]
+    generation_quality: AdminGenerationQuality = Field(default_factory=AdminGenerationQuality)
 
 
 class AdminBlockRequest(BaseModel):

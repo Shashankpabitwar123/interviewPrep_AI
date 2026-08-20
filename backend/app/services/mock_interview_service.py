@@ -6,12 +6,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import MockInterview, MockMessage, PrepPlan, User
+from app.models import ArtifactFeedback, CompetencyEvidence, MockInterview, MockMessage, PrepPlan, User
 from app.ai_policy import require_ai_result
 from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest
 from app.schemas.role_intelligence import RoleBlueprint
 from app.services.gemini_service import generate_gemini_json
 from app.services.role_intelligence_service import blueprint_context
+from app.services.artifact_quality_service import assess_mock_plan, question_text_is_usable
+from app.services.competency_service import prioritized_topics, record_mock_evidence
+from app.services.experience_service import interview_evidence_context
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +48,18 @@ def start_mock_interview(
         return None
 
     config = _mock_config(request)
+    config["interview_evidence"] = interview_evidence_context(
+        db,
+        role_title=plan.job_post.title,
+        company=plan.job_post.company or "",
+        user=user,
+    )
     role_blueprint = _role_blueprint_for_plan(plan)
-    session_plan = _build_session_plan(plan, request, config, role_blueprint)
+    scope_topics = _topics_for_mock_scope(plan, request)
+    adaptive_topics = scope_topics if request.focus_topics or request.topic else prioritized_topics(db, plan, scope_topics, user)
+    session_plan = _build_session_plan(plan, request, config, role_blueprint, adaptive_topics)
+    quality_blueprint = None if request.focus_topics or request.topic else role_blueprint
+    quality_report = assess_mock_plan(session_plan, config["question_count"], quality_blueprint)
     config["session_plan"] = session_plan
     first_slot = session_plan[0]
     topic = first_slot["topic"]
@@ -55,12 +68,17 @@ def start_mock_interview(
         current_topic=topic,
         status="active",
         session_plan=session_plan,
+        quality_report=quality_report,
     )
     db.add(interview)
     db.flush()
     db.add(MockMessage(mock_interview_id=interview.id, role="meta", content=json.dumps(config)))
     question_type = first_slot["question_type"]
     ai_question = _question_with_ai(plan, topic, question_type, config, settings, first_slot, role_blueprint)
+    if ai_question and not question_text_is_usable(ai_question):
+        ai_question = _question_with_ai(plan, topic, question_type, config, settings, first_slot, role_blueprint)
+    if ai_question and not question_text_is_usable(ai_question):
+        ai_question = None
     if ai_question:
         question = ai_question
     else:
@@ -91,6 +109,18 @@ def delete_mock_interview(db: Session, mock_interview_id: int, user: Optional[Us
     interview = db.get(MockInterview, mock_interview_id)
     if interview is None or not _owns_plan(interview.prep_plan, user):
         return False
+    feedback_ids = [str(message.id) for message in interview.messages if message.role == "feedback"]
+    if feedback_ids:
+        db.query(CompetencyEvidence).filter(
+            CompetencyEvidence.job_post_id == interview.prep_plan.job_post_id,
+            CompetencyEvidence.source_type == "mock_answer",
+            CompetencyEvidence.source_id.in_(feedback_ids),
+        ).delete(synchronize_session=False)
+    db.query(ArtifactFeedback).filter(
+        ArtifactFeedback.job_post_id == interview.prep_plan.job_post_id,
+        ArtifactFeedback.artifact_type == "mock_interview",
+        ArtifactFeedback.artifact_id == str(interview.id),
+    ).delete(synchronize_session=False)
     db.delete(interview)
     db.commit()
     return True
@@ -136,9 +166,20 @@ def answer_mock_question(
             "dimensions": {"relevance": score, "depth": score, "structure": score, "communication": score},
             "strengths": [],
             "improvements": [feedback],
+            "competency": current_slot.get("competency", interview.current_topic),
         }
     db.add(MockMessage(mock_interview_id=interview.id, role="candidate", content=request.answer_text))
-    db.add(MockMessage(mock_interview_id=interview.id, role="feedback", content=feedback, score=score, detail=feedback_detail))
+    feedback_message = MockMessage(mock_interview_id=interview.id, role="feedback", content=feedback, score=score, detail=feedback_detail)
+    db.add(feedback_message)
+    record_mock_evidence(
+        db,
+        interview,
+        feedback_message,
+        str(feedback_detail.get("competency") or current_slot.get("competency") or interview.current_topic),
+        score,
+        feedback_detail,
+        user,
+    )
     next_question_number = answered_count + 2
     if next_question_number <= config["question_count"]:
         slot = next_slot or _fallback_slot(interview.current_topic, next_question_number, config)
@@ -204,6 +245,7 @@ def _config_for_interview(interview: MockInterview) -> dict:
                 config.setdefault("day", None)
                 config.setdefault("focus_topics", [])
                 config.setdefault("session_plan", interview.session_plan or [])
+                config.setdefault("interview_evidence", "")
                 return config
             except json.JSONDecodeError:
                 break
@@ -215,6 +257,7 @@ def _config_for_interview(interview: MockInterview) -> dict:
         "day": None,
         "focus_topics": [],
         "session_plan": interview.session_plan or [],
+        "interview_evidence": "",
     }
 
 
@@ -237,8 +280,9 @@ def _build_session_plan(
     request: MockInterviewStartRequest,
     config: dict,
     role_blueprint: Optional[RoleBlueprint],
+    prioritized_scope_topics: Optional[list[str]] = None,
 ) -> list[dict]:
-    topics = _topics_for_mock_scope(plan, request)
+    topics = prioritized_scope_topics or _topics_for_mock_scope(plan, request)
     competency_by_name = {
         item.name.casefold(): item
         for item in (role_blueprint.competencies if role_blueprint else [])
@@ -410,6 +454,7 @@ def _question_prompt(
         "For team_problem_solving ask about collaboration, disagreement, tradeoffs, ownership, and communication.\n\n"
         f"Role: {plan.job_post.title}\n"
         f"Shared role intelligence:\n{blueprint_context(role_blueprint, include_sources=False)}\n"
+        f"Relevant interview evidence:\n{config.get('interview_evidence') or 'No relevant user-reported interview evidence is available.'}\n"
         f"Job-posting source excerpt: {plan.job_post.description[:2500]}\n"
         f"Prep plan summary: {plan.summary}\n"
         f"Practice scope: {scope_labels.get(config.get('scope'), 'the complete preparation plan')}\n"
@@ -462,6 +507,7 @@ def _mock_feedback_with_ai(
         "Dimension keys must include relevance, accuracy, depth, structure, and communication, each from 0 to 1. "
         "The next question must follow the supplied next-question slot instead of staying on the same topic.\n\n"
         f"Shared role intelligence:\n{blueprint_context(_role_blueprint_for_plan(interview.prep_plan), include_sources=False)}\n\n"
+        f"Relevant interview evidence:\n{config.get('interview_evidence') or 'No relevant user-reported interview evidence is available.'}\n\n"
         f"Topic: {interview.current_topic}\n"
         f"Practice scope: {config.get('scope', 'full_plan')}\n"
         f"Selected focus topics: {', '.join(config.get('focus_topics') or []) or 'Use the active interview topic.'}\n"
@@ -565,6 +611,7 @@ def _to_response(interview: MockInterview) -> MockInterviewResponse:
         average_score=interview.average_score,
         session_plan=interview.session_plan or config.get("session_plan") or [],
         overall_feedback=interview.overall_feedback or {},
+        quality_report=interview.quality_report or {},
         created_at=interview.created_at,
         messages=[
             {

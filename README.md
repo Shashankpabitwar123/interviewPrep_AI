@@ -39,6 +39,8 @@ InterviewPrep AI is a deployed full-stack SaaS-style product that turns a target
 
 - **Job-aware preparation:** analyzes a complete posting and creates a role-specific day-by-day plan.
 - **Shared role intelligence:** persists one evidence-backed Role Blueprint so plans, notes, exams, and mocks prepare the same prioritized competencies.
+- **Adaptive learning loop:** converts completed work and scored answers into job-specific competency mastery, then prioritizes weak skills in later notes, exams, mocks, and next actions.
+- **Generation quality control:** applies artifact-specific quality gates, targeted repair, latency/failure tracing, and user helpfulness feedback.
 - **Persistent AI notes:** generates structured study material with examples, interview explanations, deeper learning, and saved follow-up Q&A.
 - **Configurable exams:** uses a coverage blueprint and quality pass, keeps answer keys private until submission, and provides detailed review afterward.
 - **Mock interview practice:** creates a planned question sequence with per-question intent, scoring rubrics, dimensional feedback, and a final summary.
@@ -131,4 +133,5 @@ The Tableau portfolio analysis is built from explicitly synthetic users and even
 - [Project memory and technical handoff](docs/project-memory.md)
 - [Deployment and database plan](docs/deployment-and-database-plan.md)
 - [Role intelligence v3 architecture](docs/role-intelligence-v3.md)
+- [Adaptive learning and quality v4](docs/adaptive-learning-v4.md)
 - [Local development guide](RUN_LOCALLY.md)

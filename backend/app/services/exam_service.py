@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import AnswerAttempt, Exam, PrepPlan, Question, User
+from app.models import AnswerAttempt, ArtifactFeedback, CompetencyEvidence, Exam, PrepPlan, Question, User
 from app.ai_policy import require_ai_result
 from app.schemas.exam import (
     AnswerResult,
@@ -23,6 +23,9 @@ from app.schemas.exam import (
 from app.schemas.role_intelligence import RoleBlueprint
 from app.services.gemini_service import generate_gemini_json
 from app.services.role_intelligence_service import blueprint_context
+from app.services.artifact_quality_service import report_from_issues
+from app.services.competency_service import prioritized_topics, record_exam_evidence
+from app.services.experience_service import interview_evidence_context
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,14 @@ def generate_exam_for_plan(
         return None
 
     scope, topics = _resolve_exam_scope(plan, request)
+    topics = prioritized_topics(db, plan, topics, user)
     role_blueprint = _role_blueprint_for_plan(plan)
+    experience_context = interview_evidence_context(
+        db,
+        role_title=plan.job_post.title,
+        company=plan.job_post.company or "",
+        user=user,
+    )
     generation_blueprint = _build_exam_blueprint(topics, request, role_blueprint)
     db_exam = Exam(
         prep_plan_id=plan.id,
@@ -76,7 +86,16 @@ def generate_exam_for_plan(
     db.add(db_exam)
     db.flush()
 
-    generated = _generate_questions_with_ai(plan, topics, request, settings, scope, role_blueprint, generation_blueprint) or []
+    generated = _generate_questions_with_ai(
+        plan,
+        topics,
+        request,
+        settings,
+        scope,
+        role_blueprint,
+        generation_blueprint,
+        experience_context,
+    ) or []
     if len(generated) < request.question_count:
         require_ai_result(
             "AI exam generation did not return enough questions. Enable local fallback in settings to fill the exam with offline questions."
@@ -123,6 +142,18 @@ def delete_exam(db: Session, exam_id: int, user: Optional[User] = None) -> bool:
     exam = db.get(Exam, exam_id)
     if exam is None or not _owns_plan(exam.prep_plan, user):
         return False
+    question_ids = [str(question.id) for question in exam.questions]
+    if question_ids:
+        db.query(CompetencyEvidence).filter(
+            CompetencyEvidence.job_post_id == exam.prep_plan.job_post_id,
+            CompetencyEvidence.source_type == "exam_question",
+            CompetencyEvidence.source_id.in_(question_ids),
+        ).delete(synchronize_session=False)
+    db.query(ArtifactFeedback).filter(
+        ArtifactFeedback.job_post_id == exam.prep_plan.job_post_id,
+        ArtifactFeedback.artifact_type == "exam",
+        ArtifactFeedback.artifact_id == str(exam.id),
+    ).delete(synchronize_session=False)
     db.delete(exam)
     db.commit()
     return True
@@ -167,6 +198,7 @@ def submit_exam_answers(
         results.append(AnswerResult(question_id=question.id, score=score, feedback=feedback))
 
     db.commit()
+    record_exam_evidence(db, exam, user)
     average = round(sum(result.score for result in results) / len(results), 2) if results else 0.0
     return ExamSubmissionResponse(
         exam_id=exam.id,
@@ -354,6 +386,7 @@ def _generate_questions_with_ai(
     scope: str,
     role_blueprint: Optional[RoleBlueprint] = None,
     generation_blueprint: Optional[list[dict]] = None,
+    interview_evidence: str = "",
 ) -> Optional[list[dict]]:
     if not settings or not settings.ai_enabled:
         require_ai_result("No AI provider is configured for exam generation. Enable local fallback in settings to create an offline exam.")
@@ -376,6 +409,7 @@ def _generate_questions_with_ai(
             existing_prompts=[question["prompt"] for question in questions[-12:]],
             role_blueprint=role_blueprint,
             generation_blueprint=(generation_blueprint or [])[len(questions):len(questions) + batch_size],
+            interview_evidence=interview_evidence,
         )
         data = _request_exam_batch(prompt, settings, batch_size)
         normalized = _normalize_ai_exam_questions(data, topics, request)
@@ -543,15 +577,12 @@ def _exam_quality_report(questions: list[dict], allowed_topics: list[str], expec
     missing_coverage = [topic for topic in allowed_topics if topic.casefold() not in covered]
     if expected_count >= len(allowed_topics):
         issues.extend({"question": 0, "type": "missing_topic_coverage", "topic": topic} for topic in missing_coverage)
-    return {
-        "passed": not issues,
-        "issue_count": len(issues),
-        "issues": issues[:30],
+    return report_from_issues("exam", issues[:30], metadata={
         "question_count": len(questions),
         "expected_count": expected_count,
         "covered_topics": sorted(covered),
         "missing_topics": missing_coverage,
-    }
+    })
 
 
 def _generate_questions_with_openai(prompt: str, settings: Settings, question_count: int, max_output_tokens: int) -> dict:
@@ -590,6 +621,7 @@ def _exam_prompt(
     existing_prompts: Optional[list[str]] = None,
     role_blueprint: Optional[RoleBlueprint] = None,
     generation_blueprint: Optional[list[dict]] = None,
+    interview_evidence: str = "",
 ) -> str:
     scope_label = {
         "selected_day": "the selected day's planned topics only",
@@ -622,6 +654,7 @@ def _exam_prompt(
         f"Return exactly {question_count} complete questions for batch {batch_number}. Keep each prompt and expected answer concise enough to fit the structured response.\n"
         f"Role: {plan.job_post.title}\n"
         f"Shared role intelligence:\n{blueprint_context(role_blueprint, include_sources=False)}\n"
+        f"Relevant interview evidence:\n{interview_evidence or 'No relevant user-reported interview evidence is available.'}\n"
         f"Job-posting source excerpt: {getattr(plan.job_post, 'description', '')[:3000]}\n"
         f"Prep plan summary: {plan.summary}\n"
         f"Exam scope: {scope_label}\n"

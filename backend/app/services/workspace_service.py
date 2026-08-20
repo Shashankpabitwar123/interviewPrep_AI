@@ -4,10 +4,11 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models import PrepPlan, User, WorkspaceState
-from app.schemas.workspace import ReadinessComponent, ReadinessResponse, WorkspaceStateResponse
+from app.schemas.workspace import LearningStateResponse, ReadinessComponent, ReadinessResponse, WorkspaceStateResponse
+from app.services.competency_service import build_learning_state
 
 
-READINESS_FORMULA = "30% plan + 20% learning + 25% exams + 20% mock interviews + 5% consistency"
+READINESS_FORMULA = "25% plan + 15% learning + 25% role mastery + 20% exams + 10% mock interviews + 5% consistency"
 
 
 class WorkspaceConflictError(Exception):
@@ -87,18 +88,25 @@ def calculate_readiness(
     mock_score = round(sum(mock_scores) / len(mock_scores)) if mock_scores else 0
 
     consistency_score = _consistency_score(state, completed_tasks, plan)
+    learning_state = build_learning_state(db, plan, user)
 
     components = [
-        ReadinessComponent(key="plan", label="Plan completion", score=plan_score, weight=0.30, detail=f"{len(completed_tasks)} of {len(tasks)} tasks complete"),
-        ReadinessComponent(key="learning", label="Learning", score=learning_score, weight=0.20, detail=f"{len(completed_learning)} of {len(learning_tasks)} learning tasks complete"),
-        ReadinessComponent(key="exams", label="Exam performance", score=exam_score, weight=0.25, detail=f"{len(exam_scores)} scored exam{'s' if len(exam_scores) != 1 else ''}"),
-        ReadinessComponent(key="mocks", label="Mock interviews", score=mock_score, weight=0.20, detail=f"{len(mock_scores)} scored mock interview{'s' if len(mock_scores) != 1 else ''}"),
+        ReadinessComponent(key="plan", label="Plan completion", score=plan_score, weight=0.25, detail=f"{len(completed_tasks)} of {len(tasks)} tasks complete"),
+        ReadinessComponent(key="learning", label="Learning", score=learning_score, weight=0.15, detail=f"{len(completed_learning)} of {len(learning_tasks)} learning tasks complete"),
+        ReadinessComponent(key="competencies", label="Role mastery", score=learning_state.overall_mastery, weight=0.25, detail=f"{learning_state.evidence_count} job-specific learning signals"),
+        ReadinessComponent(key="exams", label="Exam performance", score=exam_score, weight=0.20, detail=f"{len(exam_scores)} scored exam{'s' if len(exam_scores) != 1 else ''}"),
+        ReadinessComponent(key="mocks", label="Mock interviews", score=mock_score, weight=0.10, detail=f"{len(mock_scores)} scored mock interview{'s' if len(mock_scores) != 1 else ''}"),
         ReadinessComponent(key="consistency", label="Consistency", score=consistency_score, weight=0.05, detail="Active preparation days during the last week"),
     ]
     score = round(sum(component.score * component.weight for component in components))
     ordered = sorted(components, key=lambda component: component.score)
-    strengths = [component.label for component in components if component.score >= 70]
-    needs_work = [component.label for component in ordered if component.score < 60]
+    strengths = [*learning_state.strengths, *[component.label for component in components if component.score >= 70]]
+    needs_work = [*learning_state.focus_areas, *[component.label for component in ordered if component.score < 60]]
+    next_action = (
+        learning_state.next_actions[0].detail
+        if learning_state.next_actions and learning_state.next_actions[0].competency_name in learning_state.focus_areas
+        else _next_action(ordered[0], plan)
+    )
     return ReadinessResponse(
         prep_plan_id=plan.id,
         job_post_id=plan.job_post_id,
@@ -106,10 +114,32 @@ def calculate_readiness(
         label=_readiness_label(score),
         formula=READINESS_FORMULA,
         components=components,
-        strengths=strengths,
-        needs_work=needs_work,
-        next_action=_next_action(ordered[0], plan),
+        strengths=list(dict.fromkeys(strengths))[:8],
+        needs_work=list(dict.fromkeys(needs_work))[:8],
+        next_action=next_action,
+        competency_mastery=learning_state.overall_mastery,
+        competencies=learning_state.competencies,
+        next_actions=learning_state.next_actions,
     )
+
+
+def get_learning_state(
+    db: Session,
+    user: Optional[User],
+    prep_plan_id: Optional[int] = None,
+) -> Optional[LearningStateResponse]:
+    query = db.query(PrepPlan).join(PrepPlan.job_post)
+    query = query.filter(PrepPlan.job_post.has(user_id=user.id)) if user else query.filter(PrepPlan.job_post.has(user_id=None))
+    if prep_plan_id is not None:
+        query = query.filter(PrepPlan.id == prep_plan_id)
+    else:
+        workspace = _workspace_record(db, user)
+        state = (workspace.data or {}) if workspace else {}
+        archived_ids = _integer_ids(state.get("archivedJobIds") or state.get("archived_job_ids") or [])
+        if archived_ids:
+            query = query.filter(~PrepPlan.job_post_id.in_(archived_ids))
+    plan = query.order_by(PrepPlan.created_at.desc()).first()
+    return build_learning_state(db, plan, user) if plan else None
 
 
 def _workspace_record(db: Session, user: Optional[User]) -> Optional[WorkspaceState]:
@@ -207,6 +237,7 @@ def _next_action(lowest: ReadinessComponent, plan: PrepPlan) -> str:
     actions = {
         "plan": "Complete the next unfinished task in your preparation plan.",
         "learning": "Finish the next learning note, then mark the task complete.",
+        "competencies": "Review the weakest role competency, then retry it in a focused exam.",
         "exams": "Take a focused exam for the topics you studied most recently.",
         "mocks": "Run a mock interview and answer every question aloud.",
         "consistency": "Schedule one focused preparation block today.",

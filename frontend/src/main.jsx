@@ -75,6 +75,8 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  ThumbsDown,
+  ThumbsUp,
   TrendingUp,
   Trash2,
   UserRound,
@@ -3165,6 +3167,7 @@ function App() {
       {examReview && (
         <ExamReviewModal
           review={examReview}
+          apiFetch={apiFetch}
           onClose={() => setExamReview(null)}
         />
       )}
@@ -3172,6 +3175,7 @@ function App() {
       {mockReview && (
         <MockReviewModal
           review={mockReview}
+          apiFetch={apiFetch}
           onClose={() => setMockReview(null)}
         />
       )}
@@ -4134,7 +4138,7 @@ function ExamSessionModal({ exam, session, answers, setAnswers, onMove, onJump, 
   );
 }
 
-function ExamReviewModal({ review, onClose }) {
+function ExamReviewModal({ review, apiFetch, onClose }) {
   const { exam, result, answers } = review;
   const reviewExam = result?.review_exam || exam;
   const resultByQuestion = Object.fromEntries((result?.results || []).map((item) => [item.question_id, item]));
@@ -4151,6 +4155,12 @@ function ExamReviewModal({ review, onClose }) {
         </header>
 
         <main className="review-stage">
+          <ArtifactFeedbackPrompt
+            apiFetch={apiFetch}
+            artifactType="exam"
+            artifactId={reviewExam.id}
+            prepPlanId={reviewExam.prep_plan_id}
+          />
           {reviewExam.questions.map((question, index) => {
             const questionResult = resultByQuestion[question.id];
             const correctOption = question.options?.find((option) => option.is_correct);
@@ -4263,7 +4273,7 @@ function MockInterviewModal({ session, setSession, onSubmit, onExit, loading }) 
   );
 }
 
-function MockReviewModal({ review, onClose }) {
+function MockReviewModal({ review, apiFetch, onClose }) {
   const interview = review.interview;
   const rows = mockReviewRows(interview);
   return (
@@ -4279,6 +4289,12 @@ function MockReviewModal({ review, onClose }) {
         </header>
 
         <main className="review-stage">
+          <ArtifactFeedbackPrompt
+            apiFetch={apiFetch}
+            artifactType="mock_interview"
+            artifactId={interview.id}
+            prepPlanId={interview.prep_plan_id}
+          />
           {rows.map((row, index) => (
             <article className="review-card" key={`${row.question.id}-${index}`}>
               <div className="review-card-head">
@@ -4485,6 +4501,12 @@ function StudyNoteModal({ reader, apiFetch, readApiError, allowLocalFallback, on
               {reader.content.checklist.map((item) => <li key={item}>{item}</li>)}
             </ul>
           </section>
+          <ArtifactFeedbackPrompt
+            apiFetch={apiFetch}
+            artifactType="study_note"
+            artifactId={reader.task.id || reader.task.title}
+            prepPlanId={reader.task.planId}
+          />
           <section className="note-question-section">
             <h3>Ask a question about this note</h3>
             <form className="note-question-form" onSubmit={askNoteQuestion}>
@@ -4521,6 +4543,48 @@ function StudyNoteModal({ reader, apiFetch, readApiError, allowLocalFallback, on
         </main>
       </div>
     </div>
+  );
+}
+
+function ArtifactFeedbackPrompt({ apiFetch, artifactType, artifactId, prepPlanId, jobPostId }) {
+  const [rating, setRating] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function submit(nextRating) {
+    if (!apiFetch || saving) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      const response = await apiFetch("/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifact_type: artifactType,
+          artifact_id: String(artifactId).slice(0, 180),
+          rating: nextRating,
+          prep_plan_id: prepPlanId || undefined,
+          job_post_id: jobPostId || undefined,
+        }),
+      });
+      if (!response.ok) throw new Error("Feedback could not be saved");
+      setRating(nextRating);
+      setMessage("Thanks — this will improve future generations.");
+    } catch {
+      setMessage("Could not save feedback right now.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="artifact-feedback-prompt" aria-label="Generation feedback">
+      <div><strong>Was this useful?</strong><span>{message || "A quick signal helps us protect content quality."}</span></div>
+      <div>
+        <button type="button" className={rating === "helpful" ? "selected" : ""} disabled={saving} onClick={() => submit("helpful")}><ThumbsUp size={14} /> Yes</button>
+        <button type="button" className={rating === "needs_work" ? "selected" : ""} disabled={saving} onClick={() => submit("needs_work")}><ThumbsDown size={14} /> Needs work</button>
+      </div>
+    </section>
   );
 }
 
@@ -6914,6 +6978,7 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
   }, [search, users]);
 
   const selectedUser = selectedDetail?.user || users.find((item) => item.id === selectedUserId);
+  const generationQuality = overview?.generation_quality || {};
 
   async function fetchUserDetail(userId) {
     if (!userId) return null;
@@ -7047,6 +7112,34 @@ function DeveloperDashboard({ apiFetch, currentUser, onStatus }) {
           value={formatNumber(overview?.total_api_tokens ?? 0)}
           detail={`${formatNumber(overview?.total_events ?? 0)} product actions tracked`}
         />
+        <AdminSummary
+          label="Generation quality"
+          value={`${generationQuality.pass_rate ?? 0}%`}
+          detail={`${generationQuality.success_rate ?? 100}% successful · ${generationQuality.evaluated_runs ?? 0} evaluated`}
+        />
+      </section>
+
+      <section className="simple-admin-quality" aria-label="AI generation quality">
+        <header className="simple-admin-section-head">
+          <div><span className="guided-analysis-kicker">AI quality</span><h3>Generation health</h3></div>
+          <small>{generationQuality.total_runs ?? 0} traced runs</small>
+        </header>
+        <div className="simple-admin-quality-metrics">
+          <div><span>Quality score</span><strong>{generationQuality.average_score ?? 0}%</strong></div>
+          <div><span>Average latency</span><strong>{formatDurationMs(generationQuality.average_latency_ms)}</strong></div>
+          <div><span>P95 latency</span><strong>{formatDurationMs(generationQuality.p95_latency_ms)}</strong></div>
+          <div><span>User feedback</span><strong>{generationQuality.helpful_rate ?? 0}% helpful</strong></div>
+        </div>
+        {(generationQuality.artifacts || []).length > 0 && (
+          <div className="simple-admin-quality-artifacts">
+            {generationQuality.artifacts.map((item) => (
+              <div key={item.artifact_type}>
+                <span><strong>{humanize(item.artifact_type)}</strong><small>{item.runs} runs · {item.failed_runs} failed</small></span>
+                <span>{item.pass_rate}% quality pass</span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="simple-admin-workspace">
@@ -7231,6 +7324,13 @@ function AdminDetailGroup({ title, rows }) {
   );
 }
 
+function formatDurationMs(value) {
+  const milliseconds = Number(value || 0);
+  if (!milliseconds) return "—";
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  return `${(milliseconds / 1000).toFixed(milliseconds >= 10_000 ? 0 : 1)} s`;
+}
+
 function UsersIcon(props) {
   return <UserRound {...props} />;
 }
@@ -7408,8 +7508,18 @@ function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, savedP
   const reviewQueue = buildReviewQueue(completeExams, completeMocks);
   const readinessReport = readinessReports[String(selectedPlan?.prep_plan_id || selectedPlan?.id)] || emptyReadinessReport();
   const readinessScore = readinessReport.score;
-  const nextAction = getProgressNextAction({ plan: selectedPlan, planDays, completedTasks, examAttempts: selectedExamAttempts, mockAttempts: selectedMockAttempts, reviewQueue });
-  const focusItems = [...readinessReport.components].sort((first, second) => first.value - second.value).slice(0, 3);
+  const generatedNextAction = getProgressNextAction({ plan: selectedPlan, planDays, completedTasks, examAttempts: selectedExamAttempts, mockAttempts: selectedMockAttempts, reviewQueue });
+  const adaptiveNextAction = readinessReport.next_actions?.[0];
+  const nextAction = adaptiveNextAction
+    ? { title: adaptiveNextAction.title, detail: adaptiveNextAction.detail }
+    : generatedNextAction;
+  const competencyFocus = [...(readinessReport.competencies || [])]
+    .sort((first, second) => competencyNeedRank(first) - competencyNeedRank(second))
+    .slice(0, 3)
+    .map((item) => ({ label: item.name, value: item.score, detail: item.next_action }));
+  const focusItems = competencyFocus.length
+    ? competencyFocus
+    : [...readinessReport.components].sort((first, second) => first.value - second.value).slice(0, 3);
   const recentResults = [...completeExams.map((attempt) => ({ ...attempt, kind: "Exam" })), ...completeMocks.map((attempt) => ({ ...attempt, kind: "Mock" }))]
     .sort((first, second) => new Date(second.completedAt || second.updatedAt || second.createdAt || 0) - new Date(first.completedAt || first.updatedAt || first.createdAt || 0))
     .slice(0, 4);
@@ -7465,7 +7575,7 @@ function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, savedP
             <article key={item.label}>
               <b className={item.value < 50 ? "priority-critical" : item.value < 75 ? "priority-important" : "priority-supporting"}>{item.value < 50 ? "Focus" : item.value < 75 ? "Build" : "Maintain"}</b>
               <span>{item.value}%</span>
-              <div><strong>{item.label}</strong><p>{readinessComponentAdvice(item.label, item.value)}</p></div>
+              <div><strong>{item.label}</strong><p>{item.detail || readinessComponentAdvice(item.label, item.value)}</p></div>
             </article>
           ))}
           {!focusItems.length && <p className="guided-analysis-empty-copy">Start a prep plan to see the most important readiness signals.</p>}
@@ -7493,9 +7603,15 @@ function readinessComponentAdvice(label, value) {
   const normalized = String(label || "").toLowerCase();
   if (normalized.includes("plan")) return value >= 75 ? "Keep following the next scheduled plan task." : "Complete the next unfinished preparation day.";
   if (normalized.includes("learn") || normalized.includes("note")) return value >= 75 ? "Review completed notes before the interview." : "Finish the remaining job-specific study notes.";
+  if (normalized.includes("mastery") || normalized.includes("competenc")) return value >= 75 ? "Confirm the role skill in one hard scenario." : "Review the weakest role skill, then retry it in practice.";
   if (normalized.includes("exam")) return value >= 75 ? "Use one harder exam to confirm your level." : "Take or review a job-specific exam.";
   if (normalized.includes("mock")) return value >= 75 ? "Run one final realistic mock interview." : "Complete a mock interview and review weak answers.";
   return value >= 75 ? "Keep a steady preparation rhythm." : "Complete one meaningful preparation activity today.";
+}
+
+function competencyNeedRank(item) {
+  const priorityBonus = { critical: 25, important: 10, supporting: 0 }[item?.priority] ?? 0;
+  return Number(item?.score || 0) - priorityBonus;
 }
 
 function ProgressMetric({ title, value, detail }) {

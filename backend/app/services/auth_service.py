@@ -13,6 +13,8 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import (
     AnswerAttempt,
+    ArtifactFeedback,
+    CompetencyEvidence,
     EmailVerificationOTP,
     Exam,
     JobAnalysis,
@@ -299,6 +301,8 @@ def delete_user_account(db: Session, user: User) -> None:
 
     owned_job_ids = [job_id for (job_id,) in db.query(JobPost.id).filter(JobPost.user_id == user.id).all()]
     if owned_job_ids:
+        db.query(ArtifactFeedback).filter(ArtifactFeedback.job_post_id.in_(owned_job_ids)).delete(synchronize_session=False)
+        db.query(CompetencyEvidence).filter(CompetencyEvidence.job_post_id.in_(owned_job_ids)).delete(synchronize_session=False)
         owned_plan_ids = [plan_id for (plan_id,) in db.query(PrepPlan.id).filter(PrepPlan.job_post_id.in_(owned_job_ids)).all()]
         if owned_plan_ids:
             owned_exam_ids = [exam_id for (exam_id,) in db.query(Exam.id).filter(Exam.prep_plan_id.in_(owned_plan_ids)).all()]

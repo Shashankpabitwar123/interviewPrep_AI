@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import Settings, get_settings
 from app.database import Base, get_db
 from app.main import app
+from app.models import ArtifactFeedback, CompetencyEvidence, Exam, GenerationRun, User
 from app.schemas.study_note import NoteSection, StudyNoteResponse, StudyResource
 
 
@@ -198,6 +199,9 @@ def test_prep_plan_endpoint_saves_and_reads_plan() -> None:
     assert len(detail["tasks"]) == len(body["tasks"])
     assert detail["hours_per_day"] == 2
     assert detail["interview_at"] is not None
+    assert body["quality_report"]["artifact_type"] == "prep_plan"
+    assert isinstance(body["quality_report"]["score"], int)
+    assert detail["quality_report"] == body["quality_report"]
 
     # A plan created directly (without a prior saved-job upload) also leaves a
     # canonical job analysis behind in the same creation request.
@@ -285,9 +289,9 @@ def test_workspace_sync_and_readiness_use_real_plan_state() -> None:
     readiness = client.get(f"/workspace/readiness?prep_plan_id={plan['prep_plan_id']}")
     assert readiness.status_code == 200
     report = readiness.json()
-    assert report["formula"] == "30% plan + 20% learning + 25% exams + 20% mock interviews + 5% consistency"
+    assert report["formula"] == "25% plan + 15% learning + 25% role mastery + 20% exams + 10% mock interviews + 5% consistency"
     assert report["score"] > 0
-    assert {component["key"] for component in report["components"]} == {"plan", "learning", "exams", "mocks", "consistency"}
+    assert {component["key"] for component in report["components"]} == {"plan", "learning", "competencies", "exams", "mocks", "consistency"}
 
 
 def test_readiness_ignores_other_plan_activity_and_archived_default_plan() -> None:
@@ -391,6 +395,141 @@ def test_exam_generation_and_submission_flow() -> None:
     assert stored.json()[0]["status"] == "complete"
     assert stored.json()[0]["average_score"] == submission.json()["average_score"]
     assert len(stored.json()[0]["answers"]) == len(exam["questions"])
+
+    learning_state = client.get(f"/workspace/learning-state?prep_plan_id={prep_plan_id}")
+    assert learning_state.status_code == 200
+    assert learning_state.json()["evidence_count"] == len(exam["questions"])
+    assert any(item["source_types"] == ["exam_question"] for item in learning_state.json()["competencies"])
+    assert client.delete(f"/exams/{exam['id']}").status_code == 204
+    db = next(client.app.dependency_overrides[get_db]())
+    assert db.query(CompetencyEvidence).filter(CompetencyEvidence.source_type == "exam_question").count() == 0
+
+
+def test_learning_state_tracks_completed_tasks_and_reopens_them_cleanly() -> None:
+    client = _client_with_memory_db()
+    plan = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Data Analyst",
+            "job_description": "Analyze business data with SQL, Python, dashboards, accuracy, and stakeholder communication.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=4)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    task_id = plan["tasks"][0]["id"]
+
+    completed = client.patch(f"/prep-plans/tasks/{task_id}", json={"status": "complete"})
+    assert completed.status_code == 200
+    state = client.get(f"/workspace/learning-state?prep_plan_id={plan['prep_plan_id']}").json()
+    assert state["evidence_count"] >= 1
+    assert state["next_actions"]
+
+    reopened = client.patch(f"/prep-plans/tasks/{task_id}", json={"status": "not_started"})
+    assert reopened.status_code == 200
+    db = next(client.app.dependency_overrides[get_db]())
+    assert db.query(CompetencyEvidence).filter(
+        CompetencyEvidence.source_type == "learning_task",
+        CompetencyEvidence.source_id == str(task_id),
+    ).count() == 0
+
+
+def test_artifact_feedback_is_owned_and_updates_one_signal() -> None:
+    client = _client_with_memory_db()
+    plan = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Data Analyst",
+            "job_description": "Analyze business data with SQL, Python, dashboards, accuracy, and stakeholder communication.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=4)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    payload = {
+        "artifact_type": "study_note",
+        "artifact_id": "day-1-sql-note",
+        "prep_plan_id": plan["prep_plan_id"],
+        "rating": "needs_work",
+    }
+    first = client.post("/feedback", json=payload)
+    second = client.post("/feedback", json={**payload, "rating": "helpful"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["rating"] == "helpful"
+    db = next(client.app.dependency_overrides[get_db]())
+    stored = db.query(ArtifactFeedback).filter(ArtifactFeedback.artifact_id == "day-1-sql-note").all()
+    assert len(stored) == 1
+    assert stored[0].rating == "helpful"
+
+    missing = client.post("/feedback", json={**payload, "prep_plan_id": 999999})
+    assert missing.status_code == 404
+
+
+def test_admin_overview_reports_generation_quality_and_latency() -> None:
+    client = _client_with_memory_db()
+    registered = _register(
+        client,
+        {"name": "Quality Admin", "email": "quality-admin@example.com", "password": "Password1!"},
+    ).json()
+    db = next(client.app.dependency_overrides[get_db]())
+    admin = db.query(User).filter_by(id=registered["user"]["id"]).one()
+    admin.role = "admin"
+    db.commit()
+
+    plan = client.post(
+        "/prep-plans",
+        headers={"Authorization": f"Bearer {registered['access_token']}"},
+        json={
+            "job_title": "Data Analyst",
+            "job_description": "Analyze business data with SQL, Python, dashboards, accuracy, and stakeholder communication.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=4)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    )
+    assert plan.status_code == 200
+
+    overview = client.get(
+        "/admin/overview",
+        headers={"Authorization": f"Bearer {registered['access_token']}"},
+    )
+    assert overview.status_code == 200
+    quality = overview.json()["generation_quality"]
+    assert quality["total_runs"] >= 1
+    assert quality["evaluated_runs"] >= 1
+    assert quality["average_latency_ms"] >= 0
+    assert any(item["artifact_type"] == "prep_plan" for item in quality["artifacts"])
+
+
+def test_failed_generation_is_traced_without_saving_partial_exam() -> None:
+    client = _client_with_memory_db()
+    plan = client.post(
+        "/prep-plans",
+        headers={"X-Allow-Local-Fallback": "true"},
+        json={
+            "job_title": "Data Analyst",
+            "job_description": "Analyze business data with SQL, Python, dashboards, accuracy, and stakeholder communication.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=4)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    client.headers.update({"X-Allow-Local-Fallback": "false"})
+
+    response = client.post(
+        "/exams/generate",
+        json={"prep_plan_id": plan["prep_plan_id"], "day": 1, "question_count": 3, "difficulty": "medium"},
+    )
+    assert response.status_code == 503
+    db = next(client.app.dependency_overrides[get_db]())
+    assert db.query(Exam).filter(Exam.prep_plan_id == plan["prep_plan_id"]).count() == 0
+    failed = db.query(GenerationRun).filter(
+        GenerationRun.artifact_type == "exam",
+        GenerationRun.status == "failed",
+    ).one()
+    assert failed.detail["stage"] == "exam_generation"
 
 
 def test_exam_submission_counts_unanswered_questions_as_zero() -> None:

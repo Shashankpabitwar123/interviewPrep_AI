@@ -52,5 +52,6 @@ class MockInterviewResponse(BaseModel):
     average_score: Optional[float] = None
     session_plan: list[MockQuestionPlan] = Field(default_factory=list)
     overall_feedback: dict = Field(default_factory=dict)
+    quality_report: dict = Field(default_factory=dict)
     created_at: datetime
     messages: list[MockMessageResponse]
