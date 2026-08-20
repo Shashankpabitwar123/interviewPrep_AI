@@ -201,20 +201,10 @@ const TAB_ONBOARDING = {
     title: "Exams",
     body: "Generate role-specific exams or mock interviews, choose difficulty, start attempts, submit answers, and review scores and feedback.",
   },
-  data: {
-    target: "[data-tour-page='data']",
-    title: "Interview Data",
-    body: "Collect useful interview signals from your saved jobs, notes, exams, mock interviews, and calendar so you know what to focus on next.",
-  },
-  analytics: {
-    target: "[data-tour-page='analytics']",
-    title: "Analytics",
-    body: "See readiness trends, topic coverage, activity volume, exam performance, and preparation patterns across your saved plans.",
-  },
   progress: {
     target: "[data-tour-page='progress']",
-    title: "Progress",
-    body: "Compare plan completion, notes finished, exams submitted, mock interviews, and overall readiness across all of your interview tracks.",
+    title: "Readiness",
+    body: "See the selected job's readiness, next action, completed work, practice results, and most important focus areas in one place.",
   },
   calendar: {
     target: "[data-tour-page='calendar']",
@@ -238,7 +228,7 @@ const TAB_ONBOARDING = {
   },
 };
 
-const STANDARD_ONBOARDING_TABS = ["jobs", "prep", "exams", "data", "analytics", "progress", "calendar", "notes", "settings"];
+const STANDARD_ONBOARDING_TABS = ["jobs", "prep", "exams", "progress", "calendar", "notes", "settings"];
 
 function App() {
   const [mode, setMode] = useState("paste");
@@ -2666,7 +2656,7 @@ function App() {
 
         {activeView === "prep" && <GuidedSectionTabs title="Plan" description="Follow your day-by-day preparation plan for the selected job." tabs={[]} active={activeView} onChange={setActiveView} />}
         {activeView === "exams" && <GuidedSectionTabs title="Practice" description="Create job-specific exams and mock interviews, then review completed attempts." tabs={[]} active={activeView} onChange={setActiveView} />}
-        {["progress", "analytics"].includes(activeView) && <GuidedSectionTabs title="Readiness" description="See what is improving, what needs work, and the next best action." tabs={[{ id: "progress", label: "Overview" }, { id: "analytics", label: "Trends" }]} active={activeView} onChange={setActiveView} />}
+        {activeView === "progress" && <GuidedSectionTabs title="Readiness" description="See what matters now and the next best action for the selected job." tabs={[]} active={activeView} onChange={setActiveView} />}
 
         {activeView === "jobs" && (
           <div data-tour-page="jobs">
@@ -2796,30 +2786,6 @@ function App() {
           </div>
         )}
 
-        {activeView === "data" && (
-          <div data-tour-page="data">
-          <InterviewDataView
-            jobs={jobs}
-            savedPlans={savedPlans}
-            plan={plan}
-            completedTasks={completedTasks}
-            examAttempts={examAttempts}
-            mockAttempts={mockAttempts}
-            notes={notes}
-            generatedStudyNotes={generatedStudyNotes}
-            calendarEvents={calendarEvents}
-            recentActivity={selectedActivity}
-            apiFetch={apiFetch}
-            onOpenPlan={async (prepPlanId) => {
-              await loadPrepPlan(prepPlanId);
-              setActiveView("prep");
-            }}
-            onOpenExams={() => setActiveView("exams")}
-            onOpenNotes={() => setActiveView("notes")}
-          />
-          </div>
-        )}
-
         {activeView === "progress" && (
           <div data-tour-page="progress">
           <ProgressView
@@ -2844,30 +2810,6 @@ function App() {
           <AboutView onBack={() => { setActiveView("dashboard"); setSettingsOpen(true); }} />
         )}
 
-        {activeView === "analytics" && (
-          <div data-tour-page="analytics">
-          <AnalyticsView
-            plan={plan}
-            savedPlans={savedPlans}
-            jobs={jobs}
-            completedTasks={completedTasks}
-            examAttempts={examAttempts}
-            mockAttempts={mockAttempts}
-            notes={notes}
-            generatedStudyNotes={generatedStudyNotes}
-            calendarEvents={calendarEvents}
-            recentActivity={activity}
-            apiFetch={apiFetch}
-            readiness={readinessReport}
-            onOpenPlan={async (prepPlanId) => {
-              await loadPrepPlan(prepPlanId);
-              setActiveView("prep");
-            }}
-            onOpenProgress={() => setActiveView("progress")}
-          />
-          </div>
-        )}
-
         {activeView === "developer" && isAdmin && (
           <div data-tour-page="developer">
           <DeveloperDashboard
@@ -2882,7 +2824,7 @@ function App() {
           <PlaceholderView title="Developer Dashboard" />
         )}
 
-        {!["dashboard", "jobs", "prep", "exams", "calendar", "notes", "progress", "data", "about", "analytics", "developer"].includes(activeView) && (
+        {!["dashboard", "jobs", "prep", "exams", "calendar", "notes", "progress", "about", "developer"].includes(activeView) && (
           <PlaceholderView title={viewTitle(activeView)} />
         )}
 
@@ -3394,8 +3336,7 @@ function GuidedTopNavigation({ activeView, generationInProgress, onNavigate, use
             <div className="guided-profile-menu">
               <div className="guided-profile-status"><StatusIndicator status={status} /><span>{user?.email}</span></div>
               <button onClick={() => onNavigate("progress")}><Target size={18} />Readiness</button>
-              <button onClick={() => onNavigate("calendar")}><CalendarDays size={18} />Full schedule</button>
-              <button onClick={() => onNavigate("data")}><Database size={18} />Interview data</button>
+              <button onClick={() => onNavigate("calendar")}><CalendarDays size={18} />Schedule</button>
               <button data-settings-toggle="true" data-tour="settings-button" onClick={onOpenSettings}><Settings size={18} />Settings</button>
               <button onClick={() => onNavigate("about")}><Info size={18} />About PrepInterview AI</button>
               {isAdmin && <button onClick={() => onNavigate("developer")}><ShieldCheck size={18} />Admin tools <small>Admin</small></button>}
@@ -5826,7 +5767,8 @@ function LegacyExamsView({ plan, savedPlans, planSearch, setPlanSearch, loadPrep
 }
 
 function CalendarView({ plan, planColor, calendarPlanDetails, jobMarkers, completedTasks, toggleTaskDone, generateExam, calendarMonth, setCalendarMonth, calendarEvents, eventDraft, setEventDraft, addCalendarEvent, removeCalendarEvent }) {
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(() => dateKey(new Date()));
+  const [addingEvent, setAddingEvent] = useState(false);
   const savedPlanEvents = Object.values(calendarPlanDetails).flatMap((detail) =>
     planEventsForCalendar(detail, colorForPlan(detail, jobMarkers))
   );
@@ -5834,96 +5776,116 @@ function CalendarView({ plan, planColor, calendarPlanDetails, jobMarkers, comple
   const allEvents = mergeCalendarEvents([...savedPlanEvents, ...activePlanEvents, ...calendarEvents]);
   const monthDays = buildMonthDays(calendarMonth);
   const selectedDateEvents = selectedDate ? allEvents.filter((event) => event.date === selectedDate) : [];
+  const today = dateKey(new Date());
+  const upcomingEvents = allEvents
+    .filter((event) => event.date >= today)
+    .sort((first, second) => first.date.localeCompare(second.date))
+    .slice(0, 6);
+
+  function startAddingEvent(date = selectedDate || today) {
+    setEventDraft({ ...eventDraft, date, color: planColor || eventDraft.color });
+    setAddingEvent(true);
+  }
+
   return (
-    <section className="page-stack">
-      <section className="panel page-panel">
-        <div className="calendar-head">
-          <PanelTitle icon={CalendarDays} title="Calendar" subtitle="Plan preparation, mocks, real interviews, and meeting links." />
-          <div>
-            <button className="outline-action" onClick={() => setCalendarMonth(shiftMonth(calendarMonth, -1))}>Prev</button>
-            <strong>{calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
-            <button className="outline-action" onClick={() => setCalendarMonth(shiftMonth(calendarMonth, 1))}>Next</button>
-          </div>
+    <section className="page-stack simple-schedule-page guided-job-analysis-direct">
+      <section className="guided-analysis-summary simple-page-intro">
+        <div>
+          <span>Schedule</span>
+          <h2>Know what is next</h2>
+          <p>Interview dates, preparation work, and practice sessions in one simple timeline.</p>
         </div>
-        <form className="event-form" onSubmit={addCalendarEvent}>
-          <input placeholder="Event title" value={eventDraft.title} onChange={(event) => setEventDraft({ ...eventDraft, title: event.target.value })} />
-          <input type="date" value={eventDraft.date} onChange={(event) => setEventDraft({ ...eventDraft, date: event.target.value })} />
-          <select value={eventDraft.type} onChange={(event) => setEventDraft({ ...eventDraft, type: event.target.value })}>
-            <option value="preparation">Preparation</option>
-            <option value="mock">Mock interview</option>
-            <option value="real_interview">Real interview</option>
-            <option value="exam">Exam</option>
-          </select>
-          <input type="color" value={eventDraft.color} onChange={(event) => setEventDraft({ ...eventDraft, color: event.target.value })} />
-          <input placeholder="Meet/Zoom link" value={eventDraft.link} onChange={(event) => setEventDraft({ ...eventDraft, link: event.target.value })} />
-          <button className="primary"><Plus size={16} /> Add Event</button>
-        </form>
-        <div className="month-grid">
+        <button type="button" className="guided-primary-button" onClick={() => addingEvent ? setAddingEvent(false) : startAddingEvent()}>
+          {addingEvent ? <X size={16} /> : <Plus size={16} />}{addingEvent ? "Close" : "Add event"}
+        </button>
+      </section>
+
+      {addingEvent && (
+        <section className="simple-schedule-composer">
+          <header><span>Add to schedule</span><h3>Create an event</h3></header>
+          <form onSubmit={addCalendarEvent}>
+            <label><span>Title</span><input placeholder="Mock interview or review session" value={eventDraft.title} onChange={(event) => setEventDraft({ ...eventDraft, title: event.target.value })} /></label>
+            <label><span>Date</span><input type="date" value={eventDraft.date} onChange={(event) => setEventDraft({ ...eventDraft, date: event.target.value })} /></label>
+            <label><span>Type</span><select value={eventDraft.type} onChange={(event) => setEventDraft({ ...eventDraft, type: event.target.value })}>
+              <option value="preparation">Preparation</option>
+              <option value="mock">Mock interview</option>
+              <option value="real_interview">Real interview</option>
+              <option value="exam">Exam</option>
+            </select></label>
+            <label className="simple-schedule-link"><span>Meeting link <small>optional</small></span><input placeholder="Meet or Zoom link" value={eventDraft.link} onChange={(event) => setEventDraft({ ...eventDraft, link: event.target.value })} /></label>
+            <button className="guided-primary-button" disabled={!eventDraft.title.trim()}><Plus size={16} />Save event</button>
+          </form>
+        </section>
+      )}
+
+      <div className="guided-analysis-columns simple-schedule-overview">
+        <section className="simple-upcoming-card">
+          <header><span>Next up</span><h3>Upcoming</h3></header>
+          <div className="simple-event-list">
+            {upcomingEvents.map((event) => (
+              <button type="button" key={event.id} onClick={() => setSelectedDate(event.date)}>
+                <i style={{ background: event.color }} />
+                <span><strong>{event.title}</strong><small>{formatCalendarDate(event.date)} · {labelForCalendarEvent(event.type)}</small></span>
+                <ChevronRight size={16} />
+              </button>
+            ))}
+            {!upcomingEvents.length && <p className="guided-analysis-empty-copy">Nothing is scheduled yet. Add only the events that help you prepare.</p>}
+          </div>
+        </section>
+
+        <section className="simple-day-agenda">
+          <header><span>Selected day</span><h3>{formatCalendarDate(selectedDate)}</h3></header>
+          <div className="simple-agenda-list">
+            {selectedDateEvents.map((event) => (
+              <article key={event.id}>
+                <i style={{ background: event.color }} />
+                <div><strong>{event.title}</strong><span>{labelForCalendarEvent(event.type)}</span></div>
+                <div>
+                  {event.day && <button type="button" onClick={() => generateExam(event.day, { planOverride: event.planDetail })}>Generate exam</button>}
+                  {event.link && <a href={normalizeUrl(event.link)} target="_blank" rel="noreferrer">Open link <ExternalLink size={12} /></a>}
+                  {event.source === "user" && <button type="button" className="danger" onClick={() => removeCalendarEvent(event.id)}>Remove</button>}
+                </div>
+              </article>
+            ))}
+            {!selectedDateEvents.length && <p className="guided-analysis-empty-copy">No events on this day.</p>}
+          </div>
+          <button type="button" className="simple-text-action" onClick={() => startAddingEvent(selectedDate)}><Plus size={14} />Add something on this day</button>
+        </section>
+      </div>
+
+      <section className="simple-calendar-card">
+        <header>
+          <div><span>Month</span><h3>{calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h3></div>
+          <div className="simple-calendar-controls">
+            <button type="button" onClick={() => setCalendarMonth(shiftMonth(calendarMonth, -1))} aria-label="Previous month">Prev</button>
+            <button type="button" onClick={() => { const current = new Date(); setCalendarMonth(current); setSelectedDate(dateKey(current)); }}>Today</button>
+            <button type="button" onClick={() => setCalendarMonth(shiftMonth(calendarMonth, 1))} aria-label="Next month">Next</button>
+          </div>
+        </header>
+        <div className="simple-month-grid">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <strong key={day}>{day}</strong>)}
           {monthDays.map((date) => {
             const key = dateKey(date);
             const dateEvents = allEvents.filter((event) => event.date === key);
             const realInterview = dateEvents.find((event) => event.type === "real_interview");
             return (
-              <div
-                className={`month-day ${date.getMonth() !== calendarMonth.getMonth() ? "muted" : ""} ${dateEvents.length ? "has-events" : ""}`}
+              <button
+                type="button"
+                className={`simple-month-day ${date.getMonth() !== calendarMonth.getMonth() ? "muted" : ""} ${dateEvents.length ? "has-events" : ""} ${key === selectedDate ? "selected" : ""} ${key === today ? "today" : ""}`}
                 key={key}
-                role="button"
-                tabIndex={0}
                 onClick={() => setSelectedDate(key)}
                 style={realInterview ? { background: tintColor(realInterview.color, 0.12), borderColor: realInterview.color } : undefined}
+                aria-label={`${formatCalendarDate(key)}, ${dateEvents.length} event${dateEvents.length === 1 ? "" : "s"}`}
               >
                 <span>{date.getDate()}</span>
-                {dateEvents.slice(0, 4).map((event) => (
-                  <div className="month-event" key={event.id} style={{ borderLeftColor: event.color }}>
-                    <button type="button" onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedDate(key); }}>{event.title}</button>
-                    {event.link && <a href={normalizeUrl(event.link)} target="_blank" rel="noreferrer" onClick={(clickEvent) => clickEvent.stopPropagation()}><ExternalLink size={11} /></a>}
-                  </div>
+                {dateEvents.slice(0, 2).map((event) => (
+                  <small key={event.id}><i style={{ background: event.color }} />{event.title}</small>
                 ))}
-                {dateEvents.some((event) => event.day) && <button type="button" className="mini-action" onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedDate(key); }}>Actions</button>}
-              </div>
+                {dateEvents.length > 2 && <em>+{dateEvents.length - 2} more</em>}
+              </button>
             );
           })}
         </div>
-        {selectedDate && (
-          <div className="modal-backdrop">
-            <div className="calendar-day-modal">
-              <header>
-                <div>
-                  <strong>{formatCalendarDate(selectedDate)}</strong>
-                  <span>{selectedDateEvents.length ? `${selectedDateEvents.length} event${selectedDateEvents.length === 1 ? "" : "s"}` : "No events yet"}</span>
-                </div>
-                <button className="icon-button" onClick={() => setSelectedDate(null)}><X size={18} /></button>
-              </header>
-              <div className="calendar-modal-events">
-                {selectedDateEvents.length ? selectedDateEvents.map((event) => (
-                  <article key={event.id} style={{ borderLeftColor: event.color }}>
-                    <div>
-                      <strong>{event.title}</strong>
-                      <span>{labelForCalendarEvent(event.type)}</span>
-                    </div>
-                    <div className="calendar-modal-actions">
-                      {event.day && (
-                        <button className="primary compact-action" onClick={() => { generateExam(event.day, { planOverride: event.planDetail }); setSelectedDate(null); }}>
-                          <FileQuestion size={15} /> Generate Exam
-                        </button>
-                      )}
-                      {event.link && <a className="outline-action compact-action" href={normalizeUrl(event.link)} target="_blank" rel="noreferrer">Open Link <ExternalLink size={13} /></a>}
-                      {event.source === "user" && (
-                        <button className="danger-action compact-danger" onClick={() => removeCalendarEvent(event.id)}>
-                          <Trash2 size={15} /> Remove
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                )) : <EmptyState text="No events on this date. Use the form above to add preparation, exam, or interview events." />}
-              </div>
-              <button className="outline-action" onClick={() => { setEventDraft({ ...eventDraft, date: selectedDate, color: planColor || eventDraft.color }); setSelectedDate(null); }}>
-                <Plus size={16} /> Use this date in the event form
-              </button>
-            </div>
-          </div>
-        )}
       </section>
     </section>
   );
@@ -7170,18 +7132,7 @@ function usePlanReadinessReports(savedPlans, activeReadiness, apiFetch) {
   return reports;
 }
 
-function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recentActivity, savedPlans, jobs, apiFetch, readiness, onOpenPlan }) {
-  const [openSections, setOpenSections] = useState({
-    plan: true,
-    allPlans: true,
-    notes: false,
-    exams: false,
-    mock: false,
-    insights: false,
-    queue: false,
-    milestones: false,
-    activity: false,
-  });
+function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, savedPlans, apiFetch, readiness, onOpenPlan }) {
   const [planDetails, setPlanDetails] = useState({});
   const [selectedProgressPlanId, setSelectedProgressPlanId] = useState(() => plan?.prep_plan_id || savedPlans[0]?.id || "");
   const readinessReports = usePlanReadinessReports(savedPlans, readiness, apiFetch);
@@ -7223,225 +7174,106 @@ function ProgressView({ plan, completedTasks, examAttempts, mockAttempts, recent
   const planDays = selectedPlan ? buildPlanMilestones(selectedPlan, "").filter((day) => !day.isFinal) : [];
   const selectedExamAttempts = examAttempts.filter((attempt) => String(attempt.prepPlanId) === String(selectedPlan?.prep_plan_id || selectedPlan?.id));
   const selectedMockAttempts = mockAttempts.filter((attempt) => String(attempt.prepPlanId) === String(selectedPlan?.prep_plan_id || selectedPlan?.id));
-  const completedCount = Object.keys(completedTasks).length;
   const allPlanTasks = selectedPlan ? planDays.flatMap((day) => buildDailyStudyTasks(selectedPlan, day.day)) : [];
   const noteTasks = allPlanTasks.filter((task) => task.task_type === "study_note");
   const completedNotes = countCompletedDayTasks(noteTasks, completedTasks);
-  const completeExams = examAttempts.filter((attempt) => attempt.status === "complete");
-  const completeMocks = mockAttempts.filter((attempt) => attempt.status === "complete");
-  const allScores = [
-    ...completeExams.map((attempt) => attempt.score),
-    ...completeMocks.map((attempt) => attempt.score),
-  ].filter((score) => Number.isFinite(Number(score)));
-  const averageScore = allScores.length ? Math.round((allScores.reduce((sum, score) => sum + Number(score), 0) / allScores.length) * 100) : 0;
+  const completeExams = selectedExamAttempts.filter((attempt) => attempt.status === "complete");
+  const completeMocks = selectedMockAttempts.filter((attempt) => attempt.status === "complete");
+  const examAverage = averageAttemptScore(completeExams);
+  const mockAverage = averageAttemptScore(completeMocks);
   const completedPlanDays = planDays.filter((day) => isPlanDayComplete(selectedPlan, day.day, completedTasks)).length;
   const planProgress = planDays.length ? Math.round((completedPlanDays / planDays.length) * 100) : 0;
-  const activeAttempts = [...examAttempts, ...mockAttempts].filter((attempt) => attempt.status !== "complete").length;
-  const selectedCompleteExams = completeExams.filter((attempt) => String(attempt.prepPlanId) === String(selectedPlan?.prep_plan_id || selectedPlan?.id));
-  const selectedCompleteMocks = completeMocks.filter((attempt) => String(attempt.prepPlanId) === String(selectedPlan?.prep_plan_id || selectedPlan?.id));
-  const topicInsights = buildTopicInsights(selectedCompleteExams.length ? selectedCompleteExams : completeExams);
-  const mockInsights = buildMockSectionInsights(selectedCompleteMocks.length ? selectedCompleteMocks : completeMocks);
-  const reviewQueue = buildReviewQueue(selectedCompleteExams.length ? selectedCompleteExams : completeExams, selectedCompleteMocks.length ? selectedCompleteMocks : completeMocks);
-  const milestones = buildProgressMilestones({ plan: selectedPlan, completedCount, completeExams: selectedCompleteExams, completeMocks: selectedCompleteMocks, averageScore, completedPlanDays, planDays });
+  const reviewQueue = buildReviewQueue(completeExams, completeMocks);
   const readinessReport = readinessReports[String(selectedPlan?.prep_plan_id || selectedPlan?.id)] || emptyReadinessReport();
   const readinessScore = readinessReport.score;
-  const selectedActivity = recentActivity.filter((item) => activityBelongsToPlan(item, selectedPlan));
   const nextAction = getProgressNextAction({ plan: selectedPlan, planDays, completedTasks, examAttempts: selectedExamAttempts, mockAttempts: selectedMockAttempts, reviewQueue });
-  const planSummaries = allDetailedPlans.map((detail) => buildPlanProgressSummary(detail, completedTasks, examAttempts, mockAttempts));
-
-  function toggleSection(key) {
-    setOpenSections((current) => ({ ...current, [key]: !current[key] }));
-  }
+  const focusItems = [...readinessReport.components].sort((first, second) => first.value - second.value).slice(0, 3);
+  const recentResults = [...completeExams.map((attempt) => ({ ...attempt, kind: "Exam" })), ...completeMocks.map((attempt) => ({ ...attempt, kind: "Mock" }))]
+    .sort((first, second) => new Date(second.completedAt || second.updatedAt || second.createdAt || 0) - new Date(first.completedAt || first.updatedAt || first.createdAt || 0))
+    .slice(0, 4);
 
   return (
-    <section className="page-stack progress-page">
-      <section className="panel page-panel progress-command">
-        <div className="progress-command-copy">
-          <PanelTitle
-            icon={Activity}
-            title="Progress"
-            subtitle="A focused command center for readiness, next steps, weak spots, and proof of improvement."
-            badge={selectedPlan ? `${selectedPlan.days_until_interview} days left` : "No active plan"}
-          />
-          <div className="next-action-card">
-            <span>Recommended next action</span>
-            <strong>{nextAction.title}</strong>
-            <p>{nextAction.detail}</p>
-          </div>
+    <section className="page-stack simple-readiness-page guided-job-analysis-direct">
+      <section className="guided-analysis-summary simple-readiness-summary">
+        <div className="simple-readiness-heading">
+          <div><span>Readiness</span><h2>{selectedPlan?.job_title || "Choose a prep plan"}</h2></div>
+          {savedPlans.length > 1 && (
+            <label><span>Job</span><select value={selectedProgressPlanId} onChange={(event) => setSelectedProgressPlanId(event.target.value)}>
+              {savedPlans.map((savedPlan) => <option key={savedPlan.id} value={savedPlan.id}>{savedPlan.job_title}</option>)}
+            </select></label>
+          )}
         </div>
-        <div className="readiness-card">
-          <div className="readiness-ring" style={{ "--score": readinessScore }}>
-            <strong>{readinessScore}%</strong>
-            <span>Ready</span>
+        <div className="simple-readiness-score">
+          <strong>{readinessScore}%</strong>
+          <div><h3>{readinessLabel(readinessScore)}</h3><p>{readinessSummary(readinessScore, selectedPlan, readinessReport)}</p></div>
+        </div>
+        <div className="simple-readiness-track" role="progressbar" aria-label="Interview readiness" aria-valuemin="0" aria-valuemax="100" aria-valuenow={readinessScore}><span style={{ width: `${readinessScore}%` }} /></div>
+      </section>
+
+      <section className="guided-analysis-priorities simple-next-action">
+        <header><div><span>Prepare next</span><h3>Best next action</h3></div><small>Based on the selected job</small></header>
+        <div><b className={readinessScore < 70 ? "priority-critical" : "priority-important"}>{readinessScore < 70 ? "Priority" : "Keep going"}</b><span><strong>{nextAction.title}</strong><p>{nextAction.detail}</p></span></div>
+        {selectedPlan && <button type="button" className="guided-secondary-button" onClick={() => onOpenPlan?.(selectedPlan.prep_plan_id || selectedPlan.id)}>Open plan <ChevronRight size={15} /></button>}
+      </section>
+
+      <div className="guided-analysis-columns simple-readiness-columns">
+        <section>
+          <header><span>Current progress</span><h3>What is completed</h3></header>
+          <div className="simple-status-list">
+            <ReadinessStatusRow label="Plan days" value={`${completedPlanDays} of ${planDays.length}`} detail={`${planProgress}% complete`} />
+            <ReadinessStatusRow label="Study notes" value={`${completedNotes} of ${noteTasks.length}`} detail="Completed for this job" />
+            <ReadinessStatusRow label="Practice" value={`${completeExams.length + completeMocks.length}`} detail="Scored exams and mocks" />
           </div>
-          <div>
-            <strong>{readinessLabel(readinessScore)}</strong>
-            <p>{readinessSummary(readinessScore, selectedPlan, readinessReport)}</p>
-            <div className="readiness-breakdown">
-              {readinessReport.components.map((item) => (
-                <span key={item.label}>{item.label}: <strong>{item.value}%</strong></span>
-              ))}
-            </div>
-            <small className="readiness-formula">Formula: {readinessReport.formula || READINESS_FORMULA}</small>
+        </section>
+        <section>
+          <header><span>Practice results</span><h3>What your scores show</h3></header>
+          <div className="simple-score-summary">
+            <ReadinessStatusRow label="Exam average" value={examAverage === null ? "—" : `${examAverage}%`} detail={`${completeExams.length} completed`} />
+            <ReadinessStatusRow label="Mock average" value={mockAverage === null ? "—" : `${mockAverage}%`} detail={`${completeMocks.length} completed`} />
+            <ReadinessStatusRow label="Needs review" value={`${reviewQueue.length}`} detail="Low-scored answers" />
           </div>
+          {recentResults.length > 0 && <div className="simple-recent-results">{recentResults.map((attempt) => <div key={`${attempt.kind}-${attempt.id}`}><span>{attempt.kind}</span><strong>{scorePercent(attempt.score)}%</strong></div>)}</div>}
+        </section>
+      </div>
+
+      <section className="guided-analysis-topics simple-readiness-focus">
+        <header><div><span>Focus areas</span><h3>What will improve readiness</h3></div><small>Lowest signals first</small></header>
+        <div>
+          {focusItems.map((item) => (
+            <article key={item.label}>
+              <b className={item.value < 50 ? "priority-critical" : item.value < 75 ? "priority-important" : "priority-supporting"}>{item.value < 50 ? "Focus" : item.value < 75 ? "Build" : "Maintain"}</b>
+              <span>{item.value}%</span>
+              <div><strong>{item.label}</strong><p>{readinessComponentAdvice(item.label, item.value)}</p></div>
+            </article>
+          ))}
+          {!focusItems.length && <p className="guided-analysis-empty-copy">Start a prep plan to see the most important readiness signals.</p>}
         </div>
       </section>
 
-      <section className="progress-section-stack">
-        <ProgressSection title="All prep plans" subtitle={`${planSummaries.length} saved plan${planSummaries.length === 1 ? "" : "s"} tracked`} icon={BriefcaseBusiness} open={openSections.allPlans} onToggle={() => toggleSection("allPlans")}>
-          {planSummaries.length ? (
-            <div className="progress-plan-grid">
-              {planSummaries.map((summary) => (
-                <article
-                  className={`progress-plan-card ${String(selectedProgressPlanId) === String(summary.id) ? "selected" : ""}`}
-                  key={summary.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedProgressPlanId(summary.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") setSelectedProgressPlanId(summary.id);
-                  }}
-                >
-                  <div>
-                    <strong>{summary.title}</strong>
-                    <span>{summary.daysLeft} days left • {summary.tasksDone}/{summary.tasksTotal} tasks • {summary.attempts} attempts</span>
-                  </div>
-                  <div className="progress-mini-bar"><span style={{ width: `${summary.progress}%` }} /></div>
-                  <footer>
-                    <em>{summary.progress}%</em>
-                    <span>{String(selectedProgressPlanId) === String(summary.id) ? "Active" : "Click to view"}</span>
-                    <button type="button" onClick={(event) => { event.stopPropagation(); onOpenPlan?.(summary.id); }}>Open plan</button>
-                  </footer>
-                </article>
-              ))}
-            </div>
-          ) : <EmptyState text="Generate prep plans from saved jobs and they will appear here." />}
-        </ProgressSection>
-      </section>
-
-      <section className="progress-kpi-grid">
-        <ProgressMetric title="Completed notes" value={`${completedNotes}/${noteTasks.length || 0}`} detail="Study-note tasks checked" />
-        <ProgressMetric title="Overall score" value={allScores.length ? `${averageScore}%` : "N/A"} detail={`${allScores.length} scored attempt${allScores.length === 1 ? "" : "s"} across jobs`} />
-        <ProgressMetric title="Open attempts" value={activeAttempts} detail="Ready or active exams/interviews" />
-      </section>
-
-      <section className="progress-section-stack">
-        <ProgressSection title="Selected prep plan" subtitle={selectedPlan ? selectedPlan.job_title : "No selected plan"} icon={ClipboardList} open={openSections.plan} onToggle={() => toggleSection("plan")}>
-          {selectedPlan ? (
-            <div className="progress-section-grid">
-              <div className="progress-bar-wrap">
-                <div><strong>{planProgress}% complete</strong><span>{completedPlanDays} of {planDays.length} days completed</span></div>
-                <div className="progress-bar"><span style={{ width: `${planProgress}%` }} /></div>
-              </div>
-              <div className="progress-day-list">
-                {planDays.map((day) => {
-                  const done = isPlanDayComplete(selectedPlan, day.day, completedTasks);
-                  const tasks = buildDailyStudyTasks(selectedPlan, day.day);
-                  return (
-                    <article key={day.day} className={done ? "done" : ""}>
-                      <div>
-                        <strong>Day {day.day}</strong>
-                        <span>{tasks.length} tasks • {day.label}</span>
-                      </div>
-                      <em>{done ? "Completed" : `${countCompletedDayTasks(tasks, completedTasks)} / ${tasks.length} done`}</em>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-          ) : <EmptyState text="Click a saved job with a prep plan or generate a new plan to activate progress tracking." />}
-        </ProgressSection>
-
-        <ProgressSection title="Study notes" subtitle="Topics covered and still pending" icon={NotebookText} open={openSections.notes} onToggle={() => toggleSection("notes")}>
-          <div className="progress-two-column">
-            <ProgressPillList title="Completed note topics" items={noteTasks.filter((task) => isTaskComplete(task, completedTasks)).flatMap((task) => task.topics || [task.title])} empty="Completed note topics will appear here." />
-            <ProgressPillList title="Pending note topics" items={noteTasks.filter((task) => !isTaskComplete(task, completedTasks)).flatMap((task) => task.topics || [task.title])} empty="No pending note topics." tone="muted" />
-          </div>
-        </ProgressSection>
-
-        <ProgressSection title="Exam performance" subtitle="Scores, question types, and practice coverage" icon={FileQuestion} open={openSections.exams} onToggle={() => toggleSection("exams")}>
-          <div className="progress-attempt-list">
-            {selectedExamAttempts.slice(0, 8).map((attempt) => (
-              <article key={attempt.id}>
-                <div>
-                  <strong>{attempt.exam?.title || "Generated exam"}</strong>
-                  <span>{attempt.jobTitle || selectedPlan?.job_title || "Interview practice"} • {attempt.difficulty || "medium"}</span>
-                </div>
-                <em>{attempt.status === "complete" ? `${Math.round(Number(attempt.score || 0) * 100)}%` : attempt.status}</em>
-              </article>
-            ))}
-            {!selectedExamAttempts.length && <EmptyState text="Generated exams for the selected plan will appear here." />}
-          </div>
-        </ProgressSection>
-
-        <ProgressSection title="Mock interview progress" subtitle="Behavioral, technical, and team-answer growth" icon={MessageSquareText} open={openSections.mock} onToggle={() => toggleSection("mock")}>
-          <div className="progress-two-column">
-            <div className="progress-attempt-list">
-              {selectedMockAttempts.slice(0, 6).map((attempt) => (
-                <article key={attempt.id}>
-                  <div>
-                    <strong>{attempt.difficulty || "Mock"} mock interview</strong>
-                    <span>{attempt.jobTitle || selectedPlan?.job_title || "Interview practice"} • {attempt.questionCount || attempt.interview?.question_count || 0} questions</span>
-                  </div>
-                  <em>{attempt.status === "complete" ? `${Math.round(Number(attempt.score || 0) * 100)}%` : attempt.status}</em>
-                </article>
-              ))}
-              {!selectedMockAttempts.length && <EmptyState text="Mock interviews for the selected plan will appear here after you generate them." />}
-            </div>
-            <ProgressPillList title="Section signals" items={mockInsights} empty="Mock section scores will appear here." />
-          </div>
-        </ProgressSection>
-
-        <ProgressSection title="Strengths and weak spots" subtitle="Inferred from scores and feedback" icon={Gauge} open={openSections.insights} onToggle={() => toggleSection("insights")}>
-          <div className="progress-two-column">
-            <ProgressPillList title="Strengths" items={topicInsights.strengths} empty="High-scoring topics will appear here." />
-            <ProgressPillList title="Needs review" items={topicInsights.weaknesses} empty="Weak areas will appear after scored attempts." tone="warning" />
-          </div>
-        </ProgressSection>
-
-        <ProgressSection title="Review queue" subtitle="Items to revisit before the interview" icon={BookOpen} open={openSections.queue} onToggle={() => toggleSection("queue")}>
-          <div className="review-queue-list">
-            {reviewQueue.slice(0, 8).map((item) => (
-              <article key={`${item.title}-${item.detail}`}>
-                <strong>{item.title}</strong>
-                <span>{item.detail}</span>
-              </article>
-            ))}
-            {!reviewQueue.length && <EmptyState text="Low-scored answers and unfinished work will appear here." />}
-          </div>
-        </ProgressSection>
-
-        <ProgressSection title="Milestones" subtitle="Proof that preparation is moving forward" icon={CheckCircle2} open={openSections.milestones} onToggle={() => toggleSection("milestones")}>
-          <div className="milestone-grid">
-            {milestones.map((milestone) => (
-              <article key={milestone.title} className={milestone.done ? "done" : ""}>
-                <CheckCircle2 size={16} />
-                <div>
-                  <strong>{milestone.title}</strong>
-                  <span>{milestone.detail}</span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </ProgressSection>
-
-        <ProgressSection title="Recent activity" subtitle="Meaningful actions from your preparation flow" icon={Activity} open={openSections.activity} onToggle={() => toggleSection("activity")}>
-          <div className="progress-timeline">
-            {selectedActivity.slice(0, 10).map((item, index) => (
-              <article key={`${item.title}-${index}`}>
-                <span className={`activity-icon ${item.type}`}><Activity size={15} /></span>
-                <div>
-                  <strong>{item.title}</strong>
-                  <p>{item.detail}</p>
-                </div>
-                <small>{item.time}</small>
-              </article>
-            ))}
-          </div>
-        </ProgressSection>
-      </section>
+      <details className="simple-readiness-method">
+        <summary>How readiness is calculated</summary>
+        <p>{readinessReport.formula || READINESS_FORMULA}</p>
+      </details>
     </section>
   );
+}
+
+function ReadinessStatusRow({ label, value, detail }) {
+  return <div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
+}
+
+function averageAttemptScore(attempts) {
+  if (!attempts.length) return null;
+  return Math.round(attempts.reduce((total, attempt) => total + scorePercent(attempt.score), 0) / attempts.length);
+}
+
+function readinessComponentAdvice(label, value) {
+  const normalized = String(label || "").toLowerCase();
+  if (normalized.includes("plan")) return value >= 75 ? "Keep following the next scheduled plan task." : "Complete the next unfinished preparation day.";
+  if (normalized.includes("learn") || normalized.includes("note")) return value >= 75 ? "Review completed notes before the interview." : "Finish the remaining job-specific study notes.";
+  if (normalized.includes("exam")) return value >= 75 ? "Use one harder exam to confirm your level." : "Take or review a job-specific exam.";
+  if (normalized.includes("mock")) return value >= 75 ? "Run one final realistic mock interview." : "Complete a mock interview and review weak answers.";
+  return value >= 75 ? "Keep a steady preparation rhythm." : "Complete one meaningful preparation activity today.";
 }
 
 function ProgressMetric({ title, value, detail }) {
@@ -8181,10 +8013,10 @@ function AboutView({ onBack }) {
       metric: "05",
     },
     {
-      title: "Interview data and analytics",
-      body: "The product turns preparation into a living data layer: saved jobs, generated plans, completed notes, exam history, mock feedback, calendar pressure, and recent activity all connect back to the role.",
-      detail: "Interview Data gives each job its own intelligence packet and question bank. Analytics compares readiness, trends, weak topics, and next actions across all saved prep plans.",
-      visual: ["Data packet", "Trends", "Next action"],
+      title: "Readiness and schedule",
+      body: "The product keeps preparation focused by showing the selected job’s readiness, next action, completed work, practice results, and upcoming schedule.",
+      detail: "Readiness uses real plan, learning, exam, mock, and consistency signals. Schedule keeps interview dates, preparation work, and meeting links together without duplicating the rest of the workspace.",
+      visual: ["Next action", "Readiness", "Schedule"],
       metric: "06",
     },
     {
@@ -8195,7 +8027,7 @@ function AboutView({ onBack }) {
       metric: "07",
     },
   ];
-  const pipeline = ["Job Description", "AI Analysis", "Prep Plan", "Daily Notes", "Focused Exam", "Mock Interview", "Review Loop", "Analytics"];
+  const pipeline = ["Job Description", "AI Analysis", "Prep Plan", "Daily Notes", "Focused Exam", "Mock Interview", "Review Loop", "Readiness"];
   return (
     <section className="about-page">
       <section className="about-hero">
@@ -8286,10 +8118,8 @@ function AboutView({ onBack }) {
             ["Exams", "Generate full-plan or custom exams with difficulty presets and advanced question-type control."],
             ["Notes", "Organize job-specific notes into folders, edit them, and improve them with AI."],
             ["Mock Interviews", "Practice spoken answers with timed, voice-read questions and review feedback."],
-            ["Progress", "Track readiness across notes, exams, mocks, review queue, and saved prep plans."],
-            ["Interview Data", "Browse a role-by-role data library with job signals, evidence, question banks, and preparation packets."],
-            ["Analytics", "Measure readiness trends, score history, topic weaknesses, completion funnel, and upcoming schedule pressure."],
-            ["Calendar", "See prep work, interviews, custom events, and plan tasks in a calendar workflow."],
+            ["Readiness", "See one job’s score, next action, completed work, practice results, and focus areas."],
+            ["Schedule", "See upcoming prep work, interviews, custom events, and plan tasks without leaving the selected job context."],
             ["Capture Bubble", "Save job descriptions or URLs from job boards through the browser extension."],
           ].map(([name, detail]) => (
             <article key={name}>
@@ -8784,8 +8614,6 @@ function viewTitle(view) {
     jobs: "Jobs",
     prep: "Plan",
     exams: "Practice",
-    data: "Practice",
-    analytics: "Readiness",
     progress: "Readiness",
     calendar: "Schedule",
     notes: "Notes",
