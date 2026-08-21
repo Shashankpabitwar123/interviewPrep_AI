@@ -14,3 +14,16 @@ test("Notes builds its date timeline from the selected job and active plan", () 
   assert.match(mainSource, /buildGuidedPreparationDays\(selectedJob,\s*activePlan\)/);
   assert.doesNotMatch(mainSource, /buildGuidedPreparationDays\(groupTasksByDay/);
 });
+
+test("active job context renders role, company, and interview timing separately", () => {
+  const contextBar = mainSource.slice(mainSource.indexOf("function GuidedJobContextBar"), mainSource.indexOf("function TypedBriefing"));
+  assert.match(contextBar, /className="guided-job-role"/);
+  assert.match(contextBar, /guided-job-company/);
+  assert.match(contextBar, /className="guided-job-interview"/);
+  assert.doesNotMatch(contextBar, /\$\{role\} at \$\{company\}/);
+});
+
+test("captured page-title chrome is normalized before display", () => {
+  assert.match(mainSource, /function normalizeJobIdentityForDisplay/);
+  assert.match(mainSource, /by clicking\|continue to/);
+});

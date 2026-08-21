@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from app.config import Settings
@@ -37,6 +38,26 @@ Return only JSON matching this shape:
 AUTO_TITLE_VALUES = {"auto-detect role", "auto detect role", "saved job url", "captured job", "job description"}
 AUTO_COMPANY_VALUES = {"auto-detect company", "auto detect company", "detected company"}
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class JobIdentityResolution:
+    """A precision-first role/company decision with auditable evidence."""
+
+    role_title: str
+    company: str
+    confidence: float
+    needs_review: bool
+    evidence: tuple[str, ...]
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "role_title": self.role_title,
+            "company": self.company,
+            "confidence": self.confidence,
+            "needs_review": self.needs_review,
+            "evidence": list(self.evidence),
+        }
 
 
 # This is the deliberately small, user-facing skills vocabulary.  It keeps the
@@ -114,6 +135,94 @@ def identify_job(
     return _clean_role_title(title), _clean_company_candidate(company)
 
 
+def identity_hints(
+    provided_title: str | None,
+    provided_company: str | None,
+    description: str,
+    source_url: str | None,
+) -> tuple[str, str]:
+    """Return safe prompt hints without passing browser chrome to the model."""
+
+    raw_title = (provided_title or "").strip()
+    embedded_title, embedded_company = _split_role_and_company(raw_title)
+    title = _provided_title(raw_title) or embedded_title
+    company = _provided_company(provided_company) or embedded_company
+    if not title:
+        title = _role_title_from_job_board_header(description) or "Auto-detect role"
+    if not company:
+        company = _company_from_job_board_header(description)
+    return title, company
+
+
+def resolve_job_identity(
+    provided_title: str | None,
+    provided_company: str | None,
+    description: str,
+    source_url: str | None,
+    *,
+    ai_title: str | None = None,
+    ai_company: str | None = None,
+) -> JobIdentityResolution:
+    """Reconcile user, posting, AI, browser-title, and URL evidence.
+
+    Explicit clean user fields remain authoritative. Captured browser titles are
+    treated as hints because they often contain sign-in prompts, cookie text, or
+    job-board branding. Unknown values stay unknown instead of being invented.
+    """
+
+    raw_title = (provided_title or "").strip()
+    embedded_title, embedded_company = _split_role_and_company(raw_title)
+    trusted_title = _provided_title(raw_title) if not _looks_like_browser_title(raw_title) and not embedded_company else ""
+    trusted_company = _provided_company(provided_company)
+    header_title = _role_title_from_job_board_header(description)
+    header_company = _company_from_job_board_header(description)
+    model_title = _valid_role_candidate(ai_title)
+    model_company = _clean_company_candidate(str(ai_company or ""))
+    local_title = _valid_role_candidate(infer_role_title("Auto-detect role", description, source_url))
+    local_company = infer_company_name("Auto-detect company", description, source_url)
+
+    title_candidates = (
+        (trusted_title, "user_title", 1.0),
+        (header_title, "posting_header_title", 0.98),
+        (model_title, "ai_title", 0.93),
+        (embedded_title, "captured_page_title", 0.88),
+        (local_title, "local_title", 0.78),
+    )
+    company_candidates = (
+        (trusted_company, "user_company", 1.0),
+        (header_company, "posting_header_company", 0.98),
+        (model_company, "ai_company", 0.93),
+        (embedded_company, "captured_page_company", 0.88),
+        (local_company, "local_company", 0.76),
+    )
+    role_title, title_source, title_confidence = next(
+        ((value, source, confidence) for value, source, confidence in title_candidates if value),
+        ("Interview Role", "unknown_title", 0.0),
+    )
+    company, company_source, company_confidence = next(
+        ((value, source, confidence) for value, source, confidence in company_candidates if value),
+        ("", "unknown_company", 0.0),
+    )
+
+    title_values = {_identity_key(value) for value, _, _ in title_candidates if value}
+    company_values = {_identity_key(value) for value, _, _ in company_candidates if value}
+    if len(title_values) == 1 and len([value for value, _, _ in title_candidates if value]) > 1:
+        title_confidence = min(1.0, title_confidence + 0.02)
+    if len(company_values) == 1 and len([value for value, _, _ in company_candidates if value]) > 1:
+        company_confidence = min(1.0, company_confidence + 0.02)
+
+    field_confidences = [title_confidence, company_confidence] if company else [title_confidence]
+    confidence = round(min(field_confidences), 2) if field_confidences else 0.0
+    needs_review = role_title == "Interview Role" or not company or confidence < 0.85
+    return JobIdentityResolution(
+        role_title=_clean_role_title(role_title),
+        company=_clean_company_candidate(company),
+        confidence=confidence,
+        needs_review=needs_review,
+        evidence=(title_source, company_source),
+    )
+
+
 def infer_role_title(provided_title: str, description: str, source_url: str | None = None) -> str:
     """Use the user title when present, otherwise infer a readable role title."""
 
@@ -173,7 +282,11 @@ def infer_company_name(provided_company: str | None, description: str, source_ur
     if source_url:
         host = re.sub(r"^https?://", "", source_url).split("/")[0].lower()
         parts = [part for part in host.split(".") if part]
-        ignored = {"www", "careers", "jobs", "boards", "apply", "greenhouse", "lever", "workdayjobs", "myworkdayjobs", "joinhandshake", "handshake"}
+        ignored = {
+            "www", "careers", "jobs", "boards", "apply", "greenhouse", "lever", "workdayjobs", "myworkdayjobs",
+            "joinhandshake", "handshake", "linkedin", "indeed", "glassdoor", "ziprecruiter", "wellfound",
+            "com", "org", "net", "io", "co", "us",
+        }
         for part in parts:
             if part not in ignored and "myworkdayjobs" not in part and len(part) > 2:
                 return part.replace("-", " ").title()
@@ -184,15 +297,77 @@ def infer_company_name(provided_company: str | None, description: str, source_ur
 def _provided_title(value: str | None) -> str:
     clean_title = (value or "").strip()
     if clean_title and clean_title.lower() not in AUTO_TITLE_VALUES:
-        return clean_title
+        return _valid_role_candidate(clean_title)
     return ""
 
 
 def _provided_company(value: str | None) -> str:
     clean_company = (value or "").strip()
     if clean_company and clean_company.lower() not in AUTO_COMPANY_VALUES:
-        return clean_company
+        return _clean_company_candidate(clean_company)
     return ""
+
+
+def _strip_browser_chrome(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return ""
+    text = re.split(
+        r"(?i)\s+(?:by clicking|continue to (?:join|sign in)|sign in to|join or sign in|cookie preferences|privacy choices)\b",
+        text,
+        maxsplit=1,
+    )[0]
+    text = re.split(r"\s+[|•]\s+", text, maxsplit=1)[0]
+    text = re.split(
+        r"(?i)\s+[-–—]\s+(?:linkedin|handshake|indeed|glassdoor|ziprecruiter|wellfound)(?:\b.*)?$",
+        text,
+        maxsplit=1,
+    )[0]
+    return text.strip(" .:|-–—")
+
+
+def _looks_like_browser_title(value: str) -> bool:
+    raw = str(value or "")
+    return bool(
+        len(raw) > 100
+        or re.search(r"(?i)\b(?:by clicking|continue to (?:join|sign in)|join or sign in|cookie preferences)\b", raw)
+        or re.search(r"(?i)\s+[|•]\s+|\s+[-–—]\s+(?:linkedin|handshake|indeed|glassdoor|ziprecruiter|wellfound)\b", raw)
+    )
+
+
+def _split_role_and_company(value: str) -> tuple[str, str]:
+    cleaned = _strip_browser_chrome(value)
+    if not cleaned:
+        return "", ""
+    role, company = _split_role_and_company_without_recursion(cleaned)
+    return _valid_role_candidate(role), company
+
+
+def _split_role_and_company_without_recursion(value: str) -> tuple[str, str]:
+    match = re.match(r"(?i)^(.{3,100}?)\s+(?:at|@)\s+(.{2,70})$", value)
+    if not match:
+        return value, ""
+    role = re.sub(r"\s+", " ", match.group(1)).strip(" .:-")
+    company = _clean_company_candidate(match.group(2))
+    return role, company
+
+
+def _valid_role_candidate(value: str | None) -> str:
+    cleaned = _strip_browser_chrome(str(value or ""))
+    if not cleaned:
+        return ""
+    embedded_role, embedded_company = _split_role_and_company_without_recursion(cleaned)
+    candidate = embedded_role if embedded_company else cleaned
+    candidate = re.sub(r"(?i)^(?:job title|role|position)\s*[:\-]\s*", "", candidate)
+    candidate = re.sub(r"\s+", " ", candidate).strip(" .:-")
+    blocked = {"job", "job description", "saved job url", "captured job", "interview role"}
+    if candidate.lower() in blocked or len(candidate) < 2 or len(candidate) > 100:
+        return ""
+    return candidate
+
+
+def _identity_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
 
 def _identity_with_openai(description: str, source_url: str | None, settings: Settings) -> tuple[str, str]:
@@ -433,12 +608,17 @@ def _company_from_job_board_header(description: str) -> str:
 def _clean_company_candidate(value: str) -> str:
     if not value:
         return ""
-    cleaned = re.split(r"[\n\r|•]", value.strip())[0]
+    cleaned = _strip_browser_chrome(re.split(r"[\n\r|•]", value.strip())[0])
+    cleaned = re.sub(r"(?i)^(?:company|employer|organization)\s*[:\-]\s*", "", cleaned)
     cleaned = re.sub(r"(?i)\s+logo$", "", cleaned)
     cleaned = re.sub(r"(?i)\b(inc|llc|ltd|corp|corporation)\b\.?$", "", cleaned)
-    cleaned = re.sub(r"(?i)\b(is|are|we|our|a|an|the|looking|hiring|seeking).*", "", cleaned)
+    cleaned = re.sub(r"(?i)\b(is|are|we|our|a|an|the|looking|hiring|seeking)\b.*", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .:-")
-    blocked = {"job", "job description", "at a glance", "apply", "save", "share", "full-time", "part-time"}
+    blocked = {
+        "job", "job description", "at a glance", "apply", "save", "share", "full-time", "part-time",
+        "linkedin", "handshake", "indeed", "glassdoor", "ziprecruiter", "wellfound", "workday",
+        "com", "org", "net", "io", "co", "us",
+    }
     if not cleaned or cleaned.lower() in blocked or len(cleaned) < 2 or len(cleaned) > 70:
         return ""
     return cleaned
@@ -1049,7 +1229,10 @@ def _heuristic_analysis(request: JobAnalysisRequest, source: str) -> JobAnalysis
 
 
 def _clean_role_title(value: str) -> str:
-    title = re.split(r"[\n\r|•]", value.strip())[0]
+    title = _strip_browser_chrome(re.split(r"[\n\r|•]", value.strip())[0])
+    embedded_title, embedded_company = _split_role_and_company_without_recursion(title)
+    if embedded_company:
+        title = embedded_title
     title = re.sub(r"(?i)^(?:job title|role|position)\s*[:\-]\s*", "", title)
     title = re.split(r"(?<=[a-zA-Z])\.\s+", title)[0]
     title = re.sub(r"\s+", " ", title).strip(" .:-")

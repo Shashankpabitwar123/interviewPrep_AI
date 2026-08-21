@@ -8,7 +8,7 @@ from app.database import get_db
 from app.models import JobPost, User
 from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepPlanSummary, PrepTaskStatusUpdate
 from app.services.auth_service import get_request_user
-from app.services.job_analyzer import analysis_from_job_brief, build_job_description_brief
+from app.services.job_analyzer import analysis_from_job_brief, build_job_description_brief, identity_hints, resolve_job_identity
 from app.services.job_source import ResolvedJobSource, resolve_job_source
 from app.services.planner import generate_prep_plan
 from app.services.persistence import (
@@ -62,11 +62,19 @@ def create_prep_plan(
     # time or provider calls rebuilding information the user already has.
     brief = get_saved_job_brief(db, request.job_post_id, current_user) if request.job_post_id else None
     if brief is None:
-        brief = build_job_description_brief(requested_title, description, source_url, settings)
-    title_is_auto = request.job_title.strip().lower() in {"auto-detect role", "auto detect role"}
-    company_is_auto = (request.company or "").strip().lower() in {"", "auto-detect company", "auto detect company"}
-    inferred_title = brief.role_title if title_is_auto and brief.role_title else requested_title
-    inferred_company = brief.company if company_is_auto and brief.company else (requested_company or "")
+        title_hint, _ = identity_hints(requested_title, requested_company, description, source_url)
+        brief = build_job_description_brief(title_hint, description, source_url, settings)
+    identity = resolve_job_identity(
+        requested_title,
+        requested_company,
+        description,
+        source_url,
+        ai_title=brief.role_title,
+        ai_company=brief.company,
+    )
+    inferred_title = identity.role_title
+    inferred_company = identity.company
+    brief = brief.model_copy(update={"role_title": inferred_title, "company": inferred_company})
     plan_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description, "source_url": source_url})
     if existing_job:
         db_job = db.get(JobPost, existing_job.id)
@@ -81,7 +89,7 @@ def create_prep_plan(
             source_url=source_url,
         )
         blueprint = build_role_blueprint(
-            brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+            brief,
             description,
             source_url,
             research_bundle,
@@ -120,13 +128,13 @@ def create_prep_plan(
         interview_at=request.interview_at,
         hours_per_day=request.hours_per_day,
         job_post_id=request.job_post_id,
-        capture_metadata=source.metadata(),
+        capture_metadata={**source.metadata(), "identity": identity.metadata()},
     )
     stored_brief = save_job_brief(
         db,
         saved_plan.job_post_id,
-        brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
-        analysis_from_job_brief(brief).model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+        brief,
+        analysis_from_job_brief(brief),
         current_user,
     )
     if stored_brief is None:

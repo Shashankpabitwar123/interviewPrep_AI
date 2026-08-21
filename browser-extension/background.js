@@ -226,8 +226,8 @@ function normalizeJobPayload(payload, sender) {
   if (!description && !url) throw new Error("Paste a job description, auto-copy page text, or save the URL first.");
   const isUrlOnly = payload.saveMode === "url" && !description;
   return {
-    job_title: isUrlOnly ? payload.jobTitle || sender?.tab?.title || "Saved job URL" : "Auto-detect role",
-    company: "Auto-detect company",
+    job_title: payload.jobTitle || (isUrlOnly ? sender?.tab?.title || "Saved job URL" : "Auto-detect role"),
+    company: payload.company || "Auto-detect company",
     job_description: description || undefined,
     source_url: url || undefined,
     save_mode: payload.saveMode || undefined,

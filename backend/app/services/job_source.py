@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import ipaddress
+import json
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 
@@ -90,14 +91,59 @@ def fetch_job_description_from_url(source_url: str) -> str:
         raise ValueError("The job URL did not return readable text.")
 
     soup = BeautifulSoup(response.text, "html.parser")
+    structured_title, structured_company, structured_description = _structured_job_posting(soup)
     for tag in soup(["script", "style", "noscript", "svg", "nav", "footer"]):
         tag.decompose()
 
     main = soup.find("main") or soup.find("article") or soup.body or soup
-    text = " ".join(main.get_text(" ").split())
+    page_text = " ".join(main.get_text(" ").split())
+    body_text = structured_description if len(structured_description) >= 40 else page_text
+    identity_lines = []
+    if structured_title:
+        identity_lines.append(f"Job title: {structured_title}")
+    if structured_company:
+        identity_lines.append(f"Company: {structured_company}")
+    text = "\n".join([*identity_lines, body_text]).strip()
     if len(text) < 100:
         raise ValueError("Could not extract enough readable text from the job URL.")
     return text[:30000]
+
+
+def _structured_job_posting(soup: BeautifulSoup) -> tuple[str, str, str]:
+    """Read Schema.org JobPosting identity before generic page text."""
+
+    def walk(value):
+        if isinstance(value, list):
+            for item in value:
+                yield from walk(item)
+        elif isinstance(value, dict):
+            raw_type = value.get("@type")
+            types = raw_type if isinstance(raw_type, list) else [raw_type]
+            if any(str(item or "").lower() == "jobposting" for item in types):
+                yield value
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    yield from walk(nested)
+
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            payload = json.loads(script.string or script.get_text() or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        posting = next(walk(payload), None)
+        if not posting:
+            continue
+        organization = posting.get("hiringOrganization") or {}
+        company = organization.get("name") if isinstance(organization, dict) else organization
+        title = posting.get("title") or posting.get("name") or ""
+        raw_description = str(posting.get("description") or "")
+        description = " ".join(BeautifulSoup(raw_description, "html.parser").get_text(" ").split())
+        return _clean_metadata_value(title, 160), _clean_metadata_value(company, 160), description[:30000]
+    return "", "", ""
+
+
+def _clean_metadata_value(value, limit: int) -> str:
+    return " ".join(str(value or "").split()).strip(" .:|-–—")[:limit]
 
 
 def _extract_with_tavily(source_url: str, settings: Settings) -> str:

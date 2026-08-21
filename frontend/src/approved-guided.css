@@ -1509,8 +1509,8 @@
 
 .guided-job-switcher {
   width: min(710px, calc(100vw - 270px));
-  min-height: 84px;
-  padding: 16px 22px;
+  min-height: 96px;
+  padding: 15px 22px;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
@@ -1530,22 +1530,40 @@
   color: var(--approved-coral);
 }
 
-.guided-job-switcher > span {
+.guided-job-switcher > .guided-job-identity {
   min-width: 0;
   display: grid;
-  gap: 6px;
+  gap: 2px;
 }
 
-.guided-job-switcher strong {
+.guided-job-switcher .guided-job-role {
   overflow: hidden;
   font-size: 17px;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.guided-job-switcher small {
+.guided-job-switcher .guided-job-company {
+  overflow: hidden;
   color: var(--approved-soft);
   font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guided-job-switcher .guided-job-company.missing {
+  color: var(--approved-muted);
+  font-weight: 600;
+}
+
+.guided-job-switcher .guided-job-interview {
+  margin-top: 3px;
+  color: var(--approved-soft);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .guided-job-switcher-menu {
@@ -4545,8 +4563,8 @@
 
 .guided-app-main--today .guided-job-switcher {
   width: min(650px, calc(100vw - 250px));
-  min-height: 64px;
-  padding: 10px 16px;
+  min-height: 76px;
+  padding: 9px 16px;
   gap: 13px;
   border-radius: 9px;
 }
@@ -4556,21 +4574,26 @@
   height: 20px;
 }
 
-.guided-app-main--today .guided-job-switcher > span {
-  gap: 3px;
+.guided-app-main--today .guided-job-switcher > .guided-job-identity {
+  gap: 1px;
 }
 
-.guided-app-main--today .guided-job-switcher strong {
+.guided-app-main--today .guided-job-switcher .guided-job-role {
   font-size: 15px;
 }
 
-.guided-app-main--today .guided-job-switcher small {
+.guided-app-main--today .guided-job-switcher .guided-job-company {
   font-size: 12px;
+}
+
+.guided-app-main--today .guided-job-switcher .guided-job-interview {
+  margin-top: 1px;
+  font-size: 11px;
 }
 
 .guided-app-main--today .guided-add-job-button {
   min-width: 132px;
-  min-height: 64px;
+  min-height: 76px;
   padding: 0 18px;
 }
 

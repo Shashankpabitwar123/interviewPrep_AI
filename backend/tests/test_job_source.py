@@ -40,3 +40,33 @@ def test_fetch_job_description_rejects_redirect_to_private_network(monkeypatch) 
 
     with pytest.raises(ValueError, match="Private network URLs"):
         fetch_job_description_from_url("https://example.com/jobs/analyst")
+
+
+def test_fetch_job_description_prefers_schema_job_identity(monkeypatch) -> None:
+    html = """
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "Junior Data Analyst",
+            "hiringOrganization": {"@type": "Organization", "name": "Morgan Stanley"},
+            "description": "<p>Build SQL reports, validate data, and explain findings to stakeholders.</p>"
+          }
+        </script>
+      </head>
+      <body><main><p>Navigation and unrelated page text that should not replace the structured posting.</p></main></body>
+    </html>
+    """
+
+    def fake_get(*args, **kwargs):
+        request = httpx.Request("GET", "https://careers.example.com/jobs/data-analyst")
+        return httpx.Response(200, text=html, request=request)
+
+    monkeypatch.setattr("app.services.job_source.httpx.get", fake_get)
+
+    text = fetch_job_description_from_url("https://careers.example.com/jobs/data-analyst")
+
+    assert text.startswith("Job title: Junior Data Analyst\nCompany: Morgan Stanley")
+    assert "Build SQL reports" in text

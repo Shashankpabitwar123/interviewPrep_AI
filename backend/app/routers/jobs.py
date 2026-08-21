@@ -19,6 +19,8 @@ from app.services.job_analyzer import (
     analysis_from_job_brief,
     answer_job_description_question,
     build_job_description_brief,
+    identity_hints,
+    resolve_job_identity,
 )
 from app.services.job_source import ResolvedJobSource, resolve_job_source
 from app.services.persistence import (
@@ -46,11 +48,15 @@ def analyze_job(
     current_user: User | None = Depends(get_request_user),
 ) -> JobAnalysisResponse:
     if request.save_mode == "url" and request.source_url and not request.job_description:
-        source = ResolvedJobSource(
-            text=f"Saved URL bookmark. Open the source URL to view the job description. URL: {request.source_url}",
-            extraction_method="bookmark",
-            source_url=request.source_url,
-        )
+        try:
+            source = resolve_job_source(None, request.source_url, settings)
+        except ValueError:
+            source = ResolvedJobSource(
+                text=f"Saved URL bookmark. Open the source URL to view the job description. URL: {request.source_url}",
+                extraction_method="bookmark",
+                source_url=request.source_url,
+                warnings=["The job page could not be read; identity was limited to captured page metadata."],
+            )
     else:
         try:
             source = resolve_job_source(request.job_description, request.source_url, settings)
@@ -60,13 +66,21 @@ def analyze_job(
     # Generate one canonical analysis during upload. It detects missing role
     # details and feeds the compact planner fields, so new jobs never need a
     # separate title/company or analysis generation request.
-    brief = build_job_description_brief(request.job_title, description, request.source_url, settings)
-    title_is_auto = request.job_title.strip().lower() in {"auto-detect role", "auto detect role"}
-    company_is_auto = (request.company or "").strip().lower() in {"", "auto-detect company", "auto detect company"}
-    inferred_title = brief.role_title if title_is_auto and brief.role_title else request.job_title
-    inferred_company = brief.company if company_is_auto and brief.company else (request.company or "")
+    title_hint, _ = identity_hints(request.job_title, request.company, description, request.source_url)
+    brief = build_job_description_brief(title_hint, description, request.source_url, settings)
+    identity = resolve_job_identity(
+        request.job_title,
+        request.company,
+        description,
+        request.source_url,
+        ai_title=brief.role_title,
+        ai_company=brief.company,
+    )
+    inferred_title = identity.role_title
+    inferred_company = identity.company
+    brief = brief.model_copy(update={"role_title": inferred_title, "company": inferred_company})
     analysis_request = request.model_copy(update={"job_title": inferred_title, "company": inferred_company, "job_description": description})
-    analysis = analysis_from_job_brief(brief).model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company})
+    analysis = analysis_from_job_brief(brief)
     saved_job = save_job_analysis(
         db,
         inferred_title,
@@ -77,8 +91,8 @@ def analyze_job(
         user=current_user,
         interview_at=request.interview_at,
         hours_per_day=request.hours_per_day,
-        structured_brief=brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
-        capture_metadata=source.metadata(),
+        structured_brief=brief,
+        capture_metadata={**source.metadata(), "identity": identity.metadata()},
     )
     job = db.get(JobPost, saved_job.job_post_id)
     blueprint = None
@@ -87,7 +101,7 @@ def analyze_job(
         blueprint, research_bundle = ensure_role_blueprint(
             db,
             job,
-            brief.model_copy(update={"role_title": inferred_title, "company": inferred_company or brief.company}),
+            brief,
             settings,
             current_user,
         )

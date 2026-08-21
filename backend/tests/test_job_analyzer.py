@@ -1,6 +1,14 @@
 from app.config import Settings
 from app.schemas.job_analysis import JobAnalysisRequest
-from app.services.job_analyzer import analysis_from_job_brief, analyze_job_description, build_job_description_brief, extract_core_skills
+from app.services.job_analyzer import (
+    analysis_from_job_brief,
+    analyze_job_description,
+    build_job_description_brief,
+    extract_core_skills,
+    identity_hints,
+    infer_company_name,
+    resolve_job_identity,
+)
 
 
 def test_heuristic_job_analysis_extracts_role_signals() -> None:
@@ -54,3 +62,50 @@ def test_structured_brief_exposes_core_skills_to_the_compact_analysis() -> None:
 
     assert [skill.name for skill in compact.core_skills] == ["Power BI", "Tableau", "SQL", "Excel"]
     assert compact.required_skills[:4] == ["Power BI", "Tableau", "SQL", "Excel"]
+
+
+def test_identity_resolution_removes_browser_chrome_and_splits_company() -> None:
+    captured_title = "Junior Software Engineer at now By clicking Continue to join or sign in"
+
+    hint_title, hint_company = identity_hints(captured_title, "Auto-detect company", "Saved URL bookmark.", "https://linkedin.com/jobs/123")
+    identity = resolve_job_identity(
+        captured_title,
+        "Auto-detect company",
+        "Saved URL bookmark.",
+        "https://linkedin.com/jobs/123",
+        ai_title=hint_title,
+        ai_company="",
+    )
+
+    assert hint_title == "Junior Software Engineer"
+    assert hint_company == "now"
+    assert identity.role_title == "Junior Software Engineer"
+    assert identity.company == "now"
+    assert "By clicking" not in identity.role_title
+    assert "captured_page_company" in identity.evidence
+
+
+def test_job_board_domain_is_not_mistaken_for_a_company_or_tld() -> None:
+    assert infer_company_name("Auto-detect company", "Saved URL bookmark.", "https://linkedin.com/jobs/123") == ""
+
+
+def test_posting_headers_outrank_conflicting_captured_page_title() -> None:
+    description = """
+    Company: Acme Analytics
+    Job title: Data Analyst
+    Build SQL dashboards and validate reporting data for business stakeholders.
+    """
+
+    identity = resolve_job_identity(
+        "Careers page | LinkedIn",
+        "Auto-detect company",
+        description,
+        "https://linkedin.com/jobs/456",
+        ai_title="Data Analyst",
+        ai_company="Acme Analytics",
+    )
+
+    assert identity.role_title == "Data Analyst"
+    assert identity.company == "Acme Analytics"
+    assert identity.confidence >= 0.98
+    assert identity.needs_review is False

@@ -266,9 +266,10 @@
   function payload() {
     const textValue = textarea.value.trim();
     const isUrlMode = state.mode === "url";
+    const identity = state.mode === "manual" ? {} : pageIdentityHints();
     return {
-      jobTitle: isUrlMode ? (document.title || "Saved job URL") : "Auto-detect role",
-      company: "Auto-detect company",
+      jobTitle: identity.jobTitle || (isUrlMode ? (document.title || "Saved job URL") : "Auto-detect role"),
+      company: identity.company || "Auto-detect company",
       description: isUrlMode ? "" : textValue,
       sourceUrl: isUrlMode ? textValue || window.location.href : window.location.href,
       saveMode: isUrlMode ? "url" : undefined,
@@ -289,6 +290,43 @@
       .map((node) => node.innerText || "")
       .sort((a, b) => b.length - a.length)[0] || "";
     return text.replace(/\n{3,}/g, "\n\n").trim().slice(0, 25000);
+  }
+
+  function pageIdentityHints() {
+    const visit = (value) => {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const match = visit(item);
+          if (match) return match;
+        }
+      } else if (value && typeof value === "object") {
+        const types = Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]];
+        if (types.some((type) => String(type || "").toLowerCase() === "jobposting")) return value;
+        for (const nested of Object.values(value)) {
+          const match = visit(nested);
+          if (match) return match;
+        }
+      }
+      return null;
+    };
+
+    let posting = null;
+    for (const script of document.querySelectorAll("script[type='application/ld+json']")) {
+      try {
+        posting = visit(JSON.parse(script.textContent || "{}"));
+      } catch {
+        posting = null;
+      }
+      if (posting) break;
+    }
+    const organization = posting?.hiringOrganization;
+    const structuredCompany = typeof organization === "object" ? organization?.name : organization;
+    const heading = document.querySelector("h1, [data-automation-id='jobPostingHeader'], [class*='job-title'], [class*='jobTitle']");
+    const companyNode = document.querySelector("[data-automation-id='company'], [class*='company-name'], [class*='companyName']");
+    return {
+      jobTitle: String(posting?.title || posting?.name || heading?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 180),
+      company: String(structuredCompany || companyNode?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 180),
+    };
   }
 
   function updateSubtitle() {

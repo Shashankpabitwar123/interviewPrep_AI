@@ -907,19 +907,22 @@ function App() {
       const response = await apiFetch(`/jobs`, { authTokenOverride: tokenOverride });
       if (!response.ok) return;
       const saved = await response.json();
-      const visibleJobs = filterArchived(saved, archivedIds).map((job, index) => ({
-        id: job.id,
-        title: job.title,
-        company: job.company || companyFromUrl(job.source_url) || "Saved Job",
-        source_url: job.source_url,
-        description_preview: job.description_preview,
-        saved_at: index === 0 ? "Saved now" : `Saved ${index + 1}h ago`,
-        logo: logoFor(job.title, job.source_url),
-        tone: toneFor(job.source_url),
-        color: colorForJobId(job.id, markers, job.title),
-        interview_at: job.interview_at,
-        hours_per_day: job.hours_per_day,
-      }));
+      const visibleJobs = filterArchived(saved, archivedIds).map((job, index) => {
+        const identity = normalizeJobIdentityForDisplay(job.title, job.company || companyFromUrl(job.source_url));
+        return {
+          id: job.id,
+          title: identity.role,
+          company: identity.company,
+          source_url: job.source_url,
+          description_preview: job.description_preview,
+          saved_at: index === 0 ? "Saved now" : `Saved ${index + 1}h ago`,
+          logo: logoFor(identity.role, job.source_url),
+          tone: toneFor(job.source_url),
+          color: colorForJobId(job.id, markers, identity.role),
+          interview_at: job.interview_at,
+          hours_per_day: job.hours_per_day,
+        };
+      });
       setJobs(visibleJobs);
       return visibleJobs;
     } catch {
@@ -3421,8 +3424,12 @@ function GuidedTopNavigation({ activeView, generationInProgress, onNavigate, use
 }
 
 function GuidedJobContextBar({ selectedJob, selectedPlan, jobs, jobMarkers, open, setOpen, onSelect, onAddJob }) {
-  const role = selectedPlan?.job_title || selectedJob?.title || "Choose a job";
-  const company = selectedJob?.company || companyFromUrl(selectedJob?.source_url) || "";
+  const identity = normalizeJobIdentityForDisplay(
+    selectedPlan?.job_title || selectedJob?.title || "Choose a job",
+    selectedJob?.company || selectedPlan?.company || companyFromUrl(selectedJob?.source_url) || "",
+  );
+  const role = identity.role;
+  const company = identity.company;
   const savedInterviewDate = selectedJob?.interview_at ? new Date(selectedJob.interview_at) : null;
   const interviewDay = savedInterviewDate && !Number.isNaN(savedInterviewDate.getTime()) ? new Date(savedInterviewDate) : null;
   const today = new Date();
@@ -3442,22 +3449,26 @@ function GuidedJobContextBar({ selectedJob, selectedPlan, jobs, jobMarkers, open
       <div className="guided-job-switcher-wrap">
         <button className="guided-job-switcher" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
           <BriefcaseBusiness size={25} />
-          <span>
-            <strong>{company ? `${role} at ${company}` : role}</strong>
-            <small>{selectedJob || selectedPlan ? `Interview ${interviewLabel}` : "Add a role to start your guided preparation"}</small>
+          <span className="guided-job-identity">
+            <strong className="guided-job-role">{role}</strong>
+            {(selectedJob || selectedPlan) && <span className={`guided-job-company ${company ? "" : "missing"}`}>{company || "Company not detected"}</span>}
+            <small className="guided-job-interview">{selectedJob || selectedPlan ? `Interview ${interviewLabel}` : "Add a role to start your guided preparation"}</small>
           </span>
           <ChevronDown size={18} />
         </button>
         {open && (
           <div className="guided-job-switcher-menu">
             <header><strong>Switch job</strong><span>Your plan, notes, practice, and progress update together.</span></header>
-            {jobs.length ? jobs.map((job) => (
-              <button key={job.id} className={String(selectedJob?.id) === String(job.id) ? "selected" : ""} onClick={() => { onSelect(job); setOpen(false); }}>
-                <i style={{ backgroundColor: colorForJobId(job.id, jobMarkers, job.title) }} />
-                <span><strong>{job.title}</strong><small>{job.company || companyFromUrl(job.source_url) || "Saved job"}</small></span>
-                {String(selectedJob?.id) === String(job.id) && <Check size={16} />}
-              </button>
-            )) : <p>No saved jobs yet.</p>}
+            {jobs.length ? jobs.map((job) => {
+              const jobIdentity = normalizeJobIdentityForDisplay(job.title, job.company || companyFromUrl(job.source_url));
+              return (
+                <button key={job.id} className={String(selectedJob?.id) === String(job.id) ? "selected" : ""} onClick={() => { onSelect(job); setOpen(false); }}>
+                  <i style={{ backgroundColor: colorForJobId(job.id, jobMarkers, jobIdentity.role) }} />
+                  <span><strong>{jobIdentity.role}</strong><small>{jobIdentity.company || "Company not detected"}</small></span>
+                  {String(selectedJob?.id) === String(job.id) && <Check size={16} />}
+                </button>
+              );
+            }) : <p>No saved jobs yet.</p>}
           </div>
         )}
       </div>
@@ -9063,10 +9074,29 @@ function companyFromUrl(url) {
   const host = displayUrl(url);
   if (!host || host === "saved") return "";
   const parts = host.split(".").filter(Boolean);
-  const ignored = new Set(["www", "careers", "jobs", "boards", "apply", "greenhouse", "lever", "joinhandshake", "handshake", "workdayjobs", "myworkdayjobs"]);
+  const ignored = new Set(["www", "careers", "jobs", "boards", "apply", "greenhouse", "lever", "joinhandshake", "handshake", "workdayjobs", "myworkdayjobs", "linkedin", "indeed", "glassdoor", "ziprecruiter", "wellfound", "com", "org", "net", "io", "co", "us"]);
   const companyPart = parts.find((part) => !ignored.has(part.toLowerCase()) && !part.includes("myworkdayjobs"));
   if (!companyPart) return "";
   return titleCaseCompany(companyPart);
+}
+
+function normalizeJobIdentityForDisplay(title, company) {
+  const stripChrome = (value) => String(value || "")
+    .replace(/\s+(?:by clicking|continue to (?:join|sign in)|sign in to|join or sign in|cookie preferences).*$/i, "")
+    .replace(/\s+[|•]\s+.*$/, "")
+    .replace(/\s+[-–—]\s+(?:linkedin|handshake|indeed|glassdoor|ziprecruiter|wellfound).*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const cleanedTitle = stripChrome(title) || "Choose a job";
+  const embedded = cleanedTitle.match(/^(.{3,100}?)\s+(?:at|@)\s+(.{2,70})$/i);
+  const role = (embedded?.[1] || cleanedTitle).trim();
+  const providedCompany = stripChrome(company);
+  const embeddedCompany = cleanCompanyCandidate(embedded?.[2]);
+  const blocked = new Set(["saved job", "linkedin", "handshake", "indeed", "glassdoor", "ziprecruiter", "wellfound"]);
+  const detectedCompany = providedCompany && !blocked.has(providedCompany.toLowerCase())
+    ? titleCaseCompany(providedCompany)
+    : embeddedCompany;
+  return { role, company: detectedCompany || "" };
 }
 
 function inferCompanyName(providedCompany, description, url) {
