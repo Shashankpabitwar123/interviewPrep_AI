@@ -27,3 +27,14 @@ test("captured page-title chrome is normalized before display", () => {
   assert.match(mainSource, /function normalizeJobIdentityForDisplay/);
   assert.match(mainSource, /by clicking\|continue to/);
 });
+
+test("mock interview is voice-only and uses the secure Realtime backend", () => {
+  const modal = mainSource.slice(mainSource.indexOf("function MockInterviewModal"), mainSource.indexOf("function MockReviewModal"));
+  assert.match(mainSource, /createRealtimeInterviewConnection/);
+  assert.match(modal, /Live .* mock interview/);
+  assert.match(modal, /Repeat/);
+  assert.match(modal, /Clarify/);
+  assert.match(modal, /End interview/);
+  assert.doesNotMatch(modal, /<textarea/);
+  assert.doesNotMatch(modal, /speechSynthesis/);
+});

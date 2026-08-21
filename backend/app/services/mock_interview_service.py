@@ -1,14 +1,16 @@
 import logging
 import json
+import re
 from typing import Optional
 
+import httpx
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import ArtifactFeedback, CompetencyEvidence, MockInterview, MockMessage, PrepPlan, User
 from app.ai_policy import require_ai_result
-from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest
+from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest, MockVoiceCompleteRequest
 from app.schemas.role_intelligence import RoleBlueprint
 from app.services.gemini_service import generate_gemini_json
 from app.services.role_intelligence_service import blueprint_context
@@ -26,6 +28,10 @@ class MockQuestionOutput(BaseModel):
     question: str
 
 
+class MockQuestionSetOutput(BaseModel):
+    questions: list[str]
+
+
 class MockFeedbackOutput(BaseModel):
     score: float = Field(ge=0, le=1)
     feedback: str
@@ -33,6 +39,20 @@ class MockFeedbackOutput(BaseModel):
     improvements: list[str] = Field(default_factory=list)
     dimensions: dict[str, float] = Field(default_factory=dict)
     follow_up_question: str
+
+
+class MockVoiceAnswerEvaluation(BaseModel):
+    candidate_turn_index: int = Field(ge=0)
+    score: float = Field(ge=0, le=1)
+    feedback: str
+    strengths: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
+    dimensions: dict[str, float] = Field(default_factory=dict)
+    competency: str = ""
+
+
+class MockVoiceEvaluationOutput(BaseModel):
+    answers: list[MockVoiceAnswerEvaluation] = Field(default_factory=list)
 
 
 def start_mock_interview(
@@ -59,6 +79,14 @@ def start_mock_interview(
     adaptive_topics = scope_topics if request.focus_topics or request.topic else prioritized_topics(db, plan, scope_topics, user)
     session_plan = _build_session_plan(plan, request, config, role_blueprint, adaptive_topics)
     quality_blueprint = None if request.focus_topics or request.topic else role_blueprint
+    questions = _question_set_with_ai(plan, config, session_plan, settings, role_blueprint)
+    if not questions:
+        require_ai_result("AI mock interview generation failed. Enable local fallback in settings to start an offline mock interview.")
+        questions = [_question(slot["topic"], slot["question_type"], config["difficulty"]) for slot in session_plan]
+    session_plan = [
+        {**slot, "question": questions[index] if index < len(questions) else _question(slot["topic"], slot["question_type"], config["difficulty"])}
+        for index, slot in enumerate(session_plan)
+    ]
     quality_report = assess_mock_plan(session_plan, config["question_count"], quality_blueprint)
     config["session_plan"] = session_plan
     first_slot = session_plan[0]
@@ -73,17 +101,7 @@ def start_mock_interview(
     db.add(interview)
     db.flush()
     db.add(MockMessage(mock_interview_id=interview.id, role="meta", content=json.dumps(config)))
-    question_type = first_slot["question_type"]
-    ai_question = _question_with_ai(plan, topic, question_type, config, settings, first_slot, role_blueprint)
-    if ai_question and not question_text_is_usable(ai_question):
-        ai_question = _question_with_ai(plan, topic, question_type, config, settings, first_slot, role_blueprint)
-    if ai_question and not question_text_is_usable(ai_question):
-        ai_question = None
-    if ai_question:
-        question = ai_question
-    else:
-        require_ai_result("AI mock interview generation failed. Enable local fallback in settings to start an offline mock interview.")
-        question = _question(topic, question_type, config["difficulty"])
+    question = first_slot["question"]
     db.add(MockMessage(mock_interview_id=interview.id, role="interviewer", content=question))
     db.commit()
     db.refresh(interview)
@@ -199,6 +217,145 @@ def answer_mock_question(
     return _to_response(interview)
 
 
+async def create_realtime_call(
+    db: Session,
+    mock_interview_id: int,
+    offer_sdp: str,
+    settings: Settings,
+    user: Optional[User] = None,
+) -> Optional[str]:
+    """Exchange a browser WebRTC offer without exposing the permanent API key."""
+
+    interview = db.get(MockInterview, mock_interview_id)
+    if interview is None or not _owns_plan(interview.prep_plan, user):
+        return None
+    if not settings.openai_enabled:
+        raise RuntimeError("OpenAI is not configured for live voice interviews.")
+    if not offer_sdp.strip() or len(offer_sdp) > 100_000:
+        raise ValueError("A valid WebRTC offer is required.")
+    config = _config_for_interview(interview)
+    session = {
+        "type": "realtime",
+        "model": settings.openai_realtime_model,
+        "instructions": _realtime_interviewer_instructions(interview, config),
+        "audio": {
+            "input": {
+                "transcription": {"model": settings.openai_transcription_model},
+                "turn_detection": {
+                    "type": "semantic_vad",
+                    "eagerness": "low" if config["difficulty"] == "easy" else "auto",
+                    "create_response": True,
+                    "interrupt_response": True,
+                },
+            },
+            "output": {"voice": settings.openai_realtime_voice, "speed": 1.0},
+        },
+    }
+    files = {
+        "sdp": (None, offer_sdp, "application/sdp"),
+        "session": (None, json.dumps(session), "application/json"),
+    }
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(
+            "https://api.openai.com/v1/realtime/calls",
+            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            files=files,
+        )
+    if response.status_code >= 400:
+        logger.warning("OpenAI Realtime call failed with status %s", response.status_code)
+        raise RuntimeError("OpenAI could not start the live voice interview.")
+    return response.text
+
+
+def complete_voice_mock_interview(
+    db: Session,
+    mock_interview_id: int,
+    request: MockVoiceCompleteRequest,
+    settings: Settings,
+    user: Optional[User] = None,
+) -> Optional[MockInterviewResponse]:
+    """Persist and score a completed voice transcript as one atomic session."""
+
+    interview = db.get(MockInterview, mock_interview_id)
+    if interview is None or not _owns_plan(interview.prep_plan, user):
+        return None
+    turns = [
+        {"role": turn.role, "content": " ".join(turn.content.split())[:5000]}
+        for turn in request.turns
+        if turn.content.strip()
+    ]
+    substantive_indices = [
+        index for index, turn in enumerate(turns)
+        if turn["role"] == "candidate" and not _is_voice_command(turn["content"])
+    ]
+    evaluations = _evaluate_voice_transcript_with_ai(interview, turns, substantive_indices, settings) if substantive_indices else {}
+    if substantive_indices and not evaluations:
+        require_ai_result("AI could not score the live mock interview. Please try ending the interview again.")
+
+    previous_feedback_ids = [str(message.id) for message in interview.messages if message.role == "feedback"]
+    if previous_feedback_ids:
+        db.query(CompetencyEvidence).filter(
+            CompetencyEvidence.job_post_id == interview.prep_plan.job_post_id,
+            CompetencyEvidence.source_type == "mock_answer",
+            CompetencyEvidence.source_id.in_(previous_feedback_ids),
+        ).delete(synchronize_session=False)
+    for message in list(interview.messages):
+        if message.role != "meta":
+            db.delete(message)
+    db.flush()
+    evidence_rows: list[tuple[MockMessage, dict, float]] = []
+    scores: list[float] = []
+    feedback_details: list[dict] = []
+    for index, turn in enumerate(turns):
+        role = turn["role"]
+        evaluation = evaluations.get(index) if role == "candidate" else None
+        stored_role = "command" if role == "candidate" and index not in substantive_indices else role
+        db.add(MockMessage(
+            mock_interview_id=interview.id,
+            role=stored_role,
+            content=turn["content"],
+            detail={"voice_turn": True, "turn_index": index},
+        ))
+        if evaluation:
+            score = round(float(evaluation.score), 2)
+            detail = {
+                "dimensions": _normalized_dimensions(evaluation.dimensions, score),
+                "strengths": evaluation.strengths[:4],
+                "improvements": evaluation.improvements[:4],
+                "competency": evaluation.competency or interview.current_topic,
+                "voice_turn": True,
+                "turn_index": index,
+            }
+            feedback_message = MockMessage(
+                mock_interview_id=interview.id,
+                role="feedback",
+                content=evaluation.feedback,
+                score=score,
+                detail=detail,
+            )
+            db.add(feedback_message)
+            evidence_rows.append((feedback_message, detail, score))
+            scores.append(score)
+            feedback_details.append(detail)
+    db.flush()
+    for feedback_message, detail, score in evidence_rows:
+        record_mock_evidence(
+            db,
+            interview,
+            feedback_message,
+            str(detail.get("competency") or interview.current_topic),
+            score,
+            detail,
+            user,
+        )
+    interview.status = "complete"
+    interview.average_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+    interview.overall_feedback = _overall_feedback_from_details(feedback_details)
+    db.commit()
+    db.refresh(interview)
+    return _to_response(interview)
+
+
 def _owns_plan(plan: PrepPlan, user: Optional[User]) -> bool:
     if user:
         return plan.job_post.user_id == user.id
@@ -226,7 +383,7 @@ def _mock_config(request: MockInterviewStartRequest) -> dict:
     return {
         "difficulty": difficulty,
         "question_count": min(12, max(1, question_count)),
-        "question_types": question_types or ["technical", "multiple_choice", "coding", "behavioral"],
+        "question_types": question_types or ["technical", "coding", "behavioral", "team_problem_solving"],
         "scope": request.scope,
         "day": request.day,
         "focus_topics": focus_topics,
@@ -240,7 +397,7 @@ def _config_for_interview(interview: MockInterview) -> dict:
                 config = json.loads(message.content)
                 config.setdefault("difficulty", "medium")
                 config.setdefault("question_count", 6)
-                config.setdefault("question_types", ["technical", "multiple_choice", "coding", "behavioral"])
+                config.setdefault("question_types", ["technical", "coding", "behavioral", "team_problem_solving"])
                 config.setdefault("scope", "full_plan")
                 config.setdefault("day", None)
                 config.setdefault("focus_topics", [])
@@ -252,7 +409,7 @@ def _config_for_interview(interview: MockInterview) -> dict:
     return {
         "difficulty": "medium",
         "question_count": 6,
-        "question_types": ["technical", "multiple_choice", "coding", "behavioral"],
+        "question_types": ["technical", "coding", "behavioral", "team_problem_solving"],
         "scope": "full_plan",
         "day": None,
         "focus_topics": [],
@@ -358,6 +515,7 @@ def _fallback_slot(topic: str, number: int, config: dict) -> dict:
         "question_type": question_type,
         "intent": _question_intent(question_type, topic),
         "rubric": _rubric_for_question_type(question_type),
+        "question": _question(topic, question_type, config["difficulty"]),
     }
 
 
@@ -384,6 +542,181 @@ def _question(topic: str, question_type: str, difficulty: str) -> str:
     if question_type == "team_problem_solving":
         return f"Team problem solving ({difficulty}): Describe a time your team disagreed about {topic}. How did you align people and move forward?"
     return f"Technical ({difficulty}): Explain a project where you used {topic}, including tradeoffs and results."
+
+
+def _question_set_with_ai(
+    plan: PrepPlan,
+    config: dict,
+    session_plan: list[dict],
+    settings: Optional[Settings],
+    role_blueprint: Optional[RoleBlueprint] = None,
+) -> Optional[list[str]]:
+    """Generate the complete spoken interview once so its structure is stable."""
+
+    if not settings or not settings.ai_enabled:
+        require_ai_result("No AI provider is configured for mock interview questions. Enable local fallback in settings to use offline questions.")
+        return None
+    prompt = (
+        "Create the complete question set for a realistic live voice interview as JSON. "
+        f"Return exactly {config['question_count']} questions in the same order as the supplied plan. "
+        "Every question must be open-ended, natural to say aloud, specific to the role, and answerable without seeing options. "
+        "For coding questions, ask the candidate to explain code or pseudocode aloud, including correctness, complexity, and edge cases. "
+        "Do not include answers, hints, scores, A-D options, navigation text, or generic filler. "
+        "Increase depth with the requested difficulty while keeping each question focused on one main idea.\n\n"
+        f"Role: {plan.job_post.title}\n"
+        f"Company: {plan.job_post.company or 'Not specified'}\n"
+        f"Difficulty: {config['difficulty']}\n"
+        f"Shared role intelligence:\n{blueprint_context(role_blueprint, include_sources=False)}\n\n"
+        f"Relevant interview evidence:\n{config.get('interview_evidence') or 'No relevant user-reported interview evidence is available.'}\n\n"
+        f"Job-posting source excerpt:\n{plan.job_post.description[:4000]}\n\n"
+        f"Preparation-plan summary: {plan.summary}\n\n"
+        f"Ordered question plan:\n{json.dumps(session_plan, ensure_ascii=False)}"
+    )
+    if settings.openai_enabled:
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=settings.openai_api_key)
+            response = client.responses.parse(
+                model=settings.generation_model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": "You design concise, role-specific live interview question sets as structured JSON.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                text_format=MockQuestionSetOutput,
+            )
+            questions = [" ".join(question.split()) for question in response.output_parsed.questions]
+            if len(questions) == config["question_count"] and all(question_text_is_usable(question) for question in questions):
+                return questions
+            logger.warning("OpenAI mock question set returned an unusable count or question")
+        except Exception as exc:
+            logger.warning("OpenAI mock question set failed: %s", exc)
+
+    if settings.gemini_enabled:
+        try:
+            schema = {
+                "type": "object",
+                "properties": {"questions": {"type": "array", "items": {"type": "string"}}},
+                "required": ["questions"],
+            }
+            data = generate_gemini_json(settings, prompt, schema)
+            questions = [" ".join(str(question).split()) for question in data.get("questions", [])]
+            if len(questions) == config["question_count"] and all(question_text_is_usable(question) for question in questions):
+                return questions
+        except Exception as exc:
+            logger.warning("Gemini mock question set failed: %s", exc)
+    require_ai_result("AI mock interview question generation failed. Enable local fallback in settings to use offline questions.")
+    return None
+
+
+def _realtime_interviewer_instructions(interview: MockInterview, config: dict) -> str:
+    session_plan = config.get("session_plan") or interview.session_plan or []
+    planned_questions = [
+        {
+            "number": slot.get("number", index + 1),
+            "topic": slot.get("topic", ""),
+            "competency": slot.get("competency", ""),
+            "question": slot.get("question") or _question(
+                slot.get("topic") or interview.current_topic,
+                slot.get("question_type") or "technical",
+                config["difficulty"],
+            ),
+        }
+        for index, slot in enumerate(session_plan)
+    ]
+    difficulty_rules = {
+        "easy": "Acknowledge briefly, offer clarification when requested, and move to the next planned question without adversarial probing.",
+        "medium": "When an answer lacks an important detail, ask one focused follow-up before moving to the next planned question.",
+        "hard": "Ask one or two concise follow-ups that test assumptions, tradeoffs, failure modes, measurement, or edge cases before moving on.",
+    }
+    return (
+        "You are a professional interviewer conducting a live voice-only mock interview. "
+        "Speak naturally, calmly, and concisely. Start with one short welcome sentence, then ask planned question 1 exactly. "
+        "Ask only one question at a time and wait for the candidate to finish. Do not read rubrics, scores, model instructions, or expected answers aloud. "
+        "Use the candidate's actual answer for adaptive follow-ups; never invent something they said. "
+        f"Difficulty behavior: {difficulty_rules.get(config['difficulty'], difficulty_rules['medium'])} "
+        "Commands such as repeat, say that again, clarify, speak slower, skip, next question, stop, or end interview are controls, not interview answers. "
+        "For repeat, repeat the current main question or follow-up. For clarify, rephrase it without giving away the answer. "
+        "For skip or next, move to the next planned question. For stop or end, acknowledge and say the interview can be ended with the End interview button. "
+        "If interrupted, stop speaking and respond to the latest candidate turn. "
+        "Always ask each planned main question in order, although follow-ups may appear between them. "
+        "After the last planned question and any allowed follow-up, give a brief neutral closing and tell the candidate to press End interview for feedback.\n\n"
+        f"Role: {interview.prep_plan.job_post.title}\n"
+        f"Company: {interview.prep_plan.job_post.company or 'Not specified'}\n"
+        f"Difficulty: {config['difficulty']}\n"
+        f"Planned questions: {json.dumps(planned_questions, ensure_ascii=False)}"
+    )
+
+
+def _is_voice_command(content: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9 ]", " ", content.lower())
+    normalized = " ".join(normalized.split())
+    if len(normalized.split()) > 20:
+        return False
+    normalized = re.sub(r"^(?:please |can you |could you |would you )", "", normalized)
+    patterns = (
+        r"^(?:repeat|repeat that|say that again|say the question again|repeat (?:the )?(?:current )?question)$",
+        r"^(?:clarify|clarify that|clarify (?:the )?(?:current )?question(?: without giving (?:me )?the answer)?|explain the question|rephrase|rephrase that)$",
+        r"^(?:speak slower|slow down)$",
+        r"^(?:skip|skip this|skip (?:this|the current) question(?: and move to the next planned question)?|next|next question|move on)$",
+        r"^(?:stop|end|end interview|stop interview|finish|finish interview|i (?:want|would like) to (?:stop|end|finish)(?: the interview)?)$",
+    )
+    return any(re.fullmatch(pattern, normalized) for pattern in patterns)
+
+
+def _evaluate_voice_transcript_with_ai(
+    interview: MockInterview,
+    turns: list[dict],
+    substantive_indices: list[int],
+    settings: Settings,
+) -> dict[int, MockVoiceAnswerEvaluation]:
+    if not settings.openai_enabled:
+        require_ai_result("OpenAI is required to score a live voice interview.")
+        return {}
+    config = _config_for_interview(interview)
+    prompt = (
+        "Evaluate every substantive candidate turn in this completed live interview as structured JSON. "
+        "Return exactly one evaluation for every candidate turn index listed below and no others. "
+        "Use the surrounding interviewer question or follow-up to judge the answer. Ignore speech-control commands. "
+        "Scores range from 0 to 1. Feedback must be specific, concise, actionable, and grounded only in what the candidate actually said. "
+        "Dimension keys must include relevance, accuracy, depth, structure, and communication. "
+        "Do not reward verbosity; reward correctness, specificity, reasoning, tradeoffs, examples, and role relevance.\n\n"
+        f"Role: {interview.prep_plan.job_post.title}\n"
+        f"Company: {interview.prep_plan.job_post.company or 'Not specified'}\n"
+        f"Difficulty: {config['difficulty']}\n"
+        f"Planned interview: {json.dumps(config.get('session_plan') or interview.session_plan or [], ensure_ascii=False)}\n"
+        f"Candidate turn indices to evaluate: {substantive_indices}\n"
+        f"Indexed transcript: {json.dumps([{'index': index, **turn} for index, turn in enumerate(turns)], ensure_ascii=False)}"
+    )
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=settings.openai_api_key)
+        response = client.responses.parse(
+            model=settings.scoring_model,
+            input=[
+                {
+                    "role": "system",
+                    "content": "You score spoken mock-interview answers precisely as structured JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            text_format=MockVoiceEvaluationOutput,
+        )
+        expected = set(substantive_indices)
+        evaluations = {
+            item.candidate_turn_index: item
+            for item in response.output_parsed.answers
+            if item.candidate_turn_index in expected
+        }
+        return evaluations if set(evaluations) == expected else {}
+    except Exception as exc:
+        logger.warning("OpenAI live mock transcript scoring failed: %s", exc)
+        require_ai_result("OpenAI could not score the live mock interview.")
+        return {}
 
 
 def _question_with_ai(
@@ -642,6 +975,10 @@ def _overall_feedback(interview: MockInterview, pending_detail: Optional[dict] =
     details = [message.detail for message in interview.messages if message.role == "feedback" and message.detail]
     if pending_detail:
         details.append(pending_detail)
+    return _overall_feedback_from_details(details)
+
+
+def _overall_feedback_from_details(details: list[dict]) -> dict:
     dimension_values: dict[str, list[float]] = {}
     strengths: list[str] = []
     improvements: list[str] = []

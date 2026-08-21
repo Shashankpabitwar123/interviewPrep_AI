@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from app.config import Settings
 from app.ai_policy import require_ai_result
 from app.schemas.job_analysis import (
@@ -60,6 +62,12 @@ class JobIdentityResolution:
         }
 
 
+class JobIdentityOutput(BaseModel):
+    role_title: str
+    company: str = ""
+    confidence: float = Field(default=0.0, ge=0, le=1)
+
+
 # This is the deliberately small, user-facing skills vocabulary.  It keeps the
 # workspace focused on tools a candidate can study instead of showing vague
 # requirement sentences such as "ability to work independently".
@@ -113,24 +121,47 @@ def identify_job(
     description: str,
     source_url: str | None,
     settings: Settings,
+    identity_source: str = "auto",
 ) -> tuple[str, str]:
     """Detect the role and company from raw pasted job text, using AI first when available."""
 
     user_title = _provided_title(provided_title)
     user_company = _provided_company(provided_company)
+    title_is_trusted = identity_source == "manual" or not _looks_like_browser_title(user_title, user_company)
 
     if settings.openai_enabled and description and not description.startswith("Saved URL bookmark."):
         try:
-            ai_title, ai_company = _identity_with_openai(description, source_url, settings)
-            title = user_title or ai_title or infer_role_title("Auto-detect role", description, source_url)
-            company = user_company or ai_company or infer_company_name("Auto-detect company", description, source_url)
+            ai_title, ai_company = _identity_with_openai(
+                description,
+                source_url,
+                settings,
+                title_hint=provided_title,
+                company_hint=provided_company,
+            )
+            captured = identity_source == "capture"
+            title = (
+                (user_title if title_is_trusted and not captured else "")
+                or ai_title
+                or _captured_role_title(user_title, user_company)
+                or infer_role_title("Auto-detect role", description, source_url)
+            )
+            company = (
+                (user_company if identity_source == "manual" else "")
+                or ai_company
+                or user_company
+                or infer_company_name("Auto-detect company", description, source_url)
+            )
             return _clean_role_title(title), _clean_company_candidate(company)
         except Exception:
             require_ai_result("OpenAI could not detect the job title/company. Enable local fallback in settings to use local detection.")
             pass
 
     require_ai_result("OpenAI is not configured for job title/company detection. Enable local fallback in settings to use local detection.")
-    title = user_title or infer_role_title("Auto-detect role", description, source_url)
+    title = (
+        (user_title if title_is_trusted else "")
+        or _captured_role_title(user_title, user_company)
+        or infer_role_title("Auto-detect role", description, source_url)
+    )
     company = user_company or infer_company_name("Auto-detect company", description, source_url)
     return _clean_role_title(title), _clean_company_candidate(company)
 
@@ -162,6 +193,7 @@ def resolve_job_identity(
     *,
     ai_title: str | None = None,
     ai_company: str | None = None,
+    identity_source: str = "auto",
 ) -> JobIdentityResolution:
     """Reconcile user, posting, AI, browser-title, and URL evidence.
 
@@ -172,8 +204,9 @@ def resolve_job_identity(
 
     raw_title = (provided_title or "").strip()
     embedded_title, embedded_company = _split_role_and_company(raw_title)
-    trusted_title = _provided_title(raw_title) if not _looks_like_browser_title(raw_title) and not embedded_company else ""
-    trusted_company = _provided_company(provided_company)
+    captured = identity_source == "capture"
+    trusted_title = _provided_title(raw_title) if not captured and not _looks_like_browser_title(raw_title, provided_company) and not embedded_company else ""
+    trusted_company = _provided_company(provided_company) if not captured else ""
     header_title = _role_title_from_job_board_header(description)
     header_company = _company_from_job_board_header(description)
     model_title = _valid_role_candidate(ai_title)
@@ -183,15 +216,15 @@ def resolve_job_identity(
 
     title_candidates = (
         (trusted_title, "user_title", 1.0),
-        (header_title, "posting_header_title", 0.98),
-        (model_title, "ai_title", 0.93),
+        (model_title, "ai_title", 0.98),
+        (header_title, "posting_header_title", 0.96),
         (embedded_title, "captured_page_title", 0.88),
         (local_title, "local_title", 0.78),
     )
     company_candidates = (
         (trusted_company, "user_company", 1.0),
-        (header_company, "posting_header_company", 0.98),
-        (model_company, "ai_company", 0.93),
+        (model_company, "ai_company", 0.98),
+        (header_company, "posting_header_company", 0.96),
         (embedded_company, "captured_page_company", 0.88),
         (local_company, "local_company", 0.76),
     )
@@ -326,13 +359,75 @@ def _strip_browser_chrome(value: str) -> str:
     return text.strip(" .:|-–—")
 
 
-def _looks_like_browser_title(value: str) -> bool:
+def _looks_like_browser_title(value: str, company: str | None = None) -> bool:
     raw = str(value or "")
+    clean_company = _clean_company_candidate(company or "")
+    company_inside_title = bool(clean_company and re.search(rf"(?i)\b{re.escape(clean_company)}\b", raw))
     return bool(
-        len(raw) > 100
+        len(raw) > 72
+        or company_inside_title
+        or re.search(r"(?i)\b(?:apply|united states|job details|easy apply|remote|hybrid|on-site)\b", raw)
         or re.search(r"(?i)\b(?:by clicking|continue to (?:join|sign in)|join or sign in|cookie preferences)\b", raw)
         or re.search(r"(?i)\s+[|•]\s+|\s+[-–—]\s+(?:linkedin|handshake|indeed|glassdoor|ziprecruiter|wellfound)\b", raw)
     )
+
+
+def job_identity_needs_repair(title: str, company: str | None = None) -> bool:
+    """Flag stored capture titles that contain page chrome or repeated identity text."""
+
+    raw = re.sub(r"\s+", " ", str(title or "")).strip()
+    if not raw:
+        return True
+    if _looks_like_browser_title(raw, company):
+        return True
+    words = re.findall(r"[a-z0-9+#.]+", raw.lower())
+    midpoint = len(words) // 2
+    return bool(midpoint >= 2 and words[:midpoint] == words[midpoint:midpoint * 2])
+
+
+def repair_job_identity(
+    title: str,
+    company: str | None,
+    description: str,
+    source_url: str | None,
+    settings: Settings,
+) -> JobIdentityResolution:
+    """Re-evaluate one stored captured identity without making reads fail."""
+
+    ai_title = ""
+    ai_company = ""
+    if settings.openai_enabled and description and not description.startswith("Saved URL bookmark."):
+        try:
+            ai_title, ai_company = _identity_with_openai(
+                description,
+                source_url,
+                settings,
+                title_hint=title,
+                company_hint=company,
+            )
+        except Exception as exc:
+            logger.warning("OpenAI stored job identity repair failed: %s", exc)
+    deterministic_title = _captured_role_title(title, company)
+    return resolve_job_identity(
+        title,
+        company,
+        description,
+        source_url,
+        ai_title=ai_title or deterministic_title,
+        ai_company=ai_company or company,
+        identity_source="capture",
+    )
+
+
+def _captured_role_title(title: str | None, company: str | None) -> str:
+    """Trim a known company and capture chrome from a browser page title."""
+
+    candidate = _strip_browser_chrome(str(title or ""))
+    clean_company = _clean_company_candidate(company or "")
+    if clean_company:
+        candidate = re.split(rf"(?i)\s+{re.escape(clean_company)}\b", candidate, maxsplit=1)[0]
+    candidate = re.split(r"(?i)\s+\b(?:apply|united states|remote|hybrid|on-site)\b", candidate, maxsplit=1)[0]
+    return _valid_role_candidate(candidate)
 
 
 def _split_role_and_company(value: str) -> tuple[str, str]:
@@ -370,36 +465,48 @@ def _identity_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
 
-def _identity_with_openai(description: str, source_url: str | None, settings: Settings) -> tuple[str, str]:
+def _identity_with_openai(
+    description: str,
+    source_url: str | None,
+    settings: Settings,
+    *,
+    title_hint: str | None = None,
+    company_hint: str | None = None,
+) -> tuple[str, str]:
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
-    completion = client.chat.completions.create(
+    response = client.responses.parse(
         model=settings.analysis_model,
-        response_format={"type": "json_object"},
-        messages=[
+        input=[
             {
                 "role": "system",
                 "content": (
                     "Extract the employer/company name and exact job title from a pasted job posting. "
-                    "Return only JSON with keys role_title and company. Use the job posting text as the source of truth. "
-                    "Ignore browser page titles, navigation text, buttons, usernames, and unrelated surrounding page content. "
+                    "The supplied title and company hints may be polluted browser metadata and are never authoritative. "
+                    "Use the job posting text as the source of truth. Ignore locations, Apply buttons, navigation text, "
+                    "sign-in text, job-board branding, repeated titles, and unrelated surrounding page content. "
                     "If the text has a job-board header like 'Company logo', then a company line, then an industry line, "
                     "then a role line, use those lines. Do not invent a company if it is not present; return an empty string. "
-                    "Return a concise title such as 'Software Developer' or 'Landscape Designer / Estimator', not a sentence."
+                    "Return a concise title such as 'Software Developer' or 'Landscape Designer / Estimator', not a sentence. "
+                    "Confidence is 0 to 1 and must reflect how clearly the posting supports both fields."
                 ),
             },
             {
                 "role": "user",
-                "content": f"Source URL: {source_url or ''}\n\nPasted job posting:\n{description[:12000]}",
+                "content": (
+                    f"Untrusted page-title hint: {title_hint or ''}\n"
+                    f"Untrusted company hint: {company_hint or ''}\n"
+                    f"Source URL: {source_url or ''}\n\nPasted job posting:\n{description[:16000]}"
+                ),
             },
         ],
-        temperature=0,
+        text_format=JobIdentityOutput,
     )
-    data = json.loads(completion.choices[0].message.content or "{}")
-    raw_role_title = str(data.get("role_title") or "").strip()
+    data = response.output_parsed
+    raw_role_title = str(data.role_title or "").strip()
     role_title = _clean_role_title(raw_role_title) if raw_role_title else ""
-    company = _clean_company_candidate(str(data.get("company") or ""))
+    company = _clean_company_candidate(str(data.company or ""))
     return role_title, company
 
 

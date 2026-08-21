@@ -1,14 +1,23 @@
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import MockInterview, PrepPlan, User
-from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest
+from app.schemas.mock_interview import MockAnswerRequest, MockInterviewResponse, MockInterviewStartRequest, MockVoiceCompleteRequest
 from app.services.auth_service import get_request_user
-from app.services.mock_interview_service import answer_mock_question, complete_mock_interview, delete_mock_interview, get_mock_interview, list_mock_interviews, start_mock_interview
+from app.services.mock_interview_service import (
+    answer_mock_question,
+    complete_mock_interview,
+    complete_voice_mock_interview,
+    create_realtime_call,
+    delete_mock_interview,
+    get_mock_interview,
+    list_mock_interviews,
+    start_mock_interview,
+)
 from app.services.generation_run_service import record_generation_run
 from app.services.usage_service import record_usage_event
 
@@ -40,7 +49,7 @@ def start_interview(
         record_generation_run(
             db,
             artifact_type="mock_interview",
-            prompt_version="mock-v4",
+            prompt_version="mock-v5",
             settings=settings,
             user=current_user,
             job_post_id=plan.job_post_id if plan else None,
@@ -58,7 +67,7 @@ def start_interview(
     record_generation_run(
         db,
         artifact_type="mock_interview",
-        prompt_version="mock-v4",
+        prompt_version="mock-v5",
         settings=settings,
         model=settings.generation_model if settings.openai_enabled else None,
         user=current_user,
@@ -114,6 +123,49 @@ def complete_interview(
     interview = complete_mock_interview(db, mock_interview_id, current_user)
     if interview is None:
         raise HTTPException(status_code=404, detail="Mock interview not found")
+    return interview
+
+
+@router.post("/{mock_interview_id}/realtime-call")
+async def open_realtime_call(
+    mock_interview_id: int,
+    offer_sdp: str = Body(..., media_type="application/sdp"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    current_user: User | None = Depends(get_request_user),
+) -> Response:
+    try:
+        answer_sdp = await create_realtime_call(db, mock_interview_id, offer_sdp, settings, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if answer_sdp is None:
+        raise HTTPException(status_code=404, detail="Mock interview not found")
+    return Response(content=answer_sdp, media_type="application/sdp")
+
+
+@router.post("/{mock_interview_id}/voice-complete", response_model=MockInterviewResponse)
+def complete_voice_interview(
+    mock_interview_id: int,
+    request: MockVoiceCompleteRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    current_user: User | None = Depends(get_request_user),
+) -> MockInterviewResponse:
+    interview = complete_voice_mock_interview(db, mock_interview_id, request, settings, current_user)
+    if interview is None:
+        raise HTTPException(status_code=404, detail="Mock interview not found")
+    record_usage_event(
+        db,
+        current_user,
+        "voice_mock_interview_completed",
+        "mock_interviews",
+        settings=settings,
+        input_value={"turn_count": len(request.turns)},
+        output_value=interview.model_dump(),
+        detail={"mock_interview_id": mock_interview_id, "score": interview.average_score},
+    )
     return interview
 
 

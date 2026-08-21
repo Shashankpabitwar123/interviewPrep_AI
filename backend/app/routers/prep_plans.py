@@ -8,7 +8,7 @@ from app.database import get_db
 from app.models import JobPost, User
 from app.schemas.prep_plan import PrepPlanRequest, PrepPlanResponse, PrepPlanSummary, PrepTaskStatusUpdate
 from app.services.auth_service import get_request_user
-from app.services.job_analyzer import analysis_from_job_brief, build_job_description_brief, identity_hints, resolve_job_identity
+from app.services.job_analyzer import analysis_from_job_brief, build_job_description_brief, identify_job, identity_hints, resolve_job_identity
 from app.services.job_source import ResolvedJobSource, resolve_job_source
 from app.services.planner import generate_prep_plan
 from app.services.persistence import (
@@ -61,16 +61,27 @@ def create_prep_plan(
     # Existing current analysis is reused, so "generate plan" does not spend
     # time or provider calls rebuilding information the user already has.
     brief = get_saved_job_brief(db, request.job_post_id, current_user) if request.job_post_id else None
+    detected_title = ""
+    detected_company = ""
     if brief is None:
         title_hint, _ = identity_hints(requested_title, requested_company, description, source_url)
-        brief = build_job_description_brief(title_hint, description, source_url, settings)
+        detected_title, detected_company = identify_job(
+            requested_title,
+            requested_company,
+            description,
+            source_url,
+            settings,
+            request.identity_source,
+        )
+        brief = build_job_description_brief(detected_title or title_hint, description, source_url, settings)
     identity = resolve_job_identity(
         requested_title,
         requested_company,
         description,
         source_url,
-        ai_title=brief.role_title,
-        ai_company=brief.company,
+        ai_title=detected_title or brief.role_title,
+        ai_company=detected_company or brief.company,
+        identity_source=request.identity_source,
     )
     inferred_title = identity.role_title
     inferred_company = identity.company

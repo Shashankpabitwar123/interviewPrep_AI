@@ -2,6 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CircularProgressbar } from "react-circular-progressbar";
 import MarketingLanding from "./MarketingLanding.jsx";
+import { createRealtimeInterviewConnection } from "./realtime-interview.js";
 import {
   GENERATED_NOTES_FOLDER,
   READINESS_FORMULA,
@@ -74,12 +75,15 @@ import {
   LogIn,
   LogOut,
   MessageSquareText,
+  Mic,
+  MicOff,
   MoreVertical,
   NotebookText,
   Palette,
   Plus,
   Play,
   RotateCcw,
+  Radio,
   Save,
   Search,
   Settings,
@@ -94,6 +98,7 @@ import {
   UserRound,
   UserPlus,
   Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import "./styles.css";
@@ -289,7 +294,7 @@ function App() {
   const [examSettings, setExamSettings] = useState({ ...EXAM_PRESETS.medium });
   const [mockInterview, setMockInterview] = useState(null);
   const [mockDifficulty, setMockDifficulty] = useState("medium");
-  const [mockQuestionTypes, setMockQuestionTypes] = useState(["technical", "multiple_choice", "coding", "behavioral", "team_problem_solving"]);
+  const [mockQuestionTypes, setMockQuestionTypes] = useState(["technical", "coding", "behavioral", "team_problem_solving"]);
   const [mockAnswer, setMockAnswer] = useState("");
   const [completedTasks, setCompletedTasks] = useState(() => loadCompletedTasks());
   const [notes, setNotes] = useState(() => loadLocalList("interviewprep_notes").map(normalizeWorkspaceNote));
@@ -561,6 +566,10 @@ function App() {
 
   async function hydrateWorkspace(tokenOverride = authToken) {
     try {
+      await apiFetch("/jobs/repair-identities", {
+        method: "POST",
+        authTokenOverride: tokenOverride,
+      }).catch(() => null);
       const response = await apiFetch("/workspace", { authTokenOverride: tokenOverride });
       if (!response.ok) throw new Error(await readApiError(response, "Workspace"));
       const payload = await response.json();
@@ -972,6 +981,7 @@ function App() {
       const payload = {
         job_title: jobTitle.trim() || "Auto-detect role",
         company: company.trim() || "Auto-detect company",
+        identity_source: jobTitle.trim() || company.trim() ? "manual" : "auto",
         interview_at: new Date(interviewDate).toISOString(),
         hours_per_day: Number(hoursPerDay),
         comfort_level: "intermediate",
@@ -1027,6 +1037,7 @@ function App() {
       const payload = {
         job_title: jobTitle.trim() || "Auto-detect role",
         company: company.trim() || "Auto-detect company",
+        identity_source: jobTitle.trim() || company.trim() ? "manual" : "auto",
         interview_at: interviewDate ? new Date(interviewDate).toISOString() : undefined,
         hours_per_day: Number(hoursPerDay),
       };
@@ -1069,6 +1080,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           job_title: jobDraft.title,
+          identity_source: "manual",
           job_description: jobDraft.description || !jobDraft.sourceUrl ? normalizeSavedJobDescription(jobDraft.description, jobDraft.title) : undefined,
           source_url: jobDraft.sourceUrl ? normalizeUrl(jobDraft.sourceUrl) : undefined,
         }),
@@ -1670,11 +1682,8 @@ function App() {
     setMockSession({
       attemptId: attempt.id,
       interview,
-      answer: "",
-      muted: false,
       questionTypes: attempt.questionTypes,
-      questionNumber: interview.answered_questions + 1,
-      remainingSeconds: mockQuestionSeconds(interview.difficulty, interview.answered_questions + 1),
+      remainingSeconds: mockQuestionSeconds(interview.difficulty, 1) * interview.question_count,
     });
   }
 
@@ -1808,6 +1817,54 @@ function App() {
     }
   }
 
+  async function completeVoiceMockSession(turns) {
+    const activeInterview = mockSession?.interview;
+    if (!activeInterview?.id) return;
+    setLoading(true);
+    setStatus("Preparing Interview Feedback");
+    try {
+      const response = await apiFetch(`/mock-interviews/${activeInterview.id}/voice-complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turns }),
+      });
+      if (!response.ok) throw new Error(await readApiError(response, "Voice interview"));
+      const interview = {
+        ...await response.json(),
+        status: "complete",
+        questionTypes: mockSession.questionTypes || [],
+      };
+      setMockInterview(interview);
+      setMockAttempts((current) => {
+        const next = current.map((attempt) => attempt.id === mockSession.attemptId ? {
+          ...attempt,
+          status: "complete",
+          interview,
+          score: interview.average_score,
+          completedAt: new Date().toISOString(),
+        } : attempt);
+        saveLocalList("interviewprep_mock_attempts", next);
+        return next;
+      });
+      setMockSession(null);
+      setActiveView("exams");
+      setStatus("Mock Interview Complete");
+      markStudyActivity("mock-answer");
+      addActivity({
+        type: "mock",
+        title: "Live mock interview completed",
+        detail: interview.current_topic || "Interview practice",
+        badge: `${Math.round((interview.average_score || 0) * 100)}%`,
+        target: "exams",
+      });
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function submitMockSessionAnswer(answerText, options = {}) {
     const activeInterview = mockSession?.interview;
     if (!activeInterview?.id || !answerText.trim()) return;
@@ -1849,8 +1906,6 @@ function App() {
         setMockSession({
           attemptId: mockSession.attemptId,
           interview,
-          answer: "",
-          muted: mockSession.muted,
           questionTypes: mockSession.questionTypes,
           questionNumber: interview.answered_questions + 1,
           remainingSeconds: mockQuestionSeconds(interview.difficulty, interview.answered_questions + 1),
@@ -3230,10 +3285,8 @@ function App() {
       {mockSession && (
         <MockInterviewModal
           session={mockSession}
-          setSession={setMockSession}
-          onSubmit={submitMockSessionAnswer}
-          onExit={exitMockSession}
-          onClose={() => setMockSession(null)}
+          apiFetch={apiFetch}
+          onComplete={completeVoiceMockSession}
           loading={loading}
         />
       )}
@@ -4281,76 +4334,216 @@ function ExamReviewModal({ review, apiFetch, onClose }) {
   );
 }
 
-function MockInterviewModal({ session, setSession, onSubmit, onExit, loading }) {
+function MockInterviewModal({ session, apiFetch, onComplete, loading }) {
   const interview = session.interview;
-  const currentQuestion = currentMockQuestion(interview);
-  const answeredNumbers = Array.from({ length: interview.answered_questions }, (_, index) => index + 1);
+  const plannedQuestions = (interview.session_plan || []).map((slot, index) => ({
+    number: slot.number || index + 1,
+    topic: slot.topic || interview.current_topic,
+    question: slot.question || "Interview question",
+  }));
+  const [connectionState, setConnectionState] = useState("connecting");
+  const [error, setError] = useState("");
+  const [turns, setTurns] = useState([]);
+  const [liveCaption, setLiveCaption] = useState("Preparing your interviewer…");
+  const [activeQuestionNumber, setActiveQuestionNumber] = useState(1);
+  const [micMuted, setMicMuted] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+  const audioRef = useRef(null);
+  const connectionRef = useRef(null);
+  const turnsRef = useRef([]);
+  const assistantBuffersRef = useRef({});
+  const seenCandidateRef = useRef(new Set());
+  const seenAssistantRef = useRef(new Set());
+
+  function appendTurn(role, rawContent, key = "") {
+    const content = String(rawContent || "").replace(/\s+/g, " ").trim();
+    if (!content) return;
+    const seen = role === "candidate" ? seenCandidateRef.current : seenAssistantRef.current;
+    const identity = key || `${role}:${content}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    setTurns((current) => {
+      if (current.at(-1)?.role === role && current.at(-1)?.content === content) return current;
+      const next = [...current, { role, content }];
+      turnsRef.current = next;
+      return next;
+    });
+    setLiveCaption(content);
+    if (role === "interviewer") {
+      const normalized = content.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
+      const matched = plannedQuestions.find((slot) => {
+        const question = slot.question.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).slice(0, 8).join(" ");
+        return question.length > 18 && normalized.includes(question);
+      });
+      if (matched) setActiveQuestionNumber(matched.number);
+    }
+  }
+
+  function handleRealtimeEvent(event) {
+    const type = event?.type || "";
+    if (type === "input_audio_buffer.speech_started") setConnectionState("listening");
+    if (type === "input_audio_buffer.speech_stopped") setConnectionState("thinking");
+    if (type === "conversation.item.input_audio_transcription.completed") {
+      appendTurn("candidate", event.transcript, event.item_id || event.item?.id);
+      return;
+    }
+    if (["response.output_audio_transcript.delta", "response.audio_transcript.delta", "response.output_text.delta"].includes(type)) {
+      const key = event.response_id || event.item_id || "active";
+      assistantBuffersRef.current[key] = `${assistantBuffersRef.current[key] || ""}${event.delta || ""}`;
+      setLiveCaption(assistantBuffersRef.current[key]);
+      setConnectionState("speaking");
+      return;
+    }
+    if (["response.output_audio_transcript.done", "response.audio_transcript.done", "response.output_text.done"].includes(type)) {
+      const key = event.response_id || event.item_id || "active";
+      const content = event.transcript || event.text || assistantBuffersRef.current[key];
+      appendTurn("interviewer", content, key);
+      delete assistantBuffersRef.current[key];
+      setConnectionState("listening");
+      return;
+    }
+    if (type === "error") {
+      setError(event.error?.message || "The live interviewer encountered an error.");
+      setConnectionState("failed");
+    }
+  }
 
   useEffect(() => {
-    if (session.muted || !currentQuestion || !("speechSynthesis" in window)) return undefined;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(currentQuestion.content);
-    utterance.rate = interview.difficulty === "hard" ? 0.92 : interview.difficulty === "easy" ? 1 : 0.96;
-    window.speechSynthesis.speak(utterance);
-    return () => window.speechSynthesis.cancel();
-  }, [currentQuestion?.id, session.muted, interview.difficulty]);
+    let cancelled = false;
+    setError("");
+    setConnectionState("connecting");
+    createRealtimeInterviewConnection({
+      apiFetch,
+      interviewId: interview.id,
+      audioElement: audioRef.current,
+      onEvent: handleRealtimeEvent,
+      onState: setConnectionState,
+    }).then((connection) => {
+      if (cancelled) {
+        connection.close();
+        return;
+      }
+      connectionRef.current = connection;
+    }).catch((connectionError) => {
+      if (cancelled) return;
+      setError(connectionError.message || "The live interview could not start.");
+      setConnectionState("failed");
+    });
+    return () => {
+      cancelled = true;
+      connectionRef.current?.close();
+      connectionRef.current = null;
+    };
+  }, [interview.id, retryKey]);
 
-  function toggleMute() {
-    if (!session.muted && "speechSynthesis" in window) window.speechSynthesis.cancel();
-    setSession({ ...session, muted: !session.muted });
+  function sendControl(text) {
+    if (!connectionRef.current?.sendControl(text)) return;
+    appendTurn("candidate", text);
+    setConnectionState("thinking");
   }
+
+  function toggleMic() {
+    const next = !micMuted;
+    setMicMuted(next);
+    connectionRef.current?.setMicEnabled(!next);
+  }
+
+  function toggleAudio() {
+    const next = !audioMuted;
+    setAudioMuted(next);
+    connectionRef.current?.setAudioMuted(next);
+  }
+
+  async function finishInterview() {
+    connectionRef.current?.close();
+    connectionRef.current = null;
+    setConnectionState("thinking");
+    try {
+      await onComplete(turnsRef.current);
+    } catch (completionError) {
+      setError(completionError.message || "The interview ended, but feedback could not be prepared yet. Try End interview again.");
+      setConnectionState("failed");
+    }
+  }
+
+  const currentPlanQuestion = plannedQuestions.find((item) => item.number === activeQuestionNumber) || plannedQuestions[0];
+  const stateLabel = {
+    "requesting-microphone": "Allow microphone access",
+    connecting: "Connecting your interviewer",
+    connected: "Interview starting",
+    listening: micMuted ? "Microphone muted" : "Listening to you",
+    thinking: "Preparing a follow-up",
+    speaking: audioMuted ? "Interviewer audio muted" : "Interviewer speaking",
+    failed: "Connection needs attention",
+  }[connectionState] || "Live interview";
 
   return (
     <div className="exam-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="mock-interview-shell">
-        <header className="exam-topbar">
+      <div className="mock-interview-shell voice-interview-shell">
+        <audio ref={audioRef} autoPlay className="voice-remote-audio" />
+        <header className="exam-topbar voice-topbar">
           <div>
-            <strong>{interview.difficulty} mock interview</strong>
-            <span>{interview.answered_questions}/{interview.question_count} answered • {interview.current_topic}</span>
+            <strong>Live {interview.difficulty} mock interview</strong>
+            <span>{interview.question_count} planned questions • adaptive follow-ups enabled</span>
           </div>
-          <div className={`exam-timer ${session.remainingSeconds < 30 ? "warning" : ""}`}>
+          <div className={`voice-live-status ${connectionState}`}><Radio size={16} /> {stateLabel}</div>
+          <div className={`exam-timer ${session.remainingSeconds < 60 ? "warning" : ""}`}>
             <Clock3 size={17} /> {formatSeconds(session.remainingSeconds)}
           </div>
-          <button type="button" className="icon-button" onClick={onExit}><X size={19} /></button>
         </header>
 
         <aside className="question-map">
-          {Array.from({ length: interview.question_count }, (_, index) => index + 1).map((number) => (
-            <button
-              type="button"
-              key={number}
-              className={`${number === session.questionNumber ? "current" : ""} ${answeredNumbers.includes(number) ? "answered" : ""}`}
-            >
-              {answeredNumbers.includes(number) ? <Check size={14} /> : number}
+          {plannedQuestions.map((item) => (
+            <button type="button" key={item.number} className={`${item.number === activeQuestionNumber ? "current" : ""} ${item.number < activeQuestionNumber ? "answered" : ""}`} title={item.topic}>
+              {item.number < activeQuestionNumber ? <Check size={14} /> : item.number}
             </button>
           ))}
         </aside>
 
-        <main className="exam-stage mock-stage">
-          <div className="exam-question-focus">
-            <span>{mockSectionLabel(currentQuestion, session.questionNumber)} • Question {session.questionNumber} of {interview.question_count}</span>
-            <h2>{currentQuestion?.content || "Interview complete."}</h2>
-            <div className="mock-session-tools">
-              <button type="button" className="outline-action compact-action" onClick={toggleMute}>
-                <Volume2 size={16} /> {session.muted ? "Unmute" : "Mute"}
-              </button>
-              <span>{session.muted ? "Voice is muted." : "The interviewer reads each new question automatically."} The AI scores clarity, examples, tradeoffs, and role fit.</span>
+        <main className="exam-stage voice-interview-stage">
+          <section className="voice-question-panel">
+            <span>QUESTION {activeQuestionNumber} OF {interview.question_count} • {currentPlanQuestion?.topic || interview.current_topic}</span>
+            <h2>{currentPlanQuestion?.question || "Your interviewer is preparing the next question."}</h2>
+            <div className={`voice-orb ${connectionState}`} aria-hidden="true"><i /><i /><Mic size={34} /></div>
+            <div className="voice-caption" aria-live="polite">
+              <strong>{connectionState === "listening" ? "Your turn" : "Live conversation"}</strong>
+              <p>{liveCaption}</p>
             </div>
-            <textarea
-              placeholder="Type your answer like you would say it in an interview..."
-              value={session.answer}
-              onChange={(event) => setSession({ ...session, answer: event.target.value })}
-            />
-            {session.remainingSeconds === 0 && <small className="time-warning">Time is up for this question. Submit your best answer to continue.</small>}
-          </div>
+            {error && (
+              <div className="voice-error" role="alert">
+                <span>{error}</span>
+                <button type="button" className="outline-action compact-action" onClick={() => setRetryKey((value) => value + 1)}><RotateCcw size={16} /> Retry connection</button>
+              </div>
+            )}
+          </section>
+
+          <aside className="voice-transcript-panel">
+            <div><span>LIVE TRANSCRIPT</span><strong>Conversation</strong></div>
+            <div className="voice-transcript-list">
+              {turns.length === 0 && <p>Your conversation will appear here as you speak.</p>}
+              {turns.slice(-6).map((turn, index) => (
+                <article className={turn.role} key={`${turn.role}-${index}-${turn.content.slice(0, 18)}`}>
+                  <strong>{turn.role === "candidate" ? "You" : "Interviewer"}</strong>
+                  <p>{turn.content}</p>
+                </article>
+              ))}
+            </div>
+            <small>Say “repeat,” “clarify,” “skip,” or “end interview” at any time.</small>
+          </aside>
         </main>
 
-        <footer className="exam-footer">
-          <button type="button" className="outline-action" onClick={onExit}>Submit Interview</button>
-          <button type="button" className="primary" disabled={loading || !session.answer.trim()} onClick={() => onSubmit(session.answer)}>
-            {loading ? <Loader2 className="spin" size={16} /> : <MessageSquareText size={16} />}
-            Submit Answer
-          </button>
+        <footer className="exam-footer voice-interview-footer">
+          <div>
+            <button type="button" className="outline-action compact-action" disabled={connectionState === "failed"} onClick={() => sendControl("Please repeat the current question.")}>Repeat</button>
+            <button type="button" className="outline-action compact-action" disabled={connectionState === "failed"} onClick={() => sendControl("Please clarify the current question without giving me the answer.")}>Clarify</button>
+            <button type="button" className="outline-action compact-action" disabled={connectionState === "failed"} onClick={() => sendControl("Please skip this question and move to the next planned question.")}>Skip</button>
+          </div>
+          <div>
+            <button type="button" className={`voice-round-button ${micMuted ? "muted" : ""}`} onClick={toggleMic} title={micMuted ? "Turn microphone on" : "Mute microphone"}>{micMuted ? <MicOff size={19} /> : <Mic size={19} />}</button>
+            <button type="button" className={`voice-round-button ${audioMuted ? "muted" : ""}`} onClick={toggleAudio} title={audioMuted ? "Hear interviewer" : "Mute interviewer"}>{audioMuted ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
+            <button type="button" className="primary" disabled={loading} onClick={finishInterview}>{loading ? <Loader2 className="spin" size={16} /> : <X size={16} />} End interview</button>
+          </div>
         </footer>
       </div>
     </div>

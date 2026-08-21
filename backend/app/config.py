@@ -31,6 +31,9 @@ class Settings(BaseModel):
     openai_analysis_model: Optional[str] = None
     openai_generation_model: Optional[str] = None
     openai_scoring_model: Optional[str] = None
+    openai_realtime_model: str = "gpt-realtime-2"
+    openai_realtime_voice: str = "marin"
+    openai_transcription_model: str = "gpt-4o-mini-transcribe"
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.5-flash"
     tavily_api_key: Optional[str] = None
@@ -106,6 +109,9 @@ def get_settings() -> Settings:
         openai_analysis_model=os.getenv("OPENAI_ANALYSIS_MODEL"),
         openai_generation_model=os.getenv("OPENAI_GENERATION_MODEL"),
         openai_scoring_model=os.getenv("OPENAI_SCORING_MODEL"),
+        openai_realtime_model=os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2"),
+        openai_realtime_voice=os.getenv("OPENAI_REALTIME_VOICE", "marin"),
+        openai_transcription_model=os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         tavily_api_key=os.getenv("TAVILY_API_KEY"),

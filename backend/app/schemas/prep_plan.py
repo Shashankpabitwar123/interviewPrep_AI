@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -20,6 +20,7 @@ class PrepPlanRequest(BaseModel):
     company: Optional[str] = Field(default="Auto-detect company", examples=["Amazon"])
     job_description: Optional[str] = Field(default=None, min_length=20)
     source_url: Optional[str] = Field(default=None, examples=["https://company.com/jobs/backend-intern"])
+    identity_source: Literal["manual", "capture", "auto"] = "auto"
     interview_at: datetime
     hours_per_day: float = Field(default=2.0, ge=0.5, le=10)
     comfort_level: str = Field(default="intermediate", examples=["beginner", "intermediate", "advanced"])

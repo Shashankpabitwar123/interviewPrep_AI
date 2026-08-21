@@ -10,6 +10,7 @@ class JobAnalysisRequest(BaseModel):
     job_description: Optional[str] = Field(default=None, min_length=20)
     source_url: Optional[str] = Field(default=None, examples=["https://company.com/jobs/backend-intern"])
     save_mode: Optional[str] = Field(default=None, examples=["url"])
+    identity_source: Literal["manual", "capture", "auto"] = "auto"
     interview_at: Optional[datetime] = None
     hours_per_day: Optional[float] = Field(default=None, ge=0.5, le=10)
 
@@ -67,6 +68,11 @@ class JobPostDetail(BaseModel):
     analysis: Optional[JobAnalysisResponse] = None
     interview_at: Optional[datetime] = None
     hours_per_day: Optional[float] = None
+
+
+class JobIdentityRepairResponse(BaseModel):
+    checked: int
+    updated: int
 
 
 class JobDescriptionUpdateRequest(BaseModel):

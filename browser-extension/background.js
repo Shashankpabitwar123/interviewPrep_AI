@@ -140,6 +140,7 @@ async function generatePlan(payload, sender) {
         company: normalized.company,
         job_description: normalized.job_description,
         source_url: normalized.source_url,
+        identity_source: normalized.identity_source,
         interview_at: payload.interviewAt || defaultInterviewDate(),
         hours_per_day: Number(payload.hoursPerDay || 3),
         comfort_level: payload.comfortLevel || "intermediate",
@@ -231,6 +232,7 @@ function normalizeJobPayload(payload, sender) {
     job_description: description || undefined,
     source_url: url || undefined,
     save_mode: payload.saveMode || undefined,
+    identity_source: "capture",
   };
 }
 

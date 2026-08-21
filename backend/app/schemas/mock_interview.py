@@ -13,7 +13,7 @@ class MockInterviewStartRequest(BaseModel):
     difficulty: str = Field(default="medium", examples=["easy", "medium", "hard"])
     question_count: Optional[int] = Field(default=None, ge=1, le=12)
     question_types: list[str] = Field(
-        default_factory=lambda: ["technical", "multiple_choice", "coding", "behavioral"],
+        default_factory=lambda: ["technical", "coding", "behavioral", "team_problem_solving"],
         examples=[["technical", "one_word", "multiple_choice", "multiple_select", "coding", "team_problem_solving"]],
     )
 
@@ -37,6 +37,16 @@ class MockQuestionPlan(BaseModel):
     question_type: str
     intent: str
     rubric: list[str] = Field(default_factory=list)
+    question: str = ""
+
+
+class MockVoiceTurn(BaseModel):
+    role: Literal["interviewer", "candidate"]
+    content: str = Field(min_length=1, max_length=5000)
+
+
+class MockVoiceCompleteRequest(BaseModel):
+    turns: list[MockVoiceTurn] = Field(default_factory=list, max_length=100)
 
 
 class MockInterviewResponse(BaseModel):

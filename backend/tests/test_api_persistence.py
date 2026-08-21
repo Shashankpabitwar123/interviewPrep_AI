@@ -12,6 +12,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import ArtifactFeedback, CompetencyEvidence, Exam, GenerationRun, User
 from app.schemas.study_note import NoteSection, StudyNoteResponse, StudyResource
+from app.services.mock_interview_service import MockVoiceAnswerEvaluation, _is_voice_command
 from app.services.study_note_service import AIStudyNoteOutput
 
 
@@ -958,7 +959,7 @@ def test_mock_interview_flow() -> None:
     assert started["focus_topics"] == ["SQL joins", "Python"]
     assert started["current_topic"] == "SQL joins"
     assert len(started["session_plan"]) == started["question_count"]
-    assert all(slot["intent"] and slot["rubric"] for slot in started["session_plan"])
+    assert all(slot["intent"] and slot["rubric"] and slot["question"] for slot in started["session_plan"])
 
     answer_response = client.post(
         f"/mock-interviews/{started['id']}/answer",
@@ -980,6 +981,86 @@ def test_mock_interview_flow() -> None:
     completed_response = client.post(f"/mock-interviews/{started['id']}/complete")
     assert completed_response.status_code == 200
     assert completed_response.json()["status"] == "complete"
+
+
+def test_voice_mock_interview_persists_transcript_commands_and_scores(monkeypatch) -> None:
+    client = _client_with_memory_db()
+    plan = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Backend Engineer",
+            "job_description": "Build Python APIs, design SQL data models, test edge cases, and explain tradeoffs.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    started = client.post(
+        "/mock-interviews/start",
+        json={"prep_plan_id": plan["prep_plan_id"], "question_count": 2},
+    ).json()
+
+    def fake_evaluate(interview, turns, substantive_indices, settings):
+        return {
+            index: MockVoiceAnswerEvaluation(
+                candidate_turn_index=index,
+                score=0.8 if position == 0 else 0.6,
+                feedback="Grounded voice-answer feedback.",
+                strengths=["Clear reasoning"],
+                improvements=["Add one measurable result"],
+                dimensions={"relevance": 0.8, "accuracy": 0.7, "depth": 0.6, "structure": 0.7, "communication": 0.8},
+                competency="Python APIs",
+            )
+            for position, index in enumerate(substantive_indices)
+        }
+
+    monkeypatch.setattr("app.services.mock_interview_service._evaluate_voice_transcript_with_ai", fake_evaluate)
+    response = client.post(
+        f"/mock-interviews/{started['id']}/voice-complete",
+        json={
+            "turns": [
+                {"role": "interviewer", "content": started["session_plan"][0]["question"]},
+                {"role": "candidate", "content": "I designed a FastAPI endpoint and tested failure cases before measuring latency."},
+                {"role": "candidate", "content": "Please repeat the question."},
+                {"role": "interviewer", "content": started["session_plan"][1]["question"]},
+                {"role": "candidate", "content": "I would validate the schema, parameterize queries, and explain the indexing tradeoff."},
+            ],
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["status"] == "complete"
+    assert body["answered_questions"] == 2
+    assert body["average_score"] == 0.7
+    assert len([message for message in body["messages"] if message["role"] == "feedback"]) == 2
+    assert len([message for message in body["messages"] if message["role"] == "command"]) == 1
+    assert _is_voice_command("Could you clarify the question?") is True
+    assert _is_voice_command("Please skip this question and move to the next planned question.") is True
+
+
+def test_realtime_mock_endpoint_requires_server_openai_configuration() -> None:
+    client = _client_with_memory_db()
+    plan = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Data Analyst",
+            "job_description": "Use SQL and Tableau to validate reporting data.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+            "comfort_level": "intermediate",
+        },
+    ).json()
+    started = client.post("/mock-interviews/start", json={"prep_plan_id": plan["prep_plan_id"]}).json()
+
+    response = client.post(
+        f"/mock-interviews/{started['id']}/realtime-call",
+        content="v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n",
+        headers={"Content-Type": "application/sdp"},
+    )
+
+    assert response.status_code == 503
+    assert "OpenAI is not configured" in response.json()["detail"]
 
 
 def test_mock_interview_complete_and_delete_respect_ownership() -> None:

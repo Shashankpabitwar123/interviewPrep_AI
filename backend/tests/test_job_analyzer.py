@@ -7,6 +7,7 @@ from app.services.job_analyzer import (
     extract_core_skills,
     identity_hints,
     infer_company_name,
+    job_identity_needs_repair,
     resolve_job_identity,
 )
 
@@ -109,3 +110,38 @@ def test_posting_headers_outrank_conflicting_captured_page_title() -> None:
     assert identity.company == "Acme Analytics"
     assert identity.confidence >= 0.98
     assert identity.needs_review is False
+
+
+def test_ai_identity_outranks_polluted_capture_title_and_location() -> None:
+    captured = "Frontend Developer InterEx Group United States Apply Frontend Developer InterEx Group"
+
+    identity = resolve_job_identity(
+        captured,
+        "InterEx Group",
+        "Frontend Developer\nInterEx Group\nBuild React and TypeScript applications.",
+        "https://linkedin.com/jobs/789",
+        ai_title="Frontend Developer",
+        ai_company="InterEx Group",
+        identity_source="capture",
+    )
+
+    assert job_identity_needs_repair(captured, "InterEx Group") is True
+    assert identity.role_title == "Frontend Developer"
+    assert identity.company == "InterEx Group"
+    assert identity.evidence == ("ai_title", "ai_company")
+
+
+def test_clean_manual_job_identity_remains_authoritative() -> None:
+    identity = resolve_job_identity(
+        "Product Data Analyst",
+        "Acme",
+        "Job title: Data Analyst\nCompany: Other Co",
+        None,
+        ai_title="Data Analyst",
+        ai_company="Other Co",
+        identity_source="manual",
+    )
+
+    assert identity.role_title == "Product Data Analyst"
+    assert identity.company == "Acme"
+    assert identity.evidence == ("user_title", "user_company")

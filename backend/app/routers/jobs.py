@@ -11,6 +11,7 @@ from app.schemas.job_analysis import (
     JobDescriptionAskResponse,
     JobDescriptionBrief,
     JobDescriptionUpdateRequest,
+    JobIdentityRepairResponse,
     JobPostDetail,
     JobPostSummary,
 )
@@ -20,6 +21,9 @@ from app.services.job_analyzer import (
     answer_job_description_question,
     build_job_description_brief,
     identity_hints,
+    identify_job,
+    job_identity_needs_repair,
+    repair_job_identity,
     resolve_job_identity,
 )
 from app.services.job_source import ResolvedJobSource, resolve_job_source
@@ -66,15 +70,24 @@ def analyze_job(
     # Generate one canonical analysis during upload. It detects missing role
     # details and feeds the compact planner fields, so new jobs never need a
     # separate title/company or analysis generation request.
-    title_hint, _ = identity_hints(request.job_title, request.company, description, request.source_url)
-    brief = build_job_description_brief(title_hint, description, request.source_url, settings)
+    title_hint, company_hint = identity_hints(request.job_title, request.company, description, request.source_url)
+    detected_title, detected_company = identify_job(
+        request.job_title,
+        request.company,
+        description,
+        request.source_url,
+        settings,
+        request.identity_source,
+    )
+    brief = build_job_description_brief(detected_title or title_hint, description, request.source_url, settings)
     identity = resolve_job_identity(
         request.job_title,
         request.company,
         description,
         request.source_url,
-        ai_title=brief.role_title,
-        ai_company=brief.company,
+        ai_title=detected_title or brief.role_title,
+        ai_company=detected_company or brief.company or company_hint,
+        identity_source=request.identity_source,
     )
     inferred_title = identity.role_title
     inferred_company = identity.company
@@ -128,6 +141,45 @@ def analyze_job(
         detail={"job_post_id": saved_job.job_post_id, "title": inferred_title, "company": inferred_company},
     )
     return saved_job
+
+
+@router.post("/repair-identities", response_model=JobIdentityRepairResponse)
+def repair_saved_job_identities(
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_request_user),
+) -> JobIdentityRepairResponse:
+    query = db.query(JobPost)
+    query = query.filter(JobPost.user_id == current_user.id) if current_user else query.filter(JobPost.user_id.is_(None))
+    jobs = query.all()
+    updated = 0
+    for job in jobs:
+        if not job_identity_needs_repair(job.title, job.company):
+            continue
+        identity = repair_job_identity(job.title, job.company, job.description, job.source_url, settings)
+        if job_identity_needs_repair(identity.role_title, identity.company):
+            continue
+        if identity.role_title == job.title and identity.company == (job.company or ""):
+            continue
+        job.title = identity.role_title
+        job.company = identity.company or None
+        job.capture_metadata = {**(job.capture_metadata or {}), "identity": identity.metadata(), "identity_repaired": True}
+        if job.analysis and job.analysis.structured_brief:
+            job.analysis.structured_brief = {
+                **job.analysis.structured_brief,
+                "role_title": identity.role_title,
+                "company": identity.company,
+            }
+        if job.role_blueprint and job.role_blueprint.blueprint:
+            job.role_blueprint.blueprint = {
+                **job.role_blueprint.blueprint,
+                "role_title": identity.role_title,
+                "company": identity.company,
+            }
+        updated += 1
+    if updated:
+        db.commit()
+    return JobIdentityRepairResponse(checked=len(jobs), updated=updated)
 
 
 @router.get("", response_model=list[JobPostSummary])
