@@ -12,7 +12,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import ArtifactFeedback, CompetencyEvidence, Exam, GenerationRun, User
 from app.schemas.study_note import NoteSection, StudyNoteResponse, StudyResource
-from app.services.mock_interview_service import MockVoiceAnswerEvaluation, _is_voice_command
+from app.services.mock_interview_service import MockVoiceAnswerEvaluation, MockVoiceEvaluationOutput, _is_voice_command
 from app.services.study_note_service import AIStudyNoteOutput
 
 
@@ -1024,6 +1024,8 @@ def test_voice_mock_interview_persists_transcript_commands_and_scores(monkeypatc
                 {"role": "candidate", "content": "Please repeat the question."},
                 {"role": "interviewer", "content": started["session_plan"][1]["question"]},
                 {"role": "candidate", "content": "I would validate the schema, parameterize queries, and explain the indexing tradeoff."},
+                {"role": "candidate", "content": "I'm done."},
+                {"role": "candidate", "content": "I got it."},
             ],
         },
     )
@@ -1034,9 +1036,24 @@ def test_voice_mock_interview_persists_transcript_commands_and_scores(monkeypatc
     assert body["answered_questions"] == 2
     assert body["average_score"] == 0.7
     assert len([message for message in body["messages"] if message["role"] == "feedback"]) == 2
-    assert len([message for message in body["messages"] if message["role"] == "command"]) == 1
+    assert len([message for message in body["messages"] if message["role"] == "command"]) == 3
     assert _is_voice_command("Could you clarify the question?") is True
     assert _is_voice_command("Please skip this question and move to the next planned question.") is True
+    assert _is_voice_command("I'm done.") is True
+    assert _is_voice_command("I got it.") is True
+
+
+def test_voice_scoring_schema_is_strict_and_complete() -> None:
+    from openai.lib._pydantic import to_strict_json_schema
+
+    schema = to_strict_json_schema(MockVoiceEvaluationOutput)
+    answer_schema = schema["$defs"]["MockVoiceAnswerEvaluation"]
+    dimension_schema = schema["$defs"]["MockScoreDimensions"]
+
+    assert set(schema["required"]) == set(schema["properties"])
+    assert set(answer_schema["required"]) == set(answer_schema["properties"])
+    assert set(dimension_schema["required"]) == set(dimension_schema["properties"])
+    assert dimension_schema["additionalProperties"] is False
 
 
 def test_realtime_mock_endpoint_requires_server_openai_configuration() -> None:

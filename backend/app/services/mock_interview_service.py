@@ -32,12 +32,20 @@ class MockQuestionSetOutput(BaseModel):
     questions: list[str]
 
 
+class MockScoreDimensions(BaseModel):
+    relevance: float = Field(ge=0, le=1)
+    accuracy: float = Field(ge=0, le=1)
+    depth: float = Field(ge=0, le=1)
+    structure: float = Field(ge=0, le=1)
+    communication: float = Field(ge=0, le=1)
+
+
 class MockFeedbackOutput(BaseModel):
     score: float = Field(ge=0, le=1)
     feedback: str
     strengths: list[str] = Field(default_factory=list)
     improvements: list[str] = Field(default_factory=list)
-    dimensions: dict[str, float] = Field(default_factory=dict)
+    dimensions: MockScoreDimensions
     follow_up_question: str
 
 
@@ -47,7 +55,7 @@ class MockVoiceAnswerEvaluation(BaseModel):
     feedback: str
     strengths: list[str] = Field(default_factory=list)
     improvements: list[str] = Field(default_factory=list)
-    dimensions: dict[str, float] = Field(default_factory=dict)
+    dimensions: MockScoreDimensions
     competency: str = ""
 
 
@@ -319,7 +327,7 @@ def complete_voice_mock_interview(
         if evaluation:
             score = round(float(evaluation.score), 2)
             detail = {
-                "dimensions": _normalized_dimensions(evaluation.dimensions, score),
+                "dimensions": _normalized_dimensions(evaluation.dimensions.model_dump(), score),
                 "strengths": evaluation.strengths[:4],
                 "improvements": evaluation.improvements[:4],
                 "competency": evaluation.competency or interview.current_topic,
@@ -662,7 +670,8 @@ def _is_voice_command(content: str) -> bool:
         r"^(?:clarify|clarify that|clarify (?:the )?(?:current )?question(?: without giving (?:me )?the answer)?|explain the question|rephrase|rephrase that)$",
         r"^(?:speak slower|slow down)$",
         r"^(?:skip|skip this|skip (?:this|the current) question(?: and move to the next planned question)?|next|next question|move on)$",
-        r"^(?:stop|end|end interview|stop interview|finish|finish interview|i (?:want|would like) to (?:stop|end|finish)(?: the interview)?)$",
+        r"^(?:stop|end|end interview|stop interview|finish|finish interview|done|all done|that s all|i m done|i am done|i m finished|i am finished|i (?:want|would like) to (?:stop|end|finish)(?: the interview)?)$",
+        r"^(?:ok|okay|got it|i got it|understood|thank you|thanks)$",
     )
     return any(re.fullmatch(pattern, normalized) for pattern in patterns)
 
@@ -870,7 +879,7 @@ def _mock_feedback_with_ai(
             )
             data = response.output_parsed
             detail = {
-                "dimensions": _normalized_dimensions(data.dimensions, float(data.score)),
+                "dimensions": _normalized_dimensions(data.dimensions.model_dump(), float(data.score)),
                 "strengths": data.strengths[:4],
                 "improvements": data.improvements[:4],
                 "competency": (current_slot or {}).get("competency", interview.current_topic),

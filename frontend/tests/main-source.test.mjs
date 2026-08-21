@@ -35,6 +35,9 @@ test("mock interview is voice-only and uses the secure Realtime backend", () => 
   assert.match(modal, /Repeat/);
   assert.match(modal, /Clarify/);
   assert.match(modal, /End interview/);
+  assert.match(modal, /Retry feedback/);
+  assert.match(modal, /completionError/);
+  assert.match(modal, /Your transcript is saved on this screen/);
   assert.doesNotMatch(modal, /<textarea/);
   assert.doesNotMatch(modal, /speechSynthesis/);
 });

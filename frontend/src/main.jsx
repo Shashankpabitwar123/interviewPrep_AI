@@ -4343,6 +4343,7 @@ function MockInterviewModal({ session, apiFetch, onComplete, loading }) {
   }));
   const [connectionState, setConnectionState] = useState("connecting");
   const [error, setError] = useState("");
+  const [completionError, setCompletionError] = useState("");
   const [turns, setTurns] = useState([]);
   const [liveCaption, setLiveCaption] = useState("Preparing your interviewer…");
   const [activeQuestionNumber, setActiveQuestionNumber] = useState(1);
@@ -4412,6 +4413,7 @@ function MockInterviewModal({ session, apiFetch, onComplete, loading }) {
   useEffect(() => {
     let cancelled = false;
     setError("");
+    setCompletionError("");
     setConnectionState("connecting");
     createRealtimeInterviewConnection({
       apiFetch,
@@ -4456,14 +4458,16 @@ function MockInterviewModal({ session, apiFetch, onComplete, loading }) {
   }
 
   async function finishInterview() {
+    if (loading) return;
+    setCompletionError("");
     connectionRef.current?.close();
     connectionRef.current = null;
-    setConnectionState("thinking");
+    setConnectionState("submitting-feedback");
     try {
       await onComplete(turnsRef.current);
     } catch (completionError) {
-      setError(completionError.message || "The interview ended, but feedback could not be prepared yet. Try End interview again.");
-      setConnectionState("failed");
+      setCompletionError(completionError.message || "The interview ended, but feedback could not be prepared yet.");
+      setConnectionState("feedback-failed");
     }
   }
 
@@ -4476,7 +4480,10 @@ function MockInterviewModal({ session, apiFetch, onComplete, loading }) {
     thinking: "Preparing a follow-up",
     speaking: audioMuted ? "Interviewer audio muted" : "Interviewer speaking",
     failed: "Connection needs attention",
+    "submitting-feedback": "Preparing your feedback",
+    "feedback-failed": "Feedback needs attention",
   }[connectionState] || "Live interview";
+  const conversationUnavailable = ["failed", "submitting-feedback", "feedback-failed"].includes(connectionState);
 
   return (
     <div className="exam-modal-backdrop" role="dialog" aria-modal="true">
@@ -4516,6 +4523,12 @@ function MockInterviewModal({ session, apiFetch, onComplete, loading }) {
                 <button type="button" className="outline-action compact-action" onClick={() => setRetryKey((value) => value + 1)}><RotateCcw size={16} /> Retry connection</button>
               </div>
             )}
+            {completionError && (
+              <div className="voice-error" role="alert">
+                <span>{completionError} Your transcript is saved on this screen.</span>
+                <button type="button" className="outline-action compact-action" disabled={loading} onClick={finishInterview}><RotateCcw size={16} /> Retry feedback</button>
+              </div>
+            )}
           </section>
 
           <aside className="voice-transcript-panel">
@@ -4535,14 +4548,14 @@ function MockInterviewModal({ session, apiFetch, onComplete, loading }) {
 
         <footer className="exam-footer voice-interview-footer">
           <div>
-            <button type="button" className="outline-action compact-action" disabled={connectionState === "failed"} onClick={() => sendControl("Please repeat the current question.")}>Repeat</button>
-            <button type="button" className="outline-action compact-action" disabled={connectionState === "failed"} onClick={() => sendControl("Please clarify the current question without giving me the answer.")}>Clarify</button>
-            <button type="button" className="outline-action compact-action" disabled={connectionState === "failed"} onClick={() => sendControl("Please skip this question and move to the next planned question.")}>Skip</button>
+            <button type="button" className="outline-action compact-action" disabled={conversationUnavailable} onClick={() => sendControl("Please repeat the current question.")}>Repeat</button>
+            <button type="button" className="outline-action compact-action" disabled={conversationUnavailable} onClick={() => sendControl("Please clarify the current question without giving me the answer.")}>Clarify</button>
+            <button type="button" className="outline-action compact-action" disabled={conversationUnavailable} onClick={() => sendControl("Please skip this question and move to the next planned question.")}>Skip</button>
           </div>
           <div>
-            <button type="button" className={`voice-round-button ${micMuted ? "muted" : ""}`} onClick={toggleMic} title={micMuted ? "Turn microphone on" : "Mute microphone"}>{micMuted ? <MicOff size={19} /> : <Mic size={19} />}</button>
-            <button type="button" className={`voice-round-button ${audioMuted ? "muted" : ""}`} onClick={toggleAudio} title={audioMuted ? "Hear interviewer" : "Mute interviewer"}>{audioMuted ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
-            <button type="button" className="primary" disabled={loading} onClick={finishInterview}>{loading ? <Loader2 className="spin" size={16} /> : <X size={16} />} End interview</button>
+            <button type="button" className={`voice-round-button ${micMuted ? "muted" : ""}`} disabled={conversationUnavailable} onClick={toggleMic} title={micMuted ? "Turn microphone on" : "Mute microphone"}>{micMuted ? <MicOff size={19} /> : <Mic size={19} />}</button>
+            <button type="button" className={`voice-round-button ${audioMuted ? "muted" : ""}`} disabled={conversationUnavailable} onClick={toggleAudio} title={audioMuted ? "Hear interviewer" : "Mute interviewer"}>{audioMuted ? <VolumeX size={19} /> : <Volume2 size={19} />}</button>
+            <button type="button" className="primary" disabled={loading} onClick={finishInterview}>{loading ? <Loader2 className="spin" size={16} /> : <X size={16} />} {completionError ? "Retry feedback" : "End interview"}</button>
           </div>
         </footer>
       </div>
