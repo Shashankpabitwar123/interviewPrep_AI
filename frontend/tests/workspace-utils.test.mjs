@@ -2,13 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  GENERATED_NOTES_FOLDER,
   READINESS_FORMULA,
   activityBelongsToPlan,
+  buildGeneratedWorkspaceNote,
   combineReadinessReports,
   eventBelongsToPlan,
   filterArchived,
   isTaskCompleteForPlan,
+  isUsableStudyNoteCacheEntry,
   normalizeCalendarEvent,
+  normalizeNoteFolder,
+  normalizeStudyNoteContent,
+  normalizeWorkspaceNote,
   localTimeGreeting,
   prepDateForPlanDay,
   prepTimelineForPlan,
@@ -17,6 +23,7 @@ import {
   resolveActiveJob,
   scorePercent,
   taskCompletionKey,
+  upsertGeneratedWorkspaceNote,
 } from "../src/workspace-utils.js";
 
 test("active job selection prioritizes the explicit job over a stale plan", () => {
@@ -120,4 +127,50 @@ test("scheduled mocks survive reconciliation while backend sessions are restored
   assert.equal(reconciled[0].id, "scheduled");
   assert.equal(reconciled[1].id, "recovered-mock-11");
   assert.equal(reconciled[1].jobTitle, "Engineer");
+});
+
+const completeStudyNote = {
+  title: "SQL joins",
+  subtitle: "Applied interview preparation",
+  role: "Data Analyst",
+  topics: ["SQL"],
+  summary: "Understand how joins combine related datasets.",
+  sections: [{ title: "Core idea", body: "Choose a join from the relationship and required rows.", bullets: ["Validate row counts"] }],
+  deep_dive: [],
+  interview_questions: ["When would you use a left join?"],
+  related_topics: ["Data validation"],
+  resources: [],
+  checklist: ["Explain one tradeoff"],
+  source: "openai",
+};
+
+test("study-note cache is ready only when it contains complete renderable content", () => {
+  assert.equal(isUsableStudyNoteCacheEntry({ content: completeStudyNote }), true);
+  assert.equal(isUsableStudyNoteCacheEntry({ content: { title: "Incomplete" } }), false);
+  assert.equal(normalizeStudyNoteContent({ title: "Incomplete" }), null);
+});
+
+test("generated notes stay in the automatic day-scoped folder and upsert idempotently", () => {
+  const generated = buildGeneratedWorkspaceNote({
+    content: completeStudyNote,
+    task: { title: "Read notes: SQL joins" },
+    cacheKey: "12:3:44",
+    planId: 12,
+    noteDate: "2026-08-23",
+    createdAt: "first",
+  });
+  const first = upsertGeneratedWorkspaceNote([], generated);
+  const updated = upsertGeneratedWorkspaceNote(first, { ...generated, body: "Updated", createdAt: "second" });
+
+  assert.equal(generated.folder, GENERATED_NOTES_FOLDER);
+  assert.equal(generated.noteDate, "2026-08-23");
+  assert.equal(updated.length, 1);
+  assert.equal(updated[0].body, "Updated");
+  assert.equal(updated[0].createdAt, "first");
+});
+
+test("legacy generated notes migrate out of Study notes without creating an empty system folder", () => {
+  assert.equal(normalizeNoteFolder("Generated notes"), GENERATED_NOTES_FOLDER);
+  assert.equal(normalizeNoteFolder("Quick Notes"), "Study notes");
+  assert.equal(normalizeWorkspaceNote({ generated: true, folder: "Study notes" }).folder, GENERATED_NOTES_FOLDER);
 });

@@ -1,4 +1,5 @@
 export const READINESS_FORMULA = "25% plan + 15% learning + 25% role mastery + 20% exams + 10% mock interviews + 5% consistency";
+export const GENERATED_NOTES_FOLDER = "Generated notes";
 
 export function emptyReadinessReport() {
   return {
@@ -150,6 +151,122 @@ export function localTimeGreeting(value = new Date()) {
   if (hour >= 5 && hour < 12) return "Good morning";
   if (hour >= 12 && hour < 18) return "Good afternoon";
   return "Good evening";
+}
+
+export function normalizeNoteFolder(folder) {
+  const cleanName = String(folder || "").trim();
+  if (!cleanName || ["notes", "quick notes"].includes(cleanName.toLowerCase())) return "Study notes";
+  if (cleanName.toLowerCase() === GENERATED_NOTES_FOLDER.toLowerCase()) return GENERATED_NOTES_FOLDER;
+  return cleanName;
+}
+
+export function normalizeWorkspaceNote(note) {
+  if (!note || typeof note !== "object") return note;
+  return {
+    ...note,
+    folder: note.generated || note.generationKey ? GENERATED_NOTES_FOLDER : normalizeNoteFolder(note.folder),
+  };
+}
+
+function stringList(values) {
+  return Array.isArray(values) ? values.map((value) => String(value || "").trim()).filter(Boolean) : [];
+}
+
+function noteSections(values) {
+  if (!Array.isArray(values)) return [];
+  return values.map((section) => ({
+    title: String(section?.title || "").trim(),
+    body: String(section?.body || "").trim(),
+    bullets: stringList(section?.bullets),
+  })).filter((section) => section.title && section.body);
+}
+
+export function normalizeStudyNoteContent(content) {
+  if (!content || typeof content !== "object") return null;
+  const normalized = {
+    ...content,
+    title: String(content.title || "").trim(),
+    subtitle: String(content.subtitle || "").trim(),
+    role: String(content.role || "").trim(),
+    topics: stringList(content.topics),
+    summary: String(content.summary || "").trim(),
+    sections: noteSections(content.sections),
+    deep_dive: noteSections(content.deep_dive || content.deeper),
+    interview_questions: stringList(content.interview_questions),
+    related_topics: stringList(content.related_topics),
+    web_research: Array.isArray(content.web_research) ? content.web_research : [],
+    resources: Array.isArray(content.resources) ? content.resources : [],
+    checklist: stringList(content.checklist),
+    source: String(content.source || "openai").trim(),
+  };
+  if (!normalized.title || !normalized.summary || !normalized.sections.length) return null;
+  return normalized;
+}
+
+export function isUsableStudyNoteCacheEntry(entry) {
+  return Boolean(normalizeStudyNoteContent(entry?.content));
+}
+
+export function studyNoteFailureStatus(error) {
+  const message = String(error?.message || "").replace(/^Study notes returned \d+:\s*/i, "").trim();
+  if (/not configured|no ai provider/i.test(message)) {
+    return "AI study notes unavailable — OpenAI is not configured on this backend.";
+  }
+  return message ? `Study notes error — ${message}` : "AI study notes are unavailable. Please try again.";
+}
+
+export function buildGeneratedWorkspaceNote({ content, task, cacheKey, planId, noteDate, createdAt = new Date().toISOString() }) {
+  const normalized = normalizeStudyNoteContent(content);
+  if (!normalized) throw new Error("The AI returned an incomplete study note. Please generate it again.");
+  return {
+    id: `generated-${cacheKey}`,
+    generationKey: cacheKey,
+    title: normalized.title || String(task?.title || "Study note").replace(/^Read notes:\s*/i, ""),
+    body: studyNoteContentToText(normalized),
+    planId: String(planId || ""),
+    folder: GENERATED_NOTES_FOLDER,
+    noteDate,
+    generated: true,
+    color: "#ff5d42",
+    createdAt,
+  };
+}
+
+export function upsertGeneratedWorkspaceNote(notes, generatedNote) {
+  const existing = (notes || []).find((note) => note.generationKey === generatedNote.generationKey);
+  if (!existing) return [generatedNote, ...(notes || [])];
+  return (notes || []).map((note) => note.generationKey === generatedNote.generationKey
+    ? { ...note, ...generatedNote, createdAt: note.createdAt || generatedNote.createdAt }
+    : note);
+}
+
+export function studyNoteContentToText(content) {
+  const normalized = normalizeStudyNoteContent(content);
+  if (!normalized) return "";
+  const lines = [
+    normalized.subtitle,
+    normalized.summary,
+    "",
+    ...normalized.sections.flatMap((section) => [
+      section.title,
+      section.body,
+      ...section.bullets.map((bullet) => `- ${bullet}`),
+      "",
+    ]),
+    "In depth",
+    ...normalized.deep_dive.flatMap((section) => [
+      section.title,
+      section.body,
+      ...section.bullets.map((bullet) => `- ${bullet}`),
+      "",
+    ]),
+    "Interview questions",
+    ...normalized.interview_questions.map((question) => `- ${question}`),
+    "",
+    "Resources",
+    ...normalized.resources.map((resource) => `- ${resource?.title || "Resource"}: ${resource?.url || ""}`),
+  ];
+  return lines.filter((line) => line !== undefined && line !== null).join("\n");
 }
 
 function planMeta(plans, prepPlanId) {

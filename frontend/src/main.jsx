@@ -3,15 +3,21 @@ import { createRoot } from "react-dom/client";
 import { CircularProgressbar } from "react-circular-progressbar";
 import MarketingLanding from "./MarketingLanding.jsx";
 import {
+  GENERATED_NOTES_FOLDER,
   READINESS_FORMULA,
   activityBelongsToPlan,
+  buildGeneratedWorkspaceNote,
   combineReadinessReports,
   emptyReadinessReport,
   eventBelongsToPlan,
   filterArchived,
   isTaskCompleteForPlan,
+  isUsableStudyNoteCacheEntry,
   normalizeCalendarEvent,
+  normalizeNoteFolder,
   normalizeReadinessReport,
+  normalizeStudyNoteContent,
+  normalizeWorkspaceNote,
   localTimeGreeting,
   prepDateForPlanDay,
   prepTimelineForPlan,
@@ -19,7 +25,10 @@ import {
   reconcileMockAttempts,
   resolveActiveJob,
   scorePercent,
+  studyNoteFailureStatus,
+  studyNoteContentToText,
   taskCompletionKey,
+  upsertGeneratedWorkspaceNote,
 } from "./workspace-utils.js";
 import "@fontsource/public-sans/400.css";
 import "@fontsource/public-sans/500.css";
@@ -280,7 +289,7 @@ function App() {
   const [mockQuestionTypes, setMockQuestionTypes] = useState(["technical", "multiple_choice", "coding", "behavioral", "team_problem_solving"]);
   const [mockAnswer, setMockAnswer] = useState("");
   const [completedTasks, setCompletedTasks] = useState(() => loadCompletedTasks());
-  const [notes, setNotes] = useState(() => loadLocalList("interviewprep_notes"));
+  const [notes, setNotes] = useState(() => loadLocalList("interviewprep_notes").map(normalizeWorkspaceNote));
   const [generatedStudyNotes, setGeneratedStudyNotes] = useState(() => loadLocalMap("interviewprep_generated_study_notes"));
   const [noteReader, setNoteReader] = useState(null);
   const [noteFolders, setNoteFolders] = useState(() => loadLocalList("interviewprep_note_folders"));
@@ -562,7 +571,10 @@ function App() {
       const hydratedMockAttempts = Array.isArray(data.mockAttempts) ? data.mockAttempts : mockAttempts;
       if (Object.keys(data).length) {
         applyWorkspaceCollection(data, "completedTasks", setCompletedTasks, saveCompletedTasks);
-        applyWorkspaceCollection(data, "notes", setNotes, (value) => saveLocalList("interviewprep_notes", value));
+        if (Object.prototype.hasOwnProperty.call(data, "notes")) {
+          const normalizedNotes = (data.notes || []).map(normalizeWorkspaceNote);
+          applyWorkspaceCollection({ notes: normalizedNotes }, "notes", setNotes, (value) => saveLocalList("interviewprep_notes", value));
+        }
         if (Object.prototype.hasOwnProperty.call(data, "generatedStudyNotes")) {
           const normalizedGeneratedNotes = Object.fromEntries(Object.entries(data.generatedStudyNotes || {}).map(([key, value]) => [
             key,
@@ -1974,7 +1986,9 @@ function App() {
 
   function isStudyNoteGenerated(task) {
     if (["practice_exam", "mock_interview"].includes(task?.task_type)) return false;
-    return Boolean(generatedStudyNotes[studyNoteCacheKey(task)]?.content);
+    const cacheKey = studyNoteCacheKey(task);
+    return isUsableStudyNoteCacheEntry(generatedStudyNotes[cacheKey])
+      && notes.some((note) => note.generationKey === cacheKey);
   }
 
   function saveGeneratedNoteToWorkspace(content, task, cacheKey) {
@@ -1982,22 +1996,28 @@ function App() {
     const planId = String(plan.prep_plan_id || plan.id || plan.job_id || "");
     const day = Number(task.day || selectedPlanDay || 1);
     const noteDate = prepDateForDay(plan, selectedJob, day);
-    const nextNote = {
-      id: `generated-${cacheKey}`,
-      generationKey: cacheKey,
-      title: content.title || task.title.replace(/^Read notes:\s*/i, ""),
-      body: studyNoteContentToText(content),
-      planId,
-      folder: "Study notes",
-      noteDate,
-      generated: true,
-      color: "#ff5d42",
-      createdAt: new Date().toISOString(),
-    };
+    const normalized = normalizeStudyNoteContent(content);
+    if (!normalized) throw new Error("The AI returned an incomplete study note. Please generate it again.");
+    const nextNote = buildGeneratedWorkspaceNote({ content: normalized, task, cacheKey, planId, noteDate });
     setNotes((current) => {
-      if (current.some((note) => note.generationKey === cacheKey)) return current;
-      const next = [nextNote, ...current];
+      const next = upsertGeneratedWorkspaceNote(current, nextNote);
       saveLocalList("interviewprep_notes", next);
+      return next;
+    });
+    setNoteFolders((current) => {
+      const next = addNoteFolder(current, GENERATED_NOTES_FOLDER, planId, noteDate);
+      saveLocalList("interviewprep_note_folders", next);
+      return next;
+    });
+    return normalized;
+  }
+
+  function discardGeneratedStudyNote(cacheKey) {
+    setGeneratedStudyNotes((current) => {
+      if (!Object.prototype.hasOwnProperty.call(current, cacheKey)) return current;
+      const next = { ...current };
+      delete next[cacheKey];
+      saveLocalMap("interviewprep_generated_study_notes", next);
       return next;
     });
   }
@@ -2020,13 +2040,15 @@ function App() {
       return;
     }
     const cachedNote = generatedStudyNotes[cacheKey];
-    if (cachedNote?.content) {
-      saveGeneratedNoteToWorkspace(cachedNote.content, task, cacheKey);
-      setNoteReader({ task, content: cachedNote.content });
-      setStatus(cachedNote.content.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
-      addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: cachedNote.content.source || "saved", target: "prep" });
+    const cachedContent = normalizeStudyNoteContent(cachedNote?.content);
+    if (cachedContent) {
+      const readyContent = saveGeneratedNoteToWorkspace(cachedContent, task, cacheKey);
+      setNoteReader({ task, content: readyContent });
+      setStatus(readyContent.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
+      addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: readyContent.source || "saved", target: "prep" });
       return;
     }
+    if (cachedNote) discardGeneratedStudyNote(cacheKey);
     setLoadingStudyTaskId((current) => addLoadingId(current, taskKey));
     setLoading(true);
     setStatus("Generating Study Notes");
@@ -2050,47 +2072,51 @@ function App() {
       }
       if (!content && allowLocalFallback) content = generateStudyNote(plan, task);
       if (!content) throw new Error("AI study-note generation is unavailable.");
+      const readyContent = saveGeneratedNoteToWorkspace(content, task, cacheKey);
       setGeneratedStudyNotes((current) => {
         const next = {
           ...current,
           [cacheKey]: {
-            content,
+            content: readyContent,
             taskTitle: task.title,
             planId: String(plan?.prep_plan_id || plan?.id || ""),
             jobPostId: plan?.job_post_id,
+            status: "ready",
             updatedAt: new Date().toISOString(),
           },
         };
         saveLocalMap("interviewprep_generated_study_notes", next);
         return next;
       });
-      saveGeneratedNoteToWorkspace(content, task, cacheKey);
-      setNoteReader({ task, content });
+      setNoteReader({ task, content: readyContent });
       playGeneratedSound(soundVolume);
-      setStatus(content.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
-      addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: content.source || "", target: "prep" });
+      setStatus(readyContent.source === "heuristic" ? "Study Notes Ready" : "AI Study Notes Ready");
+      addActivity({ type: "note", title: "Study note opened", detail: task.title, badge: readyContent.source || "", target: "prep" });
     } catch (error) {
       if (!allowLocalFallback) {
-        setStatus("AI Study Notes Unavailable");
+        setStatus(studyNoteFailureStatus(error));
         return;
       }
       const fallbackContent = generateStudyNote(plan, task);
+      const readyContent = saveGeneratedNoteToWorkspace(fallbackContent, task, cacheKey);
       setGeneratedStudyNotes((current) => {
         const next = {
           ...current,
           [cacheKey]: {
-            content: fallbackContent,
+            content: readyContent,
             taskTitle: task.title,
+            planId: String(plan?.prep_plan_id || plan?.id || ""),
+            jobPostId: plan?.job_post_id,
+            status: "ready",
             updatedAt: new Date().toISOString(),
           },
         };
         saveLocalMap("interviewprep_generated_study_notes", next);
         return next;
       });
-      saveGeneratedNoteToWorkspace(fallbackContent, task, cacheKey);
       setNoteReader({
         task,
-        content: fallbackContent,
+        content: readyContent,
       });
       playGeneratedSound(soundVolume);
       setStatus("Study Notes Ready");
@@ -2233,9 +2259,19 @@ function App() {
   }
 
   function removeNote(noteId) {
+    const removedNote = notes.find((note) => note.id === noteId);
     const nextNotes = notes.filter((note) => note.id !== noteId);
+    const nextFolders = normalizeNoteFolder(removedNote?.folder) === GENERATED_NOTES_FOLDER
+      && !nextNotes.some((note) => note.folder === GENERATED_NOTES_FOLDER
+        && String(note.planId || "") === String(removedNote.planId || "")
+        && String(note.noteDate || "") === String(removedNote.noteDate || ""))
+      ? noteFolders.filter((folder) => !matchesNoteFolder(folder, GENERATED_NOTES_FOLDER, removedNote.planId, removedNote.noteDate))
+      : noteFolders;
     setNotes(nextNotes);
+    setNoteFolders(nextFolders);
     saveLocalList("interviewprep_notes", nextNotes);
+    saveLocalList("interviewprep_note_folders", nextFolders);
+    if (removedNote?.generationKey) discardGeneratedStudyNote(removedNote.generationKey);
   }
 
   function createBlankNote({ title, folder = "", planId = "", noteDate = "" }) {
@@ -2326,22 +2362,31 @@ function App() {
 
   function createNoteFolder(folderName, scope = {}) {
     const folder = normalizeNoteFolder(folderName);
-    if (!folder) return;
+    if (!folder) return false;
+    if (folder === GENERATED_NOTES_FOLDER) {
+      setStatus("Generated notes appears automatically after AI creates a note");
+      return false;
+    }
     if (hasNoteFolder(noteFolders, folder, scope.planId, scope.noteDate)) {
       setStatus("Folder Already Exists");
-      return;
+      return false;
     }
     const nextFolders = addNoteFolder(noteFolders, folder, scope.planId, scope.noteDate);
     setNoteFolders(nextFolders);
     saveLocalList("interviewprep_note_folders", nextFolders);
     addActivity({ type: "note", title: "Folder created", detail: folder, badge: "folder", target: "notes" });
     setStatus("Folder Created");
+    return true;
   }
 
   function renameNoteFolder(folderName, nextFolderName, scope = {}) {
     const currentFolder = normalizeNoteFolder(folderName).trim();
     const renamedFolder = normalizeNoteFolder(nextFolderName).trim();
     if (!currentFolder || !renamedFolder || renamedFolder === currentFolder) return false;
+    if ([currentFolder, renamedFolder].includes(GENERATED_NOTES_FOLDER)) {
+      setStatus("Generated notes is managed automatically");
+      return false;
+    }
     if (hasNoteFolder(noteFolders, renamedFolder, scope.planId, scope.noteDate)) {
       setStatus("Folder Already Exists");
       return false;
@@ -2369,12 +2414,21 @@ function App() {
       && String(note.planId || "") === String(scope.planId || "")
       && String(note.noteDate || dateKey(new Date())) === String(scope.noteDate || dateKey(new Date()));
     const deletedCount = notes.filter(matchesScope).length;
+    const deletedGenerationKeys = notes.filter(matchesScope).map((note) => note.generationKey).filter(Boolean);
     const nextNotes = notes.filter((note) => !matchesScope(note));
     const nextFolders = noteFolders.filter((folder) => !matchesNoteFolder(folder, normalizedFolder, scope.planId, scope.noteDate));
     setNotes(nextNotes);
     setNoteFolders(nextFolders);
     saveLocalList("interviewprep_notes", nextNotes);
     saveLocalList("interviewprep_note_folders", nextFolders);
+    if (deletedGenerationKeys.length) {
+      setGeneratedStudyNotes((current) => {
+        const next = { ...current };
+        deletedGenerationKeys.forEach((key) => delete next[key]);
+        saveLocalMap("interviewprep_generated_study_notes", next);
+        return next;
+      });
+    }
     addActivity({ type: "note", title: "Folder removed", detail: `${normalizedFolder}; ${deletedCount} note${deletedCount === 1 ? "" : "s"} deleted`, badge: "folder", target: "notes" });
     setStatus("Folder Removed");
   }
@@ -6178,10 +6232,8 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   const grouped = groupNotesByFolder(visibleNotes);
   const scopedFolders = noteFolders
     .filter((folder) => matchesNoteFolder(folder, noteFolderName(folder), activePlanId, selectedDate))
-    .map((folder) => {
-      const rawName = String(noteFolderName(folder) || "").trim();
-      return ["Notes", "Quick Notes", "Generated notes"].includes(rawName) ? "" : normalizeNoteFolder(rawName);
-    })
+    .map((folder) => normalizeNoteFolder(noteFolderName(folder)))
+    .filter((folder) => folder !== GENERATED_NOTES_FOLDER || Boolean(grouped[GENERATED_NOTES_FOLDER]?.length))
     .filter(Boolean);
   const folderNames = [...new Set([...scopedFolders, ...Object.keys(grouped)])]
     .filter(Boolean);
@@ -6245,7 +6297,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
     event.preventDefault();
     if (!folderName.trim()) return;
     const nextFolder = normalizeNoteFolder(folderName);
-    createNoteFolder(nextFolder, { planId: activePlanId, noteDate: selectedDate });
+    if (!createNoteFolder(nextFolder, { planId: activePlanId, noteDate: selectedDate })) return;
     setSelectedFolder(nextFolder);
     setCollapsedFolders((current) => ({ ...current, [nextFolder]: false }));
     setFolderName("");
@@ -6271,6 +6323,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   function startNoteCreate(folder) {
     if (!String(folder || "").trim()) return;
     const targetFolder = normalizeNoteFolder(folder);
+    if (targetFolder === GENERATED_NOTES_FOLDER) return;
     setSelectedFolder(targetFolder);
     setCollapsedFolders((current) => ({ ...current, [targetFolder]: false }));
     setNoteDraftFolder(targetFolder);
@@ -6285,6 +6338,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   }
 
   function startFolderRename(folder) {
+    if (folder === GENERATED_NOTES_FOLDER) return;
     setSelectedFolder(folder);
     setRenamingFolder(folder);
     setFolderRenameValue(folder);
@@ -6327,7 +6381,8 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
   }
 
   function moveNoteToFolder(noteId, folder) {
-    if (!noteId || !folder) return;
+    if (!noteId || !folder || folder === GENERATED_NOTES_FOLDER) return;
+    if (notes.find((note) => note.id === noteId)?.generated) return;
     updateNote(noteId, { folder, noteDate: selectedDate });
     setSelectedFolder(folder);
     setCollapsedFolders((current) => ({ ...current, [folder]: false }));
@@ -6346,7 +6401,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
     }
 
     return (
-      <div key={note.id} className={`notes-file-item ${note.id === openNoteId ? "selected" : ""}`} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }}>
+      <div key={note.id} className={`notes-file-item ${note.id === openNoteId ? "selected" : ""}`} draggable={!note.generated} onDragStart={(event) => { if (note.generated) return; event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => { setDraggedNoteId(""); setDropFolder(""); }}>
         <button type="button" onClick={() => openNoteEditor(note)} onDoubleClick={() => startNoteRename(note)} className="notes-file-row" title="Double-click to rename">
           <FileText size={15} style={{ color: note.color || "var(--approved-coral)" }} /><span><strong>{note.title}</strong></span>
         </button>
@@ -6444,7 +6499,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
             </div>
             <div className="notes-rail-actions">
               <button type="button" onClick={() => { setFolderDraftOpen((current) => !current); setNoteDraftFolder(""); }} title="Create folder" aria-label="Create folder"><FolderPlus size={17} /></button>
-              <button type="button" disabled={!selectedFolder} onClick={() => startNoteCreate(selectedFolder)} title={selectedFolder ? `Add a file to ${selectedFolder}` : "Select a folder first"} aria-label={selectedFolder ? `Add a file to ${selectedFolder}` : "Select a folder first"}><FilePlus2 size={17} /></button>
+              <button type="button" disabled={!selectedFolder || selectedFolder === GENERATED_NOTES_FOLDER} onClick={() => startNoteCreate(selectedFolder)} title={selectedFolder === GENERATED_NOTES_FOLDER ? "Generated notes are added from the preparation plan" : selectedFolder ? `Add a file to ${selectedFolder}` : "Select a folder first"} aria-label={selectedFolder === GENERATED_NOTES_FOLDER ? "Generated notes are added from the preparation plan" : selectedFolder ? `Add a file to ${selectedFolder}` : "Select a folder first"}><FilePlus2 size={17} /></button>
             </div>
           </header>
           {folderDraftOpen && (
@@ -6457,18 +6512,19 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
           <div className="notes-date-folder-list">
             {folderNames.length ? folderNames.map((folder) => {
               const folderNotes = grouped[folder] || [];
-              const isCollapsed = collapsedFolders[folder] ?? true;
+              const generatedFolder = folder === GENERATED_NOTES_FOLDER;
+              const isCollapsed = collapsedFolders[folder] ?? !generatedFolder;
               const isDropTarget = dropFolder === folder;
               return (
-                <section key={folder} className={`notes-date-folder ${isDropTarget ? "drop-target" : ""}`} onDragOver={(event) => { event.preventDefault(); setDropFolder(folder); }} onDragLeave={() => setDropFolder("")} onDrop={(event) => { event.preventDefault(); moveNoteToFolder(event.dataTransfer.getData("text/plain") || draggedNoteId, folder); }}>
+                <section key={folder} className={`notes-date-folder ${isDropTarget ? "drop-target" : ""}`} onDragOver={(event) => { if (generatedFolder) return; event.preventDefault(); setDropFolder(folder); }} onDragLeave={() => setDropFolder("")} onDrop={(event) => { if (generatedFolder) return; event.preventDefault(); moveNoteToFolder(event.dataTransfer.getData("text/plain") || draggedNoteId, folder); }}>
                   <div className="notes-folder-label">
                     {renamingFolder === folder ? (
                       <label className="notes-folder-rename"><Folder size={16} /><input autoFocus value={folderRenameValue} aria-label="Rename folder" onChange={(event) => setFolderRenameValue(event.target.value)} onBlur={() => finishFolderRename(folder)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setRenamingFolder(""); setFolderRenameValue(""); } }} /></label>
                     ) : (
-                      <button type="button" aria-expanded={!isCollapsed} className={`notes-folder-select-button ${selectedFolder === folder ? "selected" : ""}`} onClick={() => toggleFolder(folder)} onDoubleClick={() => startFolderRename(folder)} title="Click to expand or collapse. Double-click to rename."><ChevronRight className={isCollapsed ? "" : "expanded"} size={15} /><Folder size={16} />{folder}<small>{folderNotes.length}</small></button>
+                      <button type="button" aria-expanded={!isCollapsed} className={`notes-folder-select-button ${selectedFolder === folder ? "selected" : ""}`} onClick={() => toggleFolder(folder)} onDoubleClick={() => startFolderRename(folder)} title={generatedFolder ? "AI-generated notes for this preparation day" : "Click to expand or collapse. Double-click to rename."}><ChevronRight className={isCollapsed ? "" : "expanded"} size={15} /><Folder size={16} />{folder}<small>{folderNotes.length}</small></button>
                     )}
                     <div className="notes-folder-actions">
-                      <button type="button" onClick={() => startNoteCreate(folder)} aria-label={`Add a file to ${folder}`} title={`Add a file to ${folder}`}><FilePlus2 size={13} /></button>
+                      {!generatedFolder && <button type="button" onClick={() => startNoteCreate(folder)} aria-label={`Add a file to ${folder}`} title={`Add a file to ${folder}`}><FilePlus2 size={13} /></button>}
                       <button type="button" onClick={() => confirmDeleteFolder(folder, folderNotes)} aria-label={`Delete ${folder}`} title={`Delete ${folder}`}><Trash2 size={13} /></button>
                     </div>
                   </div>
@@ -6529,7 +6585,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
               <NotebookText size={42} />
               <h2>{visibleNotes.length ? "Choose a note to continue" : "This day is ready for your notes"}</h2>
               <p>{visibleNotes.length ? "Open a note on the left, expand a folder, or add a named note for this preparation day." : folderNames.length ? "Select a folder and create a note inside it." : "Create a folder first, then add notes inside it."}</p>
-              <button type="button" className="guided-primary-button" onClick={() => { if (selectedFolder) startNoteCreate(selectedFolder); else setFolderDraftOpen(true); }}>{selectedFolder ? <><FilePlus2 size={17} />Create a note</> : <><FolderPlus size={17} />Create a folder</>}</button>
+              <button type="button" className="guided-primary-button" onClick={() => { if (selectedFolder && selectedFolder !== GENERATED_NOTES_FOLDER) startNoteCreate(selectedFolder); else setFolderDraftOpen(true); }}>{selectedFolder && selectedFolder !== GENERATED_NOTES_FOLDER ? <><FilePlus2 size={17} />Create a note</> : <><FolderPlus size={17} />Create a folder</>}</button>
             </section>
           )}
         </article>
@@ -8830,33 +8886,6 @@ function generateStudyNote(plan, task) {
   };
 }
 
-function studyNoteContentToText(content) {
-  const lines = [
-    content.subtitle,
-    content.summary,
-    "",
-    ...(content.sections || []).flatMap((section) => [
-      section.title,
-      section.body,
-      ...(section.bullets || []).map((bullet) => `- ${bullet}`),
-      "",
-    ]),
-    "In depth",
-    ...(content.deep_dive || []).flatMap((section) => [
-      section.title,
-      section.body,
-      ...(section.bullets || []).map((bullet) => `- ${bullet}`),
-      "",
-    ]),
-    "Interview questions",
-    ...(content.interview_questions || []).map((question) => `- ${question}`),
-    "",
-    "Resources",
-    ...(content.resources || []).map((resource) => `- ${resource.title}: ${resource.url}`),
-  ];
-  return lines.filter((line) => line !== undefined && line !== null).join("\n");
-}
-
 function answerStudyQuestion(content, question) {
   const topics = content.topics.join(", ");
   const lowerQuestion = question.toLowerCase();
@@ -9477,12 +9506,6 @@ function groupNotesByFolder(notes) {
     const folder = normalizeNoteFolder(note.folder);
     return { ...groups, [folder]: [...(groups[folder] || []), note] };
   }, {});
-}
-
-function normalizeNoteFolder(folder) {
-  const cleanName = String(folder || "").trim();
-  if (!cleanName || ["Notes", "Quick Notes", "Generated notes"].includes(cleanName)) return "Study notes";
-  return cleanName;
 }
 
 function noteFolderName(folder) {

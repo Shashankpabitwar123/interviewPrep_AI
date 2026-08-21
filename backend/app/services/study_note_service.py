@@ -86,6 +86,8 @@ def generate_study_note(
             logger.warning("Gemini study note generation failed: %s", exc)
 
     if note is None:
+        if not settings or not settings.ai_enabled:
+            require_ai_result("AI study notes are unavailable because no AI provider is configured on this backend.")
         require_ai_result("AI study-note generation failed. Enable local fallback in settings to create an offline note.")
         note = _fallback_note(plan, request, research, source="heuristic")
     return _quality_checked_note(plan, request, note, research, settings)

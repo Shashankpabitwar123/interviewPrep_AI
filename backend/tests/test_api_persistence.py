@@ -748,6 +748,34 @@ def test_openai_study_note_schema_excludes_server_only_metadata() -> None:
     assert "web_research" not in schema["properties"]
 
 
+def test_study_note_generation_explains_when_local_ai_is_not_configured() -> None:
+    client = _client_with_memory_db()
+    plan = client.post(
+        "/prep-plans",
+        json={
+            "job_title": "Data Analyst",
+            "job_description": "Analyze datasets with SQL, Python, statistics, dashboards, and stakeholder communication.",
+            "interview_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "hours_per_day": 2,
+        },
+    ).json()
+    client.headers.update({"X-Allow-Local-Fallback": "false"})
+
+    response = client.post(
+        "/study-notes/generate",
+        json={
+            "prep_plan_id": plan["prep_plan_id"],
+            "day": 1,
+            "title": "SQL foundations",
+            "topics": ["SQL"],
+            "difficulty": "easy",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "no AI provider is configured" in response.json()["detail"]
+
+
 def test_study_note_generation_rejects_another_users_plan() -> None:
     client = _client_with_memory_db()
     first = _register(client, {"name": "First User", "email": "note-first@example.com", "password": "Password1!"}).json()["access_token"]
