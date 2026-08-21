@@ -7,6 +7,7 @@ import {
   activityBelongsToPlan,
   buildGeneratedWorkspaceNote,
   combineReadinessReports,
+  expectedExamReviewAnswer,
   eventBelongsToPlan,
   filterArchived,
   isTaskCompleteForPlan,
@@ -21,6 +22,8 @@ import {
   reconcileExamAttempts,
   reconcileMockAttempts,
   resolveActiveJob,
+  resolveExamReviewResult,
+  resolveJobForPlan,
   scorePercent,
   taskCompletionKey,
   upsertGeneratedWorkspaceNote,
@@ -29,6 +32,38 @@ import {
 test("active job selection prioritizes the explicit job over a stale plan", () => {
   const jobs = [{ id: 1 }, { id: 2 }];
   assert.equal(resolveActiveJob(jobs, 2, { job_post_id: 1 }).id, 2);
+});
+
+test("generated notes resolve the job that owns their prep plan", () => {
+  const jobs = [
+    { id: 1, title: "Selected elsewhere" },
+    { id: 2, title: "Plan owner", interview_at: "2026-08-30T17:00:00Z" },
+  ];
+  assert.equal(resolveJobForPlan(jobs, { job_post_id: 2 }, 1).id, 2);
+  assert.equal(resolveJobForPlan(jobs, { job_post_id: 99 }, 1).id, 1);
+});
+
+test("exam review reads the stored submission result and its answer key", () => {
+  const storedResult = { average_score: 0.75, review_exam: { id: 5 } };
+  assert.equal(resolveExamReviewResult({ review: storedResult }), storedResult);
+  assert.equal(resolveExamReviewResult({ result: storedResult }), storedResult);
+  assert.deepEqual(expectedExamReviewAnswer({ expected_answer: "Run git init in the target directory." }), {
+    label: "Expected answer",
+    text: "Run git init in the target directory.",
+  });
+});
+
+test("multiple-select exam reviews show every correct option", () => {
+  assert.deepEqual(expectedExamReviewAnswer({
+    options: [
+      { label: "A", text: "Encapsulation", is_correct: true },
+      { label: "B", text: "Inheritance", is_correct: true },
+      { label: "C", text: "Global mutable state", is_correct: false },
+    ],
+  }), {
+    label: "Correct answers",
+    text: "A. Encapsulation; B. Inheritance",
+  });
 });
 
 test("archived records are filtered with string-safe identifiers", () => {

@@ -33,6 +33,12 @@ export function resolveActiveJob(jobs, activeJobId, activePlan) {
     || null;
 }
 
+export function resolveJobForPlan(jobs, plan, activeJobId) {
+  const planJobId = plan?.job_post_id ?? plan?.job_id;
+  return (jobs || []).find((job) => idsMatch(job.id, planJobId))
+    || resolveActiveJob(jobs, activeJobId, plan);
+}
+
 export function planTaskIdentity(plan, task) {
   const planId = plan?.prep_plan_id || plan?.id || plan?.job_post_id || "unscoped";
   const taskId = task?.serverTaskId || task?.id || task?.title || "task";
@@ -205,6 +211,25 @@ export function normalizeStudyNoteContent(content) {
 
 export function isUsableStudyNoteCacheEntry(entry) {
   return Boolean(normalizeStudyNoteContent(entry?.content));
+}
+
+export function resolveExamReviewResult(attempt) {
+  return attempt?.result || attempt?.review || null;
+}
+
+export function expectedExamReviewAnswer(question) {
+  const correctOptions = (question?.options || []).filter((option) => option?.is_correct);
+  if (correctOptions.length) {
+    return {
+      label: correctOptions.length > 1 ? "Correct answers" : "Correct answer",
+      text: correctOptions.map((option) => `${option.label}. ${option.text}`).join("; "),
+    };
+  }
+  const expectedAnswer = String(question?.expected_answer || "").trim();
+  return {
+    label: "Expected answer",
+    text: expectedAnswer || "The answer key is unavailable for this older attempt.",
+  };
 }
 
 export function studyNoteFailureStatus(error) {

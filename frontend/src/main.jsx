@@ -9,6 +9,7 @@ import {
   buildGeneratedWorkspaceNote,
   combineReadinessReports,
   emptyReadinessReport,
+  expectedExamReviewAnswer,
   eventBelongsToPlan,
   filterArchived,
   isTaskCompleteForPlan,
@@ -24,6 +25,8 @@ import {
   reconcileExamAttempts,
   reconcileMockAttempts,
   resolveActiveJob,
+  resolveExamReviewResult,
+  resolveJobForPlan,
   scorePercent,
   studyNoteFailureStatus,
   studyNoteContentToText,
@@ -1995,7 +1998,8 @@ function App() {
     if (!content || !plan) return;
     const planId = String(plan.prep_plan_id || plan.id || plan.job_id || "");
     const day = Number(task.day || selectedPlanDay || 1);
-    const noteDate = prepDateForDay(plan, selectedJob, day);
+    const noteJob = resolveJobForPlan(jobs, plan, selectedJobId);
+    const noteDate = prepDateForDay(plan, noteJob, day);
     const normalized = normalizeStudyNoteContent(content);
     if (!normalized) throw new Error("The AI returned an incomplete study note. Please generate it again.");
     const nextNote = buildGeneratedWorkspaceNote({ content: normalized, task, cacheKey, planId, noteDate });
@@ -2229,6 +2233,7 @@ function App() {
       content = await generatedResponse.json();
       if (!content && allowLocalFallback) content = generateStudyNote(planDetail, noteTask);
       if (!content) throw new Error("AI note generation is unavailable.");
+      const noteJob = resolveJobForPlan(jobs, planDetail, selectedJobId);
       const finalFolder = normalizeNoteFolder(folder) || "Study notes";
       const generatedNote = {
         id: crypto.randomUUID(),
@@ -2237,7 +2242,7 @@ function App() {
         planId,
         folder: finalFolder,
         subfolder: subfolder?.trim() || "",
-        noteDate: noteDate || prepDateForDay(planDetail, selectedJob, noteTask.day || 1),
+        noteDate: noteDate || prepDateForDay(planDetail, noteJob, noteTask.day || 1),
         generated: true,
         createdAt: new Date().toISOString(),
       };
@@ -4206,7 +4211,8 @@ function ExamSessionModal({ exam, session, answers, setAnswers, onMove, onJump, 
 }
 
 function ExamReviewModal({ review, apiFetch, onClose }) {
-  const { exam, result, answers } = review;
+  const { exam, answers } = review;
+  const result = resolveExamReviewResult(review);
   const reviewExam = result?.review_exam || exam;
   const resultByQuestion = Object.fromEntries((result?.results || []).map((item) => [item.question_id, item]));
   return (
@@ -4230,7 +4236,7 @@ function ExamReviewModal({ review, apiFetch, onClose }) {
           />
           {reviewExam.questions.map((question, index) => {
             const questionResult = resultByQuestion[question.id];
-            const correctOption = question.options?.find((option) => option.is_correct);
+            const answerKey = expectedExamReviewAnswer(question);
             const userAnswer = answers?.[question.id] || "Not answered";
             return (
               <article className="review-card" key={question.id}>
@@ -4245,8 +4251,8 @@ function ExamReviewModal({ review, apiFetch, onClose }) {
                     <p>{userAnswer}</p>
                   </div>
                   <div>
-                    <strong>{correctOption ? "Correct answer" : "Expected answer"}</strong>
-                    <p>{correctOption ? `${correctOption.label}. ${correctOption.text}` : question.expected_answer || "Use a clear, specific answer with examples, tradeoffs, and edge cases."}</p>
+                    <strong>{answerKey.label}</strong>
+                    <p>{answerKey.text}</p>
                   </div>
                 </div>
                 {questionResult?.feedback && (
@@ -6187,7 +6193,7 @@ function NotesView({ plan, selectedJob, savedPlans, notes, noteFolders, noteDraf
     return matchingPlan || plan || detailedPlans[0] || null;
   }, [detailedPlans, plan, selectedJob?.id, selectedJob?.job_post_id]);
   const activePlanId = String(activePlan?.prep_plan_id || activePlan?.id || activePlan?.job_id || "");
-  const preparationDays = useMemo(() => buildGuidedPreparationDays(groupTasksByDay(activePlan?.tasks || []), selectedJob, activePlan), [activePlan, selectedJob]);
+  const preparationDays = useMemo(() => buildGuidedPreparationDays(selectedJob, activePlan), [activePlan, selectedJob]);
   const todayDay = preparationDays.find((day) => day.isToday) || preparationDays[0];
   const [selectedDate, setSelectedDate] = useState("");
   const [openNoteId, setOpenNoteId] = useState("");
