@@ -3433,6 +3433,11 @@ function GuidedTopNavigation({ activeView, generationInProgress, onNavigate, use
     ["exams", "Practice", MessageSquareText, ["exams"]],
   ];
 
+  const runProfileAction = (action) => {
+    setProfileOpen(false);
+    action();
+  };
+
   return (
     <header className="guided-top-navigation">
       <button className="guided-brand-lockup" onClick={() => onNavigate("dashboard")} aria-label="PrepInterview AI home">
@@ -3458,16 +3463,19 @@ function GuidedTopNavigation({ activeView, generationInProgress, onNavigate, use
             <ChevronDown size={15} />
           </button>
           {profileOpen && (
-            <div className="guided-profile-menu">
-              <div className="guided-profile-status"><StatusIndicator status={status} /><span>{user?.email}</span></div>
-              <button onClick={() => onNavigate("progress")}><Target size={18} />Readiness</button>
-              <button onClick={() => onNavigate("calendar")}><CalendarDays size={18} />Schedule</button>
-              <button data-settings-toggle="true" data-tour="settings-button" onClick={onOpenSettings}><Settings size={18} />Settings</button>
-              <button onClick={() => onNavigate("about")}><Info size={18} />About PrepInterview AI</button>
-              {isAdmin && <button onClick={() => onNavigate("developer")}><ShieldCheck size={18} />Admin tools <small>Admin</small></button>}
-              <div className="guided-menu-separator" />
-              <button onClick={onLogout}><LogOut size={18} />Log out</button>
-            </div>
+            <>
+              <button type="button" className="guided-profile-menu-backdrop" aria-label="Close account menu" onClick={() => setProfileOpen(false)} />
+              <div className="guided-profile-menu" role="menu" aria-label="Account menu">
+                <div className="guided-profile-status"><StatusIndicator status={status} /><span>{user?.email}</span></div>
+                <button role="menuitem" onClick={() => runProfileAction(() => onNavigate("progress"))}><Target size={18} />Readiness</button>
+                <button role="menuitem" onClick={() => runProfileAction(() => onNavigate("calendar"))}><CalendarDays size={18} />Schedule</button>
+                <button role="menuitem" data-settings-toggle="true" data-tour="settings-button" onClick={() => runProfileAction(onOpenSettings)}><Settings size={18} />Settings</button>
+                <button role="menuitem" onClick={() => runProfileAction(() => onNavigate("about"))}><Info size={18} />About PrepInterview AI</button>
+                {isAdmin && <button role="menuitem" onClick={() => runProfileAction(() => onNavigate("developer"))}><ShieldCheck size={18} />Admin tools <small>Admin</small></button>}
+                <div className="guided-menu-separator" />
+                <button role="menuitem" onClick={() => runProfileAction(onLogout)}><LogOut size={18} />Log out</button>
+              </div>
+            </>
           )}
         </div>
       </div>

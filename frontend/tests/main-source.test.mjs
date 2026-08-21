@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const mainSource = readFileSync(new URL("../src/main.jsx", import.meta.url), "utf8");
+const approvedGuidedCss = readFileSync(new URL("../src/approved-guided.css", import.meta.url), "utf8");
 const appSource = mainSource.slice(mainSource.indexOf("function App()"), mainSource.indexOf("function GuidedTopNavigation"));
 
 test("study-note save paths never use an undeclared selectedJob variable", () => {
@@ -40,4 +41,17 @@ test("mock interview is voice-only and uses the secure Realtime backend", () => 
   assert.match(modal, /Your transcript is saved on this screen/);
   assert.doesNotMatch(modal, /<textarea/);
   assert.doesNotMatch(modal, /speechSynthesis/);
+});
+
+test("mobile workspaces contain menus, rails, forms, and long content", () => {
+  const navigation = mainSource.slice(mainSource.indexOf("function GuidedTopNavigation"), mainSource.indexOf("function GuidedJobContextBar"));
+  assert.match(navigation, /guided-profile-menu-backdrop/);
+  assert.match(navigation, /role="menu"/);
+  assert.match(navigation, /runProfileAction/);
+  assert.match(approvedGuidedCss, /Mobile workspace containment/);
+  assert.match(approvedGuidedCss, /@media \(max-width: 820px\)/);
+  assert.match(approvedGuidedCss, /\.guided-plan-date-rail\s*\{[^}]*overflow-x:\s*auto/s);
+  assert.match(approvedGuidedCss, /\.notes-date-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+  assert.match(approvedGuidedCss, /\.guided-job-modal\s*\{[^}]*max-height:\s*calc\(100dvh/s);
+  assert.match(approvedGuidedCss, /\.guided-settings-anchor \.settings-popover[^}]*position:\s*fixed/s);
 });

@@ -8465,3 +8465,688 @@
     justify-content: flex-start;
   }
 }
+
+/* Mobile workspace containment
+   Keep page scrolling vertical while rails, menus, and long content manage their
+   own width. The broader 820px cutoff also covers compact in-app browsers that
+   report a wider CSS viewport than the physical phone screen. */
+.guided-profile-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+@media (max-width: 820px), (hover: none) and (pointer: coarse) and (max-width: 1024px) {
+  html {
+    max-width: 100%;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body,
+  #root,
+  .guided-shell {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .guided-shell {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .guided-top-navigation {
+    position: sticky;
+    top: 0;
+    z-index: 220;
+    min-height: 64px;
+    padding: 0 12px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    backdrop-filter: none;
+  }
+
+  .guided-brand-lockup span,
+  .guided-current-date,
+  .guided-profile-trigger strong,
+  .guided-profile-trigger > svg {
+    display: none;
+  }
+
+  .guided-brand-lockup,
+  .guided-top-tools,
+  .guided-profile-wrap {
+    min-width: 0;
+  }
+
+  .guided-brand-lockup img {
+    width: 40px;
+    height: 40px;
+  }
+
+  .guided-profile-trigger {
+    min-width: 46px;
+    min-height: 46px;
+    padding: 5px;
+    justify-content: center;
+  }
+
+  .guided-profile-trigger > span {
+    width: 36px;
+    height: 36px;
+  }
+
+  .guided-primary-navigation {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 230;
+    height: calc(68px + env(safe-area-inset-bottom));
+    padding: 7px 7px calc(7px + env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    border-top: 1px solid var(--approved-line-soft);
+    background: color-mix(in srgb, var(--approved-canvas) 97%, transparent);
+    backdrop-filter: blur(16px);
+  }
+
+  .guided-primary-navigation button {
+    min-width: 0;
+    min-height: 48px;
+    padding: 4px 2px;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 2px;
+    font-size: 10px;
+  }
+
+  .guided-primary-navigation button::after {
+    top: -7px;
+    bottom: auto;
+    right: 18%;
+    left: 18%;
+  }
+
+  .guided-profile-menu-backdrop {
+    z-index: 240;
+    background: color-mix(in srgb, #000 28%, transparent);
+  }
+
+  .guided-profile-menu {
+    position: fixed;
+    z-index: 250;
+    top: auto;
+    right: 12px;
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    left: 12px;
+    width: auto;
+    min-width: 0;
+    max-height: calc(100dvh - 164px - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    padding: 9px;
+    border-radius: 15px;
+    overscroll-behavior: contain;
+  }
+
+  .guided-profile-menu > button {
+    min-height: 48px;
+    padding: 12px 11px;
+    font-size: 14px;
+  }
+
+  .guided-profile-status {
+    min-height: 46px;
+  }
+
+  .guided-profile-status > span {
+    max-width: calc(100vw - 96px);
+    font-size: 12px;
+  }
+
+  .guided-app-main,
+  .guided-app-main--jobs {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: calc(100dvh - 64px);
+    padding: 16px 12px 30px;
+    overflow-x: hidden;
+  }
+
+  .guided-app-main > *,
+  .guided-app-main > [data-tour-page],
+  .guided-app-main [data-tour-page] > *,
+  .guided-plan-page,
+  .notes-page-redesign,
+  .guided-jobs-page,
+  .guided-jobs-layout,
+  .guided-job-list-panel,
+  .guided-job-detail-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .guided-job-context-row {
+    width: 100%;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .guided-job-switcher-wrap {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .guided-job-switcher,
+  .guided-app-main--today .guided-job-switcher {
+    width: 100%;
+    min-width: 0;
+    min-height: 68px;
+    padding: 10px 12px;
+    grid-template-columns: 22px minmax(0, 1fr) 18px;
+    gap: 9px;
+  }
+
+  .guided-job-switcher .guided-job-role {
+    font-size: 14px;
+  }
+
+  .guided-job-switcher .guided-job-company {
+    font-size: 12px;
+  }
+
+  .guided-job-switcher .guided-job-interview {
+    font-size: 10px;
+  }
+
+  .guided-add-job-button,
+  .guided-app-main--today .guided-add-job-button {
+    width: 52px;
+    min-width: 52px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .guided-job-switcher-menu {
+    position: fixed;
+    z-index: 210;
+    top: 72px;
+    right: 12px;
+    bottom: auto;
+    left: 12px;
+    width: auto;
+    min-width: 0;
+    max-height: calc(100dvh - 160px);
+    overflow-y: auto;
+  }
+
+  .guided-section-head {
+    min-width: 0;
+  }
+
+  .guided-section-head > div,
+  .guided-section-head p,
+  .guided-plan-heading > div,
+  .notes-heading > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .guided-section-head h2,
+  .guided-section-head p,
+  .guided-plan-heading h1,
+  .guided-plan-heading p,
+  .notes-heading h1,
+  .notes-heading p {
+    overflow-wrap: anywhere;
+  }
+
+  /* Plan */
+  .guided-plan-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .guided-plan-heading h1 {
+    font-size: 29px;
+  }
+
+  .guided-plan-heading p {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .guided-plan-heading-progress {
+    justify-content: start;
+    white-space: normal;
+  }
+
+  .guided-plan-calendar,
+  .guided-plan-day-panel,
+  .guided-plan-health,
+  .guided-extra-exam {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .guided-plan-calendar {
+    padding: 12px 11px 10px;
+  }
+
+  .guided-plan-calendar-head small {
+    display: none;
+  }
+
+  .guided-plan-calendar-head > span {
+    min-width: 0;
+    font-size: 12px;
+  }
+
+  .guided-plan-date-rail {
+    width: 100%;
+    max-width: 100%;
+    gap: 14px;
+    margin: 0;
+    padding: 9px 9px 13px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .guided-plan-date,
+  .guided-plan-interview-tile {
+    flex: 0 0 56px;
+    width: 56px;
+    scroll-snap-align: start;
+  }
+
+  .guided-plan-layout,
+  .guided-plan-side-stack {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guided-plan-day-panel {
+    padding: 13px 11px;
+  }
+
+  .guided-plan-day-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .guided-plan-day-head h2 {
+    overflow-wrap: anywhere;
+    font-size: 20px;
+  }
+
+  .guided-plan-day-head em {
+    white-space: normal;
+  }
+
+  .guided-plan-topic-row {
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .guided-plan-topic-row span {
+    flex: 0 0 auto;
+    max-width: min(76vw, 280px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .guided-plan-task {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: 29px 32px minmax(0, 1fr);
+    align-items: start;
+    padding: 11px 10px;
+  }
+
+  .guided-plan-task-copy strong {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .guided-plan-task-copy span {
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+  }
+
+  .guided-plan-task-action {
+    grid-column: 3;
+    justify-self: start;
+    max-width: 100%;
+    min-height: 38px;
+    white-space: normal;
+  }
+
+  .guided-interview-day-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Notes */
+  .notes-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .notes-heading > span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .notes-date-panel,
+  .notes-date-workspace,
+  .notes-date-rail,
+  .notes-content-pane {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .notes-date-panel {
+    padding: 12px 11px 10px;
+    overflow: hidden;
+  }
+
+  .notes-date-panel-head small {
+    display: none;
+  }
+
+  .notes-date-scroll {
+    width: 100%;
+    max-width: 100%;
+    gap: 14px;
+    margin: 0;
+    padding: 9px 9px 13px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .notes-date-button {
+    flex: 0 0 56px;
+    width: 56px;
+    min-width: 56px;
+    scroll-snap-align: start;
+  }
+
+  .notes-date-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .notes-date-rail {
+    min-height: 0;
+    max-height: min(430px, 52dvh);
+    overflow-y: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--approved-line);
+    overscroll-behavior: contain;
+  }
+
+  .notes-date-folder-list,
+  .notes-date-folder,
+  .notes-folder-label,
+  .notes-folder-select-button,
+  .notes-folder-notes,
+  .notes-file-item,
+  .notes-file-row {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .notes-folder-select-button {
+    overflow-wrap: anywhere;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .notes-folder-actions button,
+  .notes-file-delete {
+    opacity: 1;
+  }
+
+  .notes-folder-notes {
+    margin-left: 10px;
+  }
+
+  .notes-file-row strong,
+  .notes-file-row small {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .notes-import-control {
+    margin-top: 8px;
+  }
+
+  .notes-content-pane {
+    padding: 14px;
+  }
+
+  .notes-reader,
+  .notes-empty-reader {
+    min-height: 320px;
+  }
+
+  .notes-reader-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .notes-reader-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .notes-reader-title-input,
+  .notes-direct-editor textarea,
+  .notes-ask-form input {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .notes-ask-form {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* Jobs */
+  .guided-app-main--jobs {
+    padding-top: 18px;
+  }
+
+  .guided-jobs-heading {
+    align-items: flex-end;
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .guided-jobs-heading > div,
+  .guided-jobs-heading p {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .guided-job-search-row,
+  .guided-job-search-row > label,
+  .guided-job-search-row input {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .guided-job-list {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .guided-job-detail-header > div:first-child,
+  .guided-job-detail-header > div:first-child > span {
+    min-width: 0;
+  }
+
+  .guided-job-detail-header h2,
+  .guided-job-detail-header p,
+  .guided-job-analysis-view p,
+  .guided-job-analysis-grid li {
+    overflow-wrap: anywhere;
+  }
+
+  /* Account settings */
+  .guided-settings-anchor .settings-popover,
+  .guided-settings-anchor .settings-popover.simple-settings-popover {
+    position: fixed;
+    z-index: 2000;
+    top: auto;
+    right: 10px;
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    left: 10px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - 100px - env(safe-area-inset-bottom));
+    border-radius: 15px;
+    overscroll-behavior: contain;
+  }
+
+  .settings-dismiss-layer {
+    background: color-mix(in srgb, #000 30%, transparent);
+  }
+
+  /* Add job */
+  .guided-modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .guided-job-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - max(10px, env(safe-area-inset-top)));
+    margin: 0;
+    padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
+    overflow-x: hidden;
+    overflow-y: auto;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+    overscroll-behavior: contain;
+  }
+
+  .guided-job-modal > header {
+    position: sticky;
+    z-index: 5;
+    top: -18px;
+    margin: -18px -14px 0;
+    padding: 18px 14px 12px;
+    background: var(--approved-surface);
+  }
+
+  .guided-job-modal > header > div,
+  .guided-job-capture-panel,
+  .guided-job-capture-panel > header > div,
+  .guided-job-form,
+  .guided-job-form label,
+  .guided-job-form input,
+  .guided-job-form textarea,
+  .guided-extension-help {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .guided-job-modal h2 {
+    font-size: 26px;
+  }
+
+  .guided-job-modal header > div > p,
+  .guided-job-capture-panel h3 {
+    overflow-wrap: anywhere;
+  }
+
+  .guided-job-capture-panel {
+    margin: 14px 0;
+    padding: 12px;
+  }
+
+  .guided-job-capture-panel > header {
+    display: block;
+  }
+
+  .guided-job-capture-panel header > small {
+    display: block;
+    max-width: none;
+    margin-top: 5px;
+    text-align: left;
+  }
+
+  .guided-method-tabs.guided-job-capture-methods {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .guided-job-capture-methods > button {
+    min-height: 64px;
+    padding: 8px 5px;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 5px;
+    border-right: 1px solid var(--approved-line-soft);
+    border-bottom: 0;
+    text-align: center;
+  }
+
+  .guided-job-capture-methods > button:last-child {
+    border-right: 0;
+  }
+
+  .guided-job-capture-methods > button small {
+    display: none;
+  }
+
+  .guided-job-form textarea {
+    height: clamp(160px, 30dvh, 260px);
+    min-height: 160px;
+  }
+
+  .guided-form-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guided-job-modal > footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .guided-job-modal > footer button {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+  }
+}
