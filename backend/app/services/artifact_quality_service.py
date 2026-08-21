@@ -18,12 +18,22 @@ def assess_prep_plan(plan: PrepPlanResponse, blueprint: Optional[RoleBlueprint])
     missing_critical = [name for name in critical if _key(name) not in topics]
     duplicate_titles = _duplicates(task.title for task in tasks)
     detailed_tasks = [task for task in tasks if len(task.instructions.strip()) >= 40 and task.topics]
-    assessment_tasks = [task for task in tasks if task.task_type.value in {"diagnostic", "exam", "mock_interview"}]
+    assessment_days = {task.day for task in tasks if task.task_type.value in {"diagnostic", "exam"}}
+    mock_tasks = [task for task in tasks if task.task_type.value == "mock_interview"]
+    expected_mock_count = 2 if plan.days_until_interview >= 6 else 1
+    difficulty_by_day = {
+        day: _instruction_difficulty(next((task.instructions for task in tasks if task.day == day and task.task_type.value in {"study", "coding", "revision"}), ""))
+        for day in expected_days
+    }
+    difficulty_ranks = [{"easy": 1, "medium": 2, "hard": 3}.get(difficulty_by_day[day], 0) for day in sorted(expected_days)]
+    progressive = all(rank > 0 for rank in difficulty_ranks) and difficulty_ranks == sorted(difficulty_ranks)
     gates = [
-        _gate("complete_timeline", expected_days <= actual_days, 25, f"{len(actual_days)} of {len(expected_days)} preparation days have work"),
-        _gate("critical_competency_coverage", not missing_critical, 30, "All critical role competencies are scheduled" if not missing_critical else f"Missing: {', '.join(missing_critical[:5])}"),
-        _gate("actionable_tasks", len(detailed_tasks) == len(tasks), 20, f"{len(detailed_tasks)} of {len(tasks)} tasks have topics and usable instructions"),
-        _gate("assessment_loop", bool(assessment_tasks), 15, f"{len(assessment_tasks)} diagnostic, exam, or mock tasks are scheduled"),
+        _gate("complete_timeline", expected_days <= actual_days, 20, f"{len(actual_days)} of {len(expected_days)} preparation days have work"),
+        _gate("critical_competency_coverage", not missing_critical, 20, "All critical role competencies are scheduled" if not missing_critical else f"Missing: {', '.join(missing_critical[:5])}"),
+        _gate("actionable_tasks", len(detailed_tasks) == len(tasks), 10, f"{len(detailed_tasks)} of {len(tasks)} tasks have topics and usable instructions"),
+        _gate("daily_assessment_loop", expected_days <= assessment_days, 15, f"{len(assessment_days)} of {len(expected_days)} preparation days end with an assessment"),
+        _gate("mock_interview_schedule", len(mock_tasks) >= expected_mock_count, 15, f"{len(mock_tasks)} of {expected_mock_count} required mock interviews are scheduled"),
+        _gate("progressive_difficulty", progressive, 10, f"Daily learning difficulty: {', '.join(difficulty_by_day[day] or 'missing' for day in sorted(expected_days))}"),
         _gate("no_duplicate_tasks", not duplicate_titles, 10, "Task titles are distinct" if not duplicate_titles else f"Repeated: {', '.join(duplicate_titles[:4])}"),
     ]
     return _report("prep_plan", gates, {
@@ -171,3 +181,8 @@ def _duplicates(values: Iterable[str]) -> list[str]:
             duplicates.append(value)
         seen.add(key)
     return duplicates
+
+
+def _instruction_difficulty(instructions: str) -> str:
+    match = re.search(r"difficulty:\s*(easy|medium|hard)", instructions or "", flags=re.IGNORECASE)
+    return match.group(1).casefold() if match else ""

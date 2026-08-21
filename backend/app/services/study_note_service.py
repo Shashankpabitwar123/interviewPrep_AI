@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Optional
 
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -28,6 +29,22 @@ from app.services.experience_service import interview_evidence_context
 
 
 logger = logging.getLogger(__name__)
+
+
+class AIStudyNoteOutput(BaseModel):
+    """Strict model-authored fields; server metadata is added after parsing."""
+
+    title: str
+    subtitle: str
+    role: str
+    topics: list[str]
+    summary: str
+    sections: list[NoteSection]
+    deep_dive: list[NoteSection]
+    interview_questions: list[str]
+    related_topics: list[str]
+    resources: list[StudyResource]
+    checklist: list[str]
 
 
 def generate_study_note(
@@ -132,10 +149,13 @@ def _generate_with_openai(
                     },
                     {"role": "user", "content": _note_prompt(plan, request, research, _role_blueprint_for_plan(plan))},
                 ],
-                text_format=StudyNoteResponse,
+                text_format=AIStudyNoteOutput,
                 max_output_tokens=max_output_tokens,
             )
-            return _ensure_research_sources(response.output_parsed, research).model_copy(update={"source": "openai"})
+            return _ensure_research_sources(
+                StudyNoteResponse.model_validate({**response.output_parsed.model_dump(), "source": "openai"}),
+                research,
+            )
         except Exception as exc:
             last_error = exc
             logger.warning("OpenAI study note parse failed with %s output tokens: %s", max_output_tokens, exc)
@@ -202,6 +222,7 @@ def _repair_note_with_openai(
         "explanation guidance, common mistakes, at least three likely question patterns, and a usable checklist. "
         "Do not invent company interview questions or sources.\n\n"
         f"Requested topics: {', '.join(request.topics) or request.title}\n"
+        f"Learning difficulty: {request.difficulty}\n"
         f"Role intelligence:\n{blueprint_context(blueprint, include_sources=True)}\n\n"
         f"Quality issues:\n{json.dumps(issues, ensure_ascii=False)}\n\n"
         f"Research supplied to the original note:\n{_research_context(research)}\n\n"
@@ -217,10 +238,13 @@ def _repair_note_with_openai(
                 {"role": "system", "content": "You are a strict interview-learning content editor. Return complete structured JSON only."},
                 {"role": "user", "content": prompt},
             ],
-            text_format=StudyNoteResponse,
+            text_format=AIStudyNoteOutput,
             max_output_tokens=14000,
         )
-        return _ensure_research_sources(response.output_parsed, research)
+        return _ensure_research_sources(
+            StudyNoteResponse.model_validate({**response.output_parsed.model_dump(), "source": note.source}),
+            research,
+        )
     except Exception as exc:
         logger.warning("OpenAI study note quality repair failed: %s", exc)
         return None
@@ -384,6 +408,11 @@ def _note_prompt(
 ) -> str:
     topics = ", ".join(request.topics) or request.title
     research_text = _research_context(research)
+    difficulty_guidance = {
+        "easy": "Teach foundations clearly, define the vocabulary, and use guided examples before asking for tradeoffs.",
+        "medium": "Assume the foundations are known; emphasize applied scenarios, decisions, validation, and tradeoffs.",
+        "hard": "Use interview-pressure depth: ambiguity, edge cases, failure modes, design choices, and strong follow-up questions.",
+    }[request.difficulty]
     return (
         "Create a full interview preparation note as JSON only.\n"
         "The note must prepare the user for the actual role, not give generic bullets.\n"
@@ -402,6 +431,7 @@ def _note_prompt(
         f"Shared role intelligence:\n{blueprint_context(blueprint, include_sources=True)}\n\n"
         f"Plan summary: {plan.summary}\n"
         f"Day: {request.day}\n"
+        f"Learning difficulty: {request.difficulty}. {difficulty_guidance}\n"
         f"Note title: {request.title}\n"
         f"Topics: {topics}\n"
         f"Task instructions: {request.instructions}\n\n"

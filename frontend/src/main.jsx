@@ -1604,17 +1604,23 @@ function App() {
     await beginMockAttempt(attempt, mockAttempts);
   }
 
-  async function startMockFromPlan() {
+  async function startMockFromPlan(task = {}) {
     if (!plan?.prep_plan_id) return;
+    const day = task.day || selectedPlanDay;
+    const difficulty = task.difficulty || difficultyForPlanDay(plan, day);
     const attempt = {
       id: crypto.randomUUID(),
       jobTitle: plan.job_title,
       prepPlanId: plan.prep_plan_id,
       jobPostId: plan.job_post_id,
       jobColor: colorForPlan(plan, jobMarkers),
-      difficulty: mockDifficulty,
+      difficulty,
       questionTypes: mockQuestionTypes,
-      questionCount: { easy: 4, medium: 6, hard: 8 }[mockDifficulty] || 6,
+      questionCount: { easy: 4, medium: 6, hard: 8 }[difficulty] || 6,
+      day,
+      focusTopics: task.topics || [],
+      scope: "through_selected_day",
+      scopeLabel: mockScopeLabel("through_selected_day", day),
       status: "ready",
       createdAt: new Date().toISOString(),
     };
@@ -1948,7 +1954,7 @@ function App() {
       saveCompletedTasks(next);
       return next;
     });
-    if (!wasDone) addActivity({ type: "practice", title: "Task completed", detail: task.title, badge: "done", target: task.task_type === "practice_exam" ? "exams" : "prep", prepPlanId: task.planId || plan?.prep_plan_id, jobPostId: plan?.job_post_id });
+    if (!wasDone) addActivity({ type: "practice", title: "Task completed", detail: task.title, badge: "done", target: ["practice_exam", "mock_interview"].includes(task.task_type) ? "exams" : "prep", prepPlanId: task.planId || plan?.prep_plan_id, jobPostId: plan?.job_post_id });
     if (task.serverTaskId) {
       apiFetch(`/prep-plans/tasks/${task.serverTaskId}`, {
         method: "PATCH",
@@ -1967,7 +1973,7 @@ function App() {
   }
 
   function isStudyNoteGenerated(task) {
-    if (task?.task_type === "practice_exam") return false;
+    if (["practice_exam", "mock_interview"].includes(task?.task_type)) return false;
     return Boolean(generatedStudyNotes[studyNoteCacheKey(task)]?.content);
   }
 
@@ -1999,12 +2005,17 @@ function App() {
   async function startStudyTask(task) {
     const taskKey = task.id || task.title;
     const cacheKey = studyNoteCacheKey(task);
+    if (task.task_type === "mock_interview") {
+      await startMockFromPlan(task);
+      return;
+    }
     if (task.task_type === "practice_exam") {
       setPracticeExamPrompt({
         task,
         day: task.day || selectedPlanDay,
         focusTopics: task.topics || [],
         taskKey,
+        recommendedDifficulty: task.difficulty || difficultyForPlanDay(plan, task.day || selectedPlanDay),
       });
       return;
     }
@@ -2031,6 +2042,7 @@ function App() {
             title: task.title,
             topics: task.topics || [],
             instructions: task.instructions || "",
+            difficulty: task.difficulty || difficultyForPlanDay(plan, task.day || selectedPlanDay),
           }),
         });
         if (!response.ok) throw new Error(await readApiError(response, "Study notes"));
@@ -4033,9 +4045,10 @@ function DifficultyPromptModal({ prompt, onChoose, onClose }) {
         <div className="difficulty-grid">
           {["easy", "medium", "hard"].map((difficulty) => {
             const preset = settingsForDifficulty(difficulty);
+            const recommended = difficulty === prompt.recommendedDifficulty;
             return (
-              <button type="button" key={difficulty} onClick={() => onChoose(difficulty)}>
-                <strong>{difficulty}</strong>
+              <button type="button" key={difficulty} className={recommended ? "recommended" : ""} onClick={() => onChoose(difficulty)}>
+                <strong>{difficulty}{recommended ? " · planned" : ""}</strong>
                 <span>{preset.questionCount} questions</span>
                 <small>{preset.timeLimit} min • AI chooses question types</small>
               </button>
@@ -5478,16 +5491,17 @@ function PrepPlanView({ plan, selectedPlanDay, setSelectedPlanDay, completedTask
                   const complete = isTaskComplete(task, completedTasks);
                   const generating = isTaskGenerating(task, loadingStudyTaskId, loadingExamTaskId);
                   const examTask = task.task_type === "practice_exam";
-                  const action = generating ? "Preparing" : examTask ? "Choose difficulty" : isStudyNoteGenerated?.(task) ? "Open notes" : "Generate note";
+                  const mockTask = task.task_type === "mock_interview";
+                  const action = generating ? "Preparing" : mockTask ? "Start mock" : examTask ? "Choose difficulty" : isStudyNoteGenerated?.(task) ? "Open notes" : "Generate note";
                   return (
                     <article className={`guided-plan-task ${complete ? "complete" : ""}`} key={task.id || task.title}>
                       <button type="button" className="guided-plan-task-check" onClick={() => toggleTaskDone(task)} aria-label={`${complete ? "Mark incomplete" : "Mark complete"}: ${task.title}`}>
                         {complete ? <Check size={15} /> : index + 1}
                       </button>
-                      <div className="guided-plan-task-icon">{examTask ? <FileQuestion size={17} /> : <NotebookText size={17} />}</div>
+                      <div className="guided-plan-task-icon">{mockTask ? <MessageSquareText size={17} /> : examTask ? <FileQuestion size={17} /> : <NotebookText size={17} />}</div>
                       <div className="guided-plan-task-copy">
                         <strong>{task.title}</strong>
-                        <span>{examTask ? "Practice exam" : "Study note"} · {task.duration_minutes || (examTask ? 30 : 35)} min</span>
+                        <span>{mockTask ? "Mock interview" : examTask ? "Practice exam" : "Study note"} · {capitalize(task.difficulty || difficultyForPlanDay(plan, activeDay))} · {task.duration_minutes || (mockTask ? 45 : examTask ? 30 : 35)} min</span>
                       </div>
                       <button type="button" className="guided-plan-task-action" onClick={() => startStudyTask(task)} disabled={generating || loading}>
                         {generating ? <Loader2 size={15} className="spin" /> : null}{action}<ChevronRight size={15} />
@@ -8525,9 +8539,11 @@ function samplePlanDays() {
 function buildDailyStudyTasks(plan, day) {
   const planId = plan?.prep_plan_id || plan?.id || plan?.job_post_id || "unscoped";
   const planTasks = plan?.tasks?.filter((task) => displayPlanDay(plan, task.day) === Number(day)) || [];
+  const difficulty = difficultyForPlanDay(plan, day);
   const studySources = planTasks
-    .filter((task) => !["exam", "practice_exam", "mock_interview"].includes(task.task_type))
+    .filter((task) => ["study", "coding", "revision"].includes(task.task_type))
     .slice(0, 3);
+  const mockSources = planTasks.filter((task) => task.task_type === "mock_interview").slice(0, 1);
   const fallbackTopics = topicsForStudyDay(plan, day);
   const sources = studySources.length ? studySources : fallbackTopics.slice(0, 3).map((topic) => ({
     title: topic,
@@ -8545,11 +8561,27 @@ function buildDailyStudyTasks(plan, day) {
       topics,
       task_type: "study_note",
       instructions: source.instructions,
+      difficulty,
+      duration_minutes: source.duration_minutes,
       status: source.status,
       order: index + 1,
     };
   });
   const topics = [...new Set(noteTasks.flatMap((task) => task.topics))];
+  const mockTasks = mockSources.map((source, index) => ({
+    id: `plan-${planId}-day-${day}-mock-${source.id || index}`,
+    serverTaskId: source.id,
+    planId,
+    day,
+    title: source.title || `Mock interview for Day ${day}`,
+    topics: source.topics?.length ? source.topics : topics,
+    task_type: "mock_interview",
+    instructions: source.instructions,
+    difficulty,
+    duration_minutes: source.duration_minutes || 45,
+    status: source.status,
+    order: noteTasks.length + 2,
+  }));
   return [
     ...noteTasks,
     {
@@ -8559,9 +8591,21 @@ function buildDailyStudyTasks(plan, day) {
       title: `Practice exam for Day ${day}`,
       topics,
       task_type: "practice_exam",
+      difficulty,
       order: noteTasks.length + 1,
     },
+    ...mockTasks,
   ];
+}
+
+function difficultyForPlanDay(plan, day) {
+  const lastTaskDay = Math.max(0, ...(plan?.tasks || []).map((task) => Number(task.day || 0)));
+  const totalDays = Math.max(1, Number(plan?.days_until_interview || lastTaskDay || 1));
+  if (totalDays <= 1) return "medium";
+  const progress = (Math.max(1, Number(day || 1)) - 1) / Math.max(1, totalDays - 1);
+  if (progress < 0.34) return "easy";
+  if (progress < 0.75) return "medium";
+  return "hard";
 }
 
 function isPlanDayComplete(plan, day, completedTasks) {

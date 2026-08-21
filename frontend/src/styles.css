@@ -766,6 +766,11 @@ button {
   transform: translateY(-1px);
 }
 
+.difficulty-grid button.recommended {
+  border-color: var(--approved-coral, #ff5d42);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--approved-coral, #ff5d42) 35%, transparent);
+}
+
 .difficulty-grid strong {
   text-transform: capitalize;
 }
@@ -5964,6 +5969,7 @@ footer {
 .theme-dark .tree-row.selected,
 .theme-dark .notes-job-card.selected,
 .theme-dark .difficulty-grid button:hover,
+.theme-dark .difficulty-grid button.recommended,
 .theme-dark .difficulty-group button.selected,
 .theme-dark .data-job-list button.selected,
 .theme-dark .data-job-list button:hover,

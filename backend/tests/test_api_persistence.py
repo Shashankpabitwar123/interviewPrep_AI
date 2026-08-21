@@ -5,12 +5,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from openai.lib._pydantic import to_strict_json_schema
 
 from app.config import Settings, get_settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import ArtifactFeedback, CompetencyEvidence, Exam, GenerationRun, User
 from app.schemas.study_note import NoteSection, StudyNoteResponse, StudyResource
+from app.services.study_note_service import AIStudyNoteOutput
 
 
 def test_job_analysis_endpoint_saves_and_reads_job() -> None:
@@ -735,6 +737,15 @@ def test_ai_only_study_note_generation_records_usage_without_route_error(monkeyp
 
     assert response.status_code == 200
     assert response.json()["source"] == "openai"
+
+
+def test_openai_study_note_schema_excludes_server_only_metadata() -> None:
+    schema = to_strict_json_schema(AIStudyNoteOutput)
+
+    assert schema["additionalProperties"] is False
+    assert schema["$defs"]["NoteSection"]["additionalProperties"] is False
+    assert "quality_report" not in schema["properties"]
+    assert "web_research" not in schema["properties"]
 
 
 def test_study_note_generation_rejects_another_users_plan() -> None:

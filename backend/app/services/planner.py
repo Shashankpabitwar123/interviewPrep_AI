@@ -121,6 +121,7 @@ def _generate_heuristic_plan(
         plan_summary=_summary(days_until_interview, topics),
         plan_source=plan_source,
         tasks=_build_tasks(days_until_interview, topics, request.hours_per_day),
+        hours_per_day=request.hours_per_day,
     )
 
 
@@ -143,8 +144,10 @@ def _generate_with_openai(
                     "You generate interview preparation schedules as structured JSON. "
                     "Create practical daily tasks that match the job description, the user's comfort level, "
                     "the interview timeline, and available hours. Use different task mixes for short, medium, "
-                    "and long timelines. Every day must have at least one task. Include diagnostic work early, "
-                    "technical practice through the middle, mock interview practice near the end, and revision on the final day."
+                    "and long timelines. Schedule two focused learning-note tasks on a normal study day and a scoped exam after them. "
+                    "Difficulty must progress from foundations early, to applied work in the middle, to interview-depth scenarios late. "
+                    "Include diagnostic work early, at least one realistic mock interview before the final day, and lighter revision on the final day. "
+                    "For plans of six days or more, schedule both a midpoint mock and a final full mock. Every day must contain useful work."
                 ),
             },
             {
@@ -186,6 +189,7 @@ def _generate_with_openai(
         plan_summary=ai_plan.plan_summary,
         plan_source="openai",
         tasks=sorted(tasks, key=lambda task: (task.day, task.title)),
+        hours_per_day=request.hours_per_day,
     )
 
 
@@ -252,6 +256,7 @@ def _generate_with_gemini(
         plan_summary=ai_plan.plan_summary,
         plan_source="gemini",
         tasks=sorted(tasks, key=lambda task: (task.day, task.title)),
+        hours_per_day=request.hours_per_day,
     )
 
 
@@ -541,39 +546,150 @@ def _align_plan_to_blueprint(plan: PrepPlanResponse, blueprint: Optional[RoleBlu
 
 
 def _repair_plan_structure(plan: PrepPlanResponse, blueprint: Optional[RoleBlueprint]) -> PrepPlanResponse:
-    """Repair structural gaps deterministically without changing the requested timeline."""
+    """Guarantee a paced learn-test-speak schedule across the complete timeline."""
 
-    tasks = [task.model_copy(deep=True) for task in plan.tasks]
-    topics = [item.name for item in (blueprint.competencies if blueprint else [])] or [
-        topic for task in tasks for topic in task.topics
-    ] or ["Role fundamentals"]
-    days_with_tasks = {task.day for task in tasks}
-    for day in range(1, plan.days_until_interview + 1):
-        if day in days_with_tasks:
-            continue
-        topic = topics[(day - 1) % len(topics)]
-        tasks.append(PrepTask(
-            day=day,
-            title=f"Day {day} role-focused review",
-            task_type=PrepTaskType.study,
-            duration_minutes=60,
-            topics=[topic],
-            instructions=f"Study {topic}, connect it to the saved job responsibilities, prepare one example, and explain one tradeoff aloud.",
+    total_days = max(1, plan.days_until_interview)
+    tasks = [task.model_copy(deep=True) for task in plan.tasks if 1 <= task.day <= total_days]
+    topics = list(dict.fromkeys(
+        [item.name for item in (blueprint.competencies if blueprint else [])]
+        or [topic for task in tasks for topic in task.topics if topic]
+        or ["Role fundamentals"]
+    ))
+    note_target = 3 if plan.hours_per_day >= 3 else 2 if plan.hours_per_day >= 1.25 else 1
+
+    repaired: list[PrepTask] = []
+    for day in range(1, total_days + 1):
+        day_tasks = [task for task in tasks if task.day == day]
+        difficulty = _difficulty_for_day(day, total_days)
+        learning = [task for task in day_tasks if task.task_type in {PrepTaskType.study, PrepTaskType.coding, PrepTaskType.revision}]
+        assessments = [task for task in day_tasks if task.task_type in {PrepTaskType.diagnostic, PrepTaskType.exam}]
+
+        # Keep the day readable. Merge overflow topics into the visible learning tasks
+        # instead of silently dropping useful AI-selected role coverage.
+        kept_learning = learning[:max(note_target, min(3, len(learning)))]
+        overflow_topics = [topic for task in learning[len(kept_learning):] for topic in task.topics]
+        if kept_learning and overflow_topics:
+            kept_learning[0].topics = list(dict.fromkeys([*kept_learning[0].topics, *overflow_topics]))
+        while len(kept_learning) < note_target:
+            index = len(kept_learning)
+            topic = topics[((day - 1) * note_target + index) % len(topics)]
+            kept_learning.append(PrepTask(
+                day=day,
+                title=_learning_title(topic, difficulty, index),
+                task_type=PrepTaskType.study,
+                duration_minutes=_note_duration(plan.hours_per_day, note_target),
+                topics=[topic],
+                instructions=_learning_instructions(topic, difficulty),
+            ))
+        for task in kept_learning:
+            task.topics = task.topics or [topics[(day - 1) % len(topics)]]
+            task.duration_minutes = _normalize_duration(task.duration_minutes)
+            task.instructions = _with_difficulty_guidance(task.instructions, task.topics[0], difficulty)
+
+        if not assessments:
+            daily_topics = list(dict.fromkeys(topic for task in kept_learning for topic in task.topics)) or _topics_for_day(topics, day)
+            assessments.append(PrepTask(
+                day=day,
+                title=f"Day {day} {difficulty} practice exam",
+                task_type=PrepTaskType.diagnostic if day == 1 else PrepTaskType.exam,
+                duration_minutes=_normalize_duration(25 if difficulty == "easy" else 35 if difficulty == "medium" else 45),
+                topics=daily_topics,
+                instructions=(
+                    f"Test only Day {day}'s topics at {difficulty} difficulty, review every missed answer, "
+                    "and use the result to choose the next revision target."
+                ),
+            ))
+        for task in assessments:
+            task.topics = task.topics or list(dict.fromkeys(topic for item in kept_learning for topic in item.topics)) or _topics_for_day(topics, day)
+            task.instructions = _with_difficulty_guidance(task.instructions, task.topics[0], difficulty)
+
+        repaired.extend([*kept_learning, *assessments[:1]])
+
+    for index, mock_day in enumerate(_required_mock_days(total_days)):
+        difficulty = _difficulty_for_day(mock_day, total_days)
+        mock_topics = _topics_for_day(topics, mock_day) if index == 0 else topics[:6]
+        repaired.append(PrepTask(
+            day=mock_day,
+            title="Midpoint interview checkpoint" if len(_required_mock_days(total_days)) > 1 and index == 0 else "Full role-specific mock interview",
+            task_type=PrepTaskType.mock_interview,
+            duration_minutes=_normalize_duration(35 if difficulty == "easy" else 50 if difficulty == "medium" else 60),
+            topics=mock_topics,
+            instructions=(
+                f"Run a {difficulty} mock interview covering {', '.join(mock_topics[:5])}. Answer aloud, "
+                "finish the full question set, then review scoring dimensions and weak answers."
+            ),
         ))
 
     seen_titles: dict[str, int] = {}
-    for task in sorted(tasks, key=lambda item: (item.day, item.title)):
+    for task in sorted(repaired, key=lambda item: (item.day, _task_order(item.task_type), item.title)):
         key = task.title.casefold().strip()
         seen_titles[key] = seen_titles.get(key, 0) + 1
         if seen_titles[key] > 1:
             task.title = f"{task.title} — Day {task.day}, part {seen_titles[key]}"
-        if not task.topics:
-            task.topics = [topics[(task.day - 1) % len(topics)]]
         if len(task.instructions.strip()) < 40:
             task.instructions = (
                 f"{task.instructions.rstrip()} Prepare a concrete example, a tradeoff, and a validation step for the interview."
             ).strip()
-    if tasks and not any(task.task_type in {PrepTaskType.diagnostic, PrepTaskType.exam, PrepTaskType.mock_interview} for task in tasks):
-        tasks[0].task_type = PrepTaskType.diagnostic
-        tasks[0].instructions = f"{tasks[0].instructions.rstrip()} Use this as a baseline before later practice."
-    return plan.model_copy(update={"tasks": sorted(tasks, key=lambda item: (item.day, item.title))})
+    return plan.model_copy(update={
+        "tasks": sorted(repaired, key=lambda item: (item.day, _task_order(item.task_type), item.title)),
+    })
+
+
+def _difficulty_for_day(day: int, total_days: int) -> str:
+    if total_days <= 1:
+        return "medium"
+    progress = (day - 1) / max(1, total_days - 1)
+    if progress < 0.34:
+        return "easy"
+    if progress < 0.75:
+        return "medium"
+    return "hard"
+
+
+def _required_mock_days(total_days: int) -> list[int]:
+    if total_days <= 2:
+        return [total_days]
+    if total_days <= 5:
+        return [max(2, total_days - 1)]
+    midpoint = max(2, min(total_days - 2, round(total_days * 0.55)))
+    return list(dict.fromkeys([midpoint, total_days - 1]))
+
+
+def _learning_title(topic: str, difficulty: str, index: int) -> str:
+    labels = {
+        "easy": ["Foundation", "Core concepts", "Guided example"],
+        "medium": ["Applied workflow", "Scenario practice", "Tradeoff review"],
+        "hard": ["Interview-depth challenge", "Edge cases and failure modes", "Advanced decision practice"],
+    }
+    return f"{labels[difficulty][index % len(labels[difficulty])]}: {topic}"
+
+
+def _learning_instructions(topic: str, difficulty: str) -> str:
+    guidance = {
+        "easy": "Learn the foundations, define the important terms, and work through one guided example.",
+        "medium": "Apply the concept to a realistic job scenario, explain a tradeoff, and show how you would validate the result.",
+        "hard": "Handle ambiguity, edge cases, failure modes, and follow-up questions while defending your decisions aloud.",
+    }
+    return f"Difficulty: {difficulty}. Study {topic}. {guidance[difficulty]} Connect the answer directly to the saved role."
+
+
+def _with_difficulty_guidance(instructions: str, topic: str, difficulty: str) -> str:
+    clean = re.sub(r"(?:Difficulty|Learning difficulty):\s*(?:easy|medium|hard)\.?\s*", "", instructions or "", flags=re.IGNORECASE).strip()
+    return f"Difficulty: {difficulty}. {clean} {_learning_instructions(topic, difficulty).split('. ', 1)[1]}".strip()
+
+
+def _note_duration(hours_per_day: float, note_count: int) -> int:
+    daily_minutes = max(30, int(hours_per_day * 60))
+    assessment_reserve = min(45, max(15, daily_minutes // 4))
+    return _normalize_duration((daily_minutes - assessment_reserve) // max(1, note_count))
+
+
+def _task_order(task_type: PrepTaskType) -> int:
+    return {
+        PrepTaskType.diagnostic: 0,
+        PrepTaskType.study: 1,
+        PrepTaskType.coding: 1,
+        PrepTaskType.revision: 1,
+        PrepTaskType.exam: 2,
+        PrepTaskType.mock_interview: 3,
+    }[task_type]

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import re
 
 from app.config import Settings
 from app.schemas.prep_plan import PrepPlanRequest, PrepTaskType
@@ -115,3 +116,34 @@ def test_role_blueprint_critical_competencies_are_covered_by_plan() -> None:
     assert plan.role_blueprint_version == "v3"
     assert "Data reconciliation" in covered_topics
     assert [skill.name for skill in plan.detected_skills][:2] == ["Data reconciliation", "Stakeholder communication"]
+
+
+def test_week_plan_is_paced_with_daily_notes_assessments_and_two_mocks() -> None:
+    request = PrepPlanRequest(
+        job_title="Data Analyst",
+        job_description="Analyze data using SQL, Python, Tableau, statistics, and stakeholder communication.",
+        interview_at=datetime.now(timezone.utc) + timedelta(days=7),
+        hours_per_day=2,
+    )
+
+    plan = generate_prep_plan(request)
+    difficulties: list[str] = []
+    learning_types = {PrepTaskType.study, PrepTaskType.coding, PrepTaskType.revision}
+
+    for day in range(1, 8):
+        day_tasks = [task for task in plan.tasks if task.day == day]
+        learning = [task for task in day_tasks if task.task_type in learning_types]
+        assert len(learning) >= 2
+        assert any(task.task_type in {PrepTaskType.diagnostic, PrepTaskType.exam} for task in day_tasks)
+        match = re.search(r"Difficulty:\s*(easy|medium|hard)", learning[0].instructions, flags=re.IGNORECASE)
+        assert match
+        difficulties.append(match.group(1).lower())
+
+    ranks = [{"easy": 1, "medium": 2, "hard": 3}[value] for value in difficulties]
+    mocks = [task for task in plan.tasks if task.task_type == PrepTaskType.mock_interview]
+
+    assert difficulties[0] == "easy"
+    assert difficulties[-1] == "hard"
+    assert ranks == sorted(ranks)
+    assert len(mocks) == 2
+    assert len({task.day for task in mocks}) == 2

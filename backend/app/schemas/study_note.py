@@ -7,6 +7,7 @@ class StudyNoteRequest(BaseModel):
     title: str
     topics: list[str]
     instructions: str = ""
+    difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")
 
 
 class NoteSection(BaseModel):
